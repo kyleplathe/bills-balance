@@ -92,23 +92,26 @@ struct ReportsView: View {
                     Button {
                         showingStatementImportPicker = true
                     } label: {
-                        ZStack(alignment: .bottomTrailing) {
-                            Image(systemName: "creditcard.fill")
-                                .font(.title3)
-                            ZStack {
-                                Circle()
-                                    .fill(colorScheme == .light ? Color.white : Color(.systemBackground))
-                                    .overlay(
-                                        Circle()
-                                            .stroke(Color.primary.opacity(0.2), lineWidth: 1.5)
-                                    )
-                                    .frame(width: 16, height: 16)
-                                Image(systemName: "arrow.down")
-                                    .font(.system(size: 9, weight: .semibold))
-                                    .foregroundStyle(colorScheme == .light ? Color.black : Color.primary)
+                        // iOS share/export style: credit card with gap (two segments + arrow)
+                        ZStack(alignment: .center) {
+                            VStack(spacing: 4) {
+                                // Top segment of card
+                                RoundedRectangle(cornerRadius: 2.5)
+                                    .stroke(Color.primary, lineWidth: 1.5)
+                                    .frame(width: 20, height: 5)
+                                
+                                // Bottom segment of card (gap created by spacing)
+                                RoundedRectangle(cornerRadius: 2.5)
+                                    .stroke(Color.primary, lineWidth: 1.5)
+                                    .frame(width: 20, height: 5)
                             }
-                            .offset(x: 4, y: 4)
+                            
+                            // Down arrow centered in the gap
+                            Image(systemName: "arrow.down")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Color.primary)
                         }
+                        .frame(width: 20, height: 16)
                     }
                 }
             }
@@ -623,52 +626,24 @@ private struct WalletTotalSpendingAppleCard: View {
 
     private var walletBarChart: some View {
         switch barData {
-        case .week(let days):
-            return WalletAppleBarChart(
-                labels: days.prefix(7).map { dayLabel($0.day) },
-                values: days.prefix(7).map { $0.expenses },
-                showEveryNthLabel: nil,
-                comparisonText: nil,
-                comparisonColor: .secondary,
-                appeared: appeared
-            )
-        case .month(let weekly, let month):
-            let w = weekly.count >= 5 ? Array(weekly.prefix(5)) : weekly + Array(repeating: Decimal(0), count: max(0, 5 - weekly.count))
-            let calendar = Calendar.current
-            let range = calendar.range(of: .day, in: .month, for: month)!
-            let dayCount = range.count
-            let daysPerWeek = max(1, (dayCount + 4) / 5)
-            let labels = (0..<5).map { weekIndex -> String in
-                let startDay = weekIndex * daysPerWeek + 1
-                let endDay = min((weekIndex + 1) * daysPerWeek, dayCount)
-                return "\(startDay)-\(endDay)"
-            }
-            let compText = comparisonText
-            let compColor = comparisonColor
-            return WalletAppleBarChart(
-                labels: labels,
-                values: w,
-                showEveryNthLabel: nil,
-                comparisonText: compText,
-                comparisonColor: compColor,
-                appeared: appeared
-            )
-        case .year(let months):
-            let m = Array(months.prefix(12))
-            let fmt = DateFormatter()
-            fmt.dateFormat = "MMM"
-            // Create labels for all months, but we'll only show every 3rd one
-            let allLabels = m.map { fmt.string(from: $0.month) }
-            let compText = comparisonText
-            let compColor = comparisonColor
-            return WalletAppleBarChart(
-                labels: allLabels,
-                values: m.map { $0.expenses },
-                showEveryNthLabel: 3, // Show every 3rd label for year (indices 0, 3, 6, 9)
-                comparisonText: compText,
-                comparisonColor: compColor,
-                appeared: appeared
-            )
+        case .week:
+            return AnyView(WalletStackedCategoryBarChart(
+                period: .week,
+                appeared: appeared,
+                showEveryNthLabel: nil
+            ))
+        case .month:
+            return AnyView(WalletStackedCategoryBarChart(
+                period: .month,
+                appeared: appeared,
+                showEveryNthLabel: nil
+            ))
+        case .year:
+            return AnyView(WalletStackedCategoryBarChart(
+                period: .year,
+                appeared: appeared,
+                showEveryNthLabel: 3
+            ))
         }
     }
 
@@ -676,6 +651,163 @@ private struct WalletTotalSpendingAppleCard: View {
         let f = DateFormatter()
         f.dateFormat = "EEE"
         return f.string(from: d)
+    }
+}
+
+// MARK: - Stacked Category Bar Chart
+
+private struct WalletStackedCategoryBarChart: View {
+    @EnvironmentObject private var reportsViewModel: ReportsViewModel
+    let period: ReportsViewModel.WalletPeriod
+    let appeared: Bool
+    let showEveryNthLabel: Int?
+    
+    // Enhanced color palette for categories
+    private let categoryColors: [Color] = [
+        .orange, .pink, .purple, .blue, .green, .mint, .cyan, .teal,
+        .indigo, .red, .yellow, .brown, .gray
+    ]
+    
+    private var categoryBreakdown: [(period: String, categories: [(name: String, amount: Decimal)])] {
+        reportsViewModel.categoryBreakdownByPeriod(period: period)
+    }
+    
+    private var allCategories: [String] {
+        var categories: Set<String> = []
+        for item in categoryBreakdown {
+            for cat in item.categories {
+                categories.insert(cat.name)
+            }
+        }
+        return Array(categories).sorted()
+    }
+    
+    private func colorForCategory(_ categoryName: String) -> Color {
+        if let index = allCategories.firstIndex(of: categoryName) {
+            return categoryColors[index % categoryColors.count]
+        }
+        return .gray
+    }
+    
+    // Create gradient that blends categories smoothly
+    private func gradientForPeriod(_ categories: [(name: String, amount: Decimal)]) -> LinearGradient {
+        guard !categories.isEmpty else {
+            return LinearGradient(colors: [.gray], startPoint: .bottom, endPoint: .top)
+        }
+        
+        // Get colors for all categories - SwiftUI LinearGradient will blend them smoothly
+        let colors = categories.map { colorForCategory($0.name) }
+        
+        return LinearGradient(
+            colors: colors,
+            startPoint: .bottom,
+            endPoint: .top
+        )
+    }
+    
+    private let formatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = "USD"
+        f.maximumFractionDigits = 0
+        f.minimumFractionDigits = 0
+        return f
+    }()
+    
+    private var maxValue: Double {
+        categoryBreakdown.map { period in
+            period.categories.reduce(Decimal(0)) { $0 + $1.amount }
+        }.map { ($0 as NSDecimalNumber).doubleValue }.max() ?? 0
+    }
+    
+    private func formatAmount(_ value: Double) -> String {
+        if value >= 1000 {
+            return String(format: "$%.1fk", value / 1000)
+        } else {
+            return formatter.string(from: NSNumber(value: value)) ?? "$0"
+        }
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Chart {
+                ForEach(Array(categoryBreakdown.enumerated()), id: \.offset) { periodIndex, periodData in
+                    let totalAmount = periodData.categories.reduce(Decimal(0)) { $0 + $1.amount }
+                    let gradient = gradientForPeriod(periodData.categories)
+                    
+                    // Use gradient for the entire bar to blend categories smoothly
+                    BarMark(
+                        x: .value("Period", periodData.period),
+                        y: .value("Amount", (totalAmount as NSDecimalNumber).doubleValue)
+                    )
+                    .foregroundStyle(gradient)
+                    .cornerRadius(6)
+                    
+                    // Add individual segments with slight transparency for structure
+                    // Calculate cumulative positions inline
+                    ForEach(Array(periodData.categories.enumerated()), id: \.offset) { catIndex, category in
+                        let segmentStart = periodData.categories.prefix(catIndex).reduce(Decimal(0)) { $0 + $1.amount }
+                        let segmentEnd = segmentStart + category.amount
+                        
+                        BarMark(
+                            x: .value("Period", periodData.period),
+                            yStart: .value("Amount", (segmentStart as NSDecimalNumber).doubleValue),
+                            yEnd: .value("Amount", (segmentEnd as NSDecimalNumber).doubleValue)
+                        )
+                        .foregroundStyle(colorForCategory(category.name))
+                        .opacity(0.3)
+                    }
+                }
+            }
+            .chartXAxis {
+                if let nth = showEveryNthLabel {
+                    let labelIndices = (0..<categoryBreakdown.count).filter { $0 % nth == 0 }
+                    AxisMarks(values: .automatic) { value in
+                        if let stringValue = value.as(String.self),
+                           let index = categoryBreakdown.firstIndex(where: { $0.period == stringValue }),
+                           labelIndices.contains(index) {
+                            AxisValueLabel()
+                                .font(.caption2)
+                        }
+                    }
+                } else {
+                    AxisMarks(values: .automatic) { _ in
+                        AxisValueLabel()
+                            .font(.caption2)
+                    }
+                }
+            }
+            .chartYAxis {
+                let maxVal = max(maxValue, 100)
+                let quarter = maxVal / 4.0
+                let mainValues: [Double] = [0, quarter, quarter * 2, quarter * 3, maxVal]
+                let midpointValues: [Double] = [quarter * 0.5, quarter * 1.5, quarter * 2.5, quarter * 3.5]
+                let allValues = (mainValues + midpointValues).sorted()
+                
+                AxisMarks(position: .trailing, values: allValues) { value in
+                    if let doubleValue = value.as(Double.self) {
+                        let isMainValue = mainValues.contains { abs($0 - doubleValue) < 0.01 }
+                        
+                        if isMainValue {
+                            AxisValueLabel {
+                                Text(formatAmount(doubleValue))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                                .foregroundStyle(.secondary.opacity(0.3))
+                        } else {
+                            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2, 2]))
+                                .foregroundStyle(.secondary.opacity(0.2))
+                        }
+                    }
+                }
+            }
+            .frame(height: 160)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 8)
+        }
+        .opacity(appeared ? 1 : 0)
     }
 }
 
@@ -895,11 +1027,31 @@ private struct WalletCategorySection: View {
         return f
     }()
     
-    // Extended color palette with distinct colors
+    // Enhanced color palette with visually appealing, vibrant colors
     private let categoryColorPalette: [Color] = [
         .orange, .pink, .purple, .blue, .green, .mint, .cyan, .teal,
-        .indigo, .red, .yellow, .brown, .gray
+        .indigo, .red, .yellow, .brown, .gray, .blue.opacity(0.8), .purple.opacity(0.8)
     ]
+    
+    // Create smooth gradient transitions between categories
+    private func gradientForCategories(_ categories: [(name: String, amount: Decimal)], startIndex: Int) -> LinearGradient {
+        guard !categories.isEmpty else {
+            return LinearGradient(colors: [.gray], startPoint: .bottom, endPoint: .top)
+        }
+        
+        // Get colors for all categories in this period
+        let colors = categories.enumerated().map { index, _ in
+            categoryColorPalette[(startIndex + index) % categoryColorPalette.count]
+        }
+        
+        // Create a gradient that blends all category colors
+        // The gradient goes from bottom (first category) to top (last category)
+        return LinearGradient(
+            colors: colors,
+            startPoint: .bottom,
+            endPoint: .top
+        )
+    }
     
     // Calculate total spending across all categories
     private var totalSpending: Decimal {
@@ -1869,6 +2021,23 @@ private struct CategoryTransactionRow: View {
                 onDelete()
             } label: {
                 Label("Delete", systemImage: "trash")
+            }
+        }
+    }
+}
+
+// MARK: - Category Picker
+
+struct CategoryPicker: View {
+    @Binding var selection: String
+    let usage: [String: CategoryUsage]
+    @EnvironmentObject private var categoryManager: CategoryManager
+    
+    var body: some View {
+        Picker("Category", selection: $selection) {
+            Text("None").tag("")
+            ForEach(categoryManager.displayCategories(usage: usage, selected: selection), id: \.self) { category in
+                Text(category).tag(category)
             }
         }
     }

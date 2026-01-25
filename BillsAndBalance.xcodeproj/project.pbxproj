@@ -31,8 +31,11 @@
 		DED0AAA92EBCC41000EF3BD6 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DED0AAA82EBCC41000EF3BD6 /* Assets.xcassets */; };
 		DED579AE2F06C25C00FBBEDC /* ManageBillsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DED579AD2F06C25C00FBBEDC /* ManageBillsView.swift */; };
 		DED579B02F06D6AC00FBBEDC /* ManualIncomeEntrySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DED579AF2F06D6AC00FBBEDC /* ManualIncomeEntrySheet.swift */; };
+		DED579B12F06D6AD00FBBEDC /* ManualTransactionEntrySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DED579B22F06D6AD00FBBEDC /* ManualTransactionEntrySheet.swift */; };
+		DED579B32F06D6AE00FBBEDC /* AccountDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DED579B42F06D6AE00FBBEDC /* AccountDetailView.swift */; };
 		DEF001002ED930F40056A7A2 /* AccountViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEF0010F2ED930F40056A7A2 /* AccountViewModel.swift */; };
 		DEF001012ED930F40056A7A2 /* BalanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEF001102ED930F40056A7A2 /* BalanceView.swift */; };
+		DEF001022ED930F50056A7A2 /* AccountEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEF001132ED930F50056A7A2 /* AccountEditorSheet.swift */; };
 		DEF001022ED930F40056A7A2 /* CalendarTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEF001112ED930F40056A7A2 /* CalendarTabView.swift */; };
 		DEF001032ED930F40056A7A2 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEF001122ED930F40056A7A2 /* MainTabView.swift */; };
 		DEF101132EDA57F10056A7A3 /* CreditCardManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEF101112EDA57F10056A7A3 /* CreditCardManager.swift */; };
@@ -73,8 +76,11 @@
 		DED0AAA82EBCC41000EF3BD6 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		DED579AD2F06C25C00FBBEDC /* ManageBillsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManageBillsView.swift; sourceTree = "<group>"; };
 		DED579AF2F06D6AC00FBBEDC /* ManualIncomeEntrySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualIncomeEntrySheet.swift; sourceTree = "<group>"; };
+		DED579B22F06D6AD00FBBEDC /* ManualTransactionEntrySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualTransactionEntrySheet.swift; sourceTree = "<group>"; };
+		DED579B42F06D6AE00FBBEDC /* AccountDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountDetailView.swift; sourceTree = "<group>"; };
 		DEF0010F2ED930F40056A7A2 /* AccountViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountViewModel.swift; sourceTree = "<group>"; };
 		DEF001102ED930F40056A7A2 /* BalanceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BalanceView.swift; sourceTree = "<group>"; };
+		DEF001132ED930F50056A7A2 /* AccountEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountEditorSheet.swift; sourceTree = "<group>"; };
 		DEF001112ED930F40056A7A2 /* CalendarTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarTabView.swift; sourceTree = "<group>"; };
 		DEF001122ED930F40056A7A2 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
 		DEF101112EDA57F10056A7A3 /* CreditCardManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreditCardManager.swift; sourceTree = "<group>"; };
@@ -102,6 +108,8 @@
 			isa = PBXGroup;
 			children = (
 				DED579AF2F06D6AC00FBBEDC /* ManualIncomeEntrySheet.swift */,
+				DED579B22F06D6AD00FBBEDC /* ManualTransactionEntrySheet.swift */,
+				DED579B42F06D6AE00FBBEDC /* AccountDetailView.swift */,
 				DED579AD2F06C25C00FBBEDC /* ManageBillsView.swift */,
 				DE546C272F04AEAE004F8E56 /* CategoryManager.swift */,
 				DE546C2A2F04AEB00048E56 /* CategorySuggester.swift */,
@@ -151,6 +159,7 @@
 				DED060602EBCC41000EF3BD3 /* OnboardingView.swift */,
 				DED060612EBCC41000EF3BD3 /* SplashScreenView.swift */,
 				DEF001102ED930F40056A7A2 /* BalanceView.swift */,
+				DEF001132ED930F50056A7A2 /* AccountEditorSheet.swift */,
 				DEF001112ED930F40056A7A2 /* CalendarTabView.swift */,
 				DEF001122ED930F40056A7A2 /* MainTabView.swift */,
 				DF20011E2EE2C5D1003006B1 /* PaycheckEditorSheet.swift */,
@@ -303,11 +312,14 @@
 				DE7C83982EBAF76A00880E97 /* ContentView.swift in Sources */,
 				DE7C83992EBAF76A00880E97 /* PersistenceController.swift in Sources */,
 				DEF001012ED930F40056A7A2 /* BalanceView.swift in Sources */,
+				DEF001022ED930F50056A7A2 /* AccountEditorSheet.swift in Sources */,
 				DF2001202EE2C5D1003006B1 /* PaycheckEditorSheet.swift in Sources */,
 				DEF001022ED930F40056A7A2 /* CalendarTabView.swift in Sources */,
 				DEF101142EDA57F10056A7A3 /* ManageCreditCardsView.swift in Sources */,
 				DE14BD592EBAFC88008476B5 /* BillsAndBalance.xcdatamodeld in Sources */,
 				DED579B02F06D6AC00FBBEDC /* ManualIncomeEntrySheet.swift in Sources */,
+				DED579B12F06D6AD00FBBEDC /* ManualTransactionEntrySheet.swift in Sources */,
+				DED579B32F06D6AE00FBBEDC /* AccountDetailView.swift in Sources */,
 				DE57A0042F08AA0001 /* StatementImportSheet.swift in Sources */,
 				DE57B0012F08BB0001 /* TransactionCSVParser.swift in Sources */,
 				DE57C0012F08CC0001 /* YearWrapPopupView.swift in Sources */,

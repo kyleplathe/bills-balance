@@ -106,9 +106,9 @@ struct YearWrapPopupView: View {
                         onDismiss()
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title2)
-                            .symbolRenderingMode(.hierarchical)
+                        Image(systemName: "xmark")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.primary)
                     }
                 }
             }

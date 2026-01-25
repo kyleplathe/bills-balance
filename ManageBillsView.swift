@@ -29,9 +29,8 @@ struct ManageBillsView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
+                        Image(systemName: "xmark")
                             .font(.title2)
-                            .symbolRenderingMode(.hierarchical)
                     }
                 }
             }

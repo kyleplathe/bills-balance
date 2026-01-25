@@ -10,7 +10,7 @@ Use standard iOS design. Prefer system defaults (including iOS 26 liquid glass) 
 ## Toolbars & Navigation
 
 - **Main tabs (Bills, Balance, Calendar):** Each has its own NavigationStack. Toolbar uses `ToolbarItemGroup(placement: .navigationBarTrailing)` with `Image(systemName:).font(.title2)`. No `toolbarBackground`; use default nav bar.
-- **Modal close (sheets / fullScreenCover):** Use `ToolbarItem(placement: .cancellationAction)` with `Image(systemName: "xmark.circle.fill").font(.title2).symbolRenderingMode(.hierarchical)`. Match ManageBillsView / ManageAccountsView.
+- **Modal close (sheets / fullScreenCover):** Use `ToolbarItem(placement: .cancellationAction)` with `Image(systemName: "xmark").font(.system(size: 17, weight: .semibold)).foregroundStyle(.primary)`. Match ManageBillsView / ManageAccountsView.
 - **Pushed views (e.g. Account detail):** Use system back button. No custom leading button unless replacing back.
 
 ## Activity Reports (fullScreenCover)
@@ -26,11 +26,11 @@ Use standard iOS design. Prefer system defaults (including iOS 26 liquid glass) 
 ## Don’t
 
 - Add `toolbarBackground` unless a specific view (e.g. List in modal) needs a solid bar and we’ve agreed.
-- Use hierarchical/multi-tone toolbar icons except where we match ManageBillsView (X).
+- Use hierarchical/multi-tone toolbar icons (X buttons use standard `xmark` icon).
 - Put the main tab toolbar or tab bar on modal sheets (Activity, Manage Bills, etc.).
 
 ## Reference
 
 - **Balance:** `BalanceView` → `navigationContent` toolbar (plus, search, menu).
-- **Modals:** `ManageBillsView`, `ManageAccountsView` → X + `.symbolRenderingMode(.hierarchical)`.
+- **Modals:** `ManageBillsView`, `ManageAccountsView` → X with standard iOS style.
 - **Activity:** `ReportsView` → fullScreenCover, X + segmented period picker in toolbar.

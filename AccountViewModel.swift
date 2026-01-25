@@ -31,6 +31,14 @@ class AccountViewModel: ObservableObject {
     
     // MARK: - Fetch Data
     func fetchAccounts() {
+        // Ensure we're on the main thread for UI updates
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async {
+                self.fetchAccounts()
+            }
+            return
+        }
+        
         let request = NSFetchRequest<Account>(entityName: "Account")
         request.sortDescriptors = [
             NSSortDescriptor(keyPath: \Account.order, ascending: true),
@@ -39,6 +47,8 @@ class AccountViewModel: ObservableObject {
         
         do {
             let fetched = try context.fetch(request)
+            // Refresh context to ensure we have latest data
+            context.refreshAllObjects()
             accounts = fetched
             if let selected = selectedAccount, fetched.contains(selected) {
                 // keep current selection
@@ -83,7 +93,12 @@ class AccountViewModel: ObservableObject {
         account.startingBalance = NSDecimalNumber(decimal: startingBalance)
         account.createdAt = Date()
         account.updatedAt = Date()
-        account.order = Int16(accounts.count)
+        // Set order to 0 so new accounts appear first
+        account.order = 0
+        // Shift existing accounts' order down
+        for existingAccount in accounts {
+            existingAccount.order += 1
+        }
         account.isHiddenFlag = isHidden
         account.currencyCode = currency
         account.btcDisplayFormat = btcDisplayFormat
@@ -617,6 +632,9 @@ class AccountViewModel: ObservableObject {
         if selectedAccount == account {
             refreshLedgerEntries()
         }
+        
+        // Refresh the account to ensure balance updates are reflected
+        context.refresh(account, mergeChanges: true)
     }
     
     func toggleReconciled(for entry: LedgerEntry) {

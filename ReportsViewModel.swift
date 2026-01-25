@@ -758,4 +758,135 @@ final class ReportsViewModel: ObservableObject {
             return []
         }
     }
+    
+    /// Gets category breakdown by period for stacked bar chart
+    func categoryBreakdownByPeriod(period: WalletPeriod) -> [(period: String, categories: [(name: String, amount: Decimal)])] {
+        let calendar = Calendar.current
+        var result: [(period: String, categories: [(name: String, amount: Decimal)])] = []
+        
+        let (start, end, periodCount, periodFormatter): (Date, Date, Int, (Date) -> String) = {
+            switch period {
+            case .week:
+                let weekStart = startOfWeek(for: selectedWeekStart)
+                guard let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) else {
+                    return (weekStart, weekStart, 0, { _ in "" })
+                }
+                let formatter: (Date) -> String = { date in
+                    let f = DateFormatter()
+                    f.dateFormat = "EEE"
+                    return f.string(from: date)
+                }
+                return (weekStart, weekEnd, 7, formatter)
+            case .month:
+                let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: selectedMonth))!
+                guard let monthEnd = calendar.date(byAdding: .month, value: 1, to: monthStart) else {
+                    return (monthStart, monthStart, 0, { _ in "" })
+                }
+                let range = calendar.range(of: .day, in: .month, for: selectedMonth)!
+                let dayCount = range.count
+                let daysPerWeek = max(1, (dayCount + 4) / 5)
+                let formatter: (Date) -> String = { date in
+                    let day = calendar.component(.day, from: date)
+                    let weekIndex = (day - 1) / daysPerWeek
+                    let startDay = weekIndex * daysPerWeek + 1
+                    let endDay = min((weekIndex + 1) * daysPerWeek, dayCount)
+                    return "\(startDay)-\(endDay)"
+                }
+                return (monthStart, monthEnd, 5, formatter)
+            case .year:
+                let yearStart = calendar.date(from: DateComponents(year: selectedYear, month: 1, day: 1))!
+                guard let yearEnd = calendar.date(byAdding: .year, value: 1, to: yearStart) else {
+                    return (yearStart, yearStart, 0, { _ in "" })
+                }
+                let formatter: (Date) -> String = { date in
+                    let f = DateFormatter()
+                    f.dateFormat = "MMM"
+                    return f.string(from: date)
+                }
+                return (yearStart, yearEnd, 12, formatter)
+            }
+        }()
+        
+        // Get all categories from the period
+        let entries = fetchEntries(from: start, to: end)
+        var allCategories: Set<String> = []
+        for entry in entries {
+            guard let account = entry.account, !account.isHiddenFlag else { continue }
+            let usd = reportUSDAmount(for: entry, account: account, btcService: bitcoinPriceService)
+            guard usd < 0 else { continue }
+            let cat = entry.category?.isEmpty == false ? entry.category! : "Uncategorized"
+            allCategories.insert(cat)
+        }
+        let sortedCategories = Array(allCategories).sorted()
+        
+        // Get category data for each period
+        for periodIndex in 0..<periodCount {
+            let periodStart: Date?
+            let periodEnd: Date?
+            
+            switch period {
+            case .week:
+                guard let day = calendar.date(byAdding: .day, value: periodIndex, to: start) else {
+                    continue
+                }
+                let dayStart = calendar.startOfDay(for: day)
+                guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else {
+                    continue
+                }
+                periodStart = dayStart
+                periodEnd = dayEnd
+            case .month:
+                let range = calendar.range(of: .day, in: .month, for: selectedMonth)!
+                let dayCount = range.count
+                let daysPerWeek = max(1, (dayCount + 4) / 5)
+                let startDay = periodIndex * daysPerWeek + 1
+                let endDay = min((periodIndex + 1) * daysPerWeek, dayCount)
+                guard let periodStartDate = calendar.date(byAdding: .day, value: startDay - 1, to: start),
+                      let periodEndDate = calendar.date(byAdding: .day, value: endDay - startDay + 1, to: periodStartDate) else {
+                    continue
+                }
+                periodStart = periodStartDate
+                periodEnd = periodEndDate
+            case .year:
+                guard let monthDate = calendar.date(byAdding: .month, value: periodIndex, to: start) else {
+                    continue
+                }
+                let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: monthDate))!
+                guard let monthEnd = calendar.date(byAdding: .month, value: 1, to: monthStart) else {
+                    continue
+                }
+                periodStart = monthStart
+                periodEnd = monthEnd
+            }
+            
+            guard let periodStart = periodStart, let periodEnd = periodEnd else {
+                continue
+            }
+            
+            var categoryAmounts: [String: Decimal] = [:]
+            let periodEntries = fetchEntries(from: periodStart, to: periodEnd)
+            
+            for entry in periodEntries {
+                guard let account = entry.account, !account.isHiddenFlag else { continue }
+                let usd = reportUSDAmount(for: entry, account: account, btcService: bitcoinPriceService)
+                guard usd < 0 else { continue }
+                let cat = entry.category?.isEmpty == false ? entry.category! : "Uncategorized"
+                categoryAmounts[cat, default: 0] += abs(usd)
+            }
+            
+            // Create sorted category list for this period
+            let categories = sortedCategories.compactMap { category -> (name: String, amount: Decimal)? in
+                let amount = categoryAmounts[category] ?? 0
+                guard amount > 0 else { return nil }
+                return (name: category, amount: amount)
+            }.sorted { $0.amount > $1.amount }
+            
+            if !categories.isEmpty {
+                let periodLabel = periodFormatter(periodStart)
+                result.append((period: periodLabel, categories: categories))
+            }
+        }
+        
+        return result
+    }
 }

@@ -25,99 +25,68 @@ struct ManageAccountsView: View {
     
     var body: some View {
         NavigationStack {
-            Form {
-                accountsSection
-                dataManagementSection
-            }
-            .navigationTitle("Manage Accounts")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title2)
-                            .symbolRenderingMode(.hierarchical)
-                    }
-                }
-            }
-            .alert("Clear All Bills", isPresented: $showingClearBillsAlert) {
-                Button("Cancel", role: .cancel) { }
-                Button("Clear All", role: .destructive) {
-                    let result = billViewModel.clearAllBills()
-                    clearSuccessMessage = result.message
-                    showingClearSuccessAlert = true
-                }
-            } message: {
-                Text("This will permanently delete all bills. This action cannot be undone.")
-            }
-            .alert("Clear All Income", isPresented: $showingClearIncomeAlert) {
-                Button("Cancel", role: .cancel) { }
-                Button("Clear All", role: .destructive) {
-                    let result = paycheckViewModel.clearAllPaychecks()
-                    clearSuccessMessage = result.message
-                    showingClearSuccessAlert = true
-                }
-            } message: {
-                Text("This will permanently delete all income entries. This action cannot be undone.")
-            }
-            .alert("Clear All Transactions", isPresented: $showingClearTransactionsAlert) {
-                Button("Cancel", role: .cancel) { }
-                Button("Clear All", role: .destructive) {
-                    let result = accountViewModel.clearAllLedgerEntries()
-                    clearSuccessMessage = result.message
-                    showingClearSuccessAlert = true
-                }
-            } message: {
-                Text("This will permanently delete all transactions. Account balances will remain, but all transaction history will be lost. This action cannot be undone.")
-            }
-            .alert("Clear All Data", isPresented: $showingClearAllDataAlert) {
-                Button("Cancel", role: .cancel) { }
-                Button("Clear All", role: .destructive) {
-                    let billsResult = billViewModel.clearAllBills()
-                    let paychecksResult = paycheckViewModel.clearAllPaychecks()
-                    let dataResult = accountViewModel.clearAllData(keepAccounts: true)
-                    clearSuccessMessage = "\(billsResult.message). \(paychecksResult.message). \(dataResult.message)"
-                    showingClearSuccessAlert = true
-                }
-            } message: {
-                Text("This will permanently delete all bills, income, and transactions. Accounts will be kept but balances reset to $0. This action cannot be undone.")
-            }
-            .alert("Success", isPresented: $showingClearSuccessAlert) {
-                Button("OK") { }
-            } message: {
-                Text(clearSuccessMessage)
-            }
-            .sheet(isPresented: $showingAccountEditor) {
-                AccountEditorSheet(account: accountToEdit) { name, type, startingBalance, isHidden, currency, btcDisplayFormat, feePercentage in
-                    if let account = accountToEdit {
-                        accountViewModel.updateAccount(account,
-                                                       name: name,
-                                                       type: type,
-                                                       startingBalance: startingBalance,
-                                                       isHidden: isHidden,
-                                                       currency: currency,
-                                                       btcDisplayFormat: btcDisplayFormat,
-                                                       feePercentage: feePercentage)
-                    } else {
-                        accountViewModel.addAccount(name: name,
-                                                    type: type,
-                                                    startingBalance: startingBalance,
-                                                    isHidden: isHidden,
-                                                    currency: currency,
-                                                    btcDisplayFormat: btcDisplayFormat,
-                                                    feePercentage: feePercentage)
-                    }
-                    accountViewModel.fetchAccounts()
-                }
-                .environmentObject(BitcoinPriceService.shared)
-            }
-            .onAppear {
-                accountViewModel.fetchAccounts()
-            }
+            formContent
         }
     }
+    
+    private var formContent: some View {
+        Form {
+            accountsSection
+            dataManagementSection
+        }
+        .navigationTitle("Manage Accounts")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.title2)
+                }
+            }
+        }
+        .modifier(AlertModifiers(
+            showingClearBillsAlert: $showingClearBillsAlert,
+            showingClearIncomeAlert: $showingClearIncomeAlert,
+            showingClearTransactionsAlert: $showingClearTransactionsAlert,
+            showingClearAllDataAlert: $showingClearAllDataAlert,
+            showingClearSuccessAlert: $showingClearSuccessAlert,
+            clearSuccessMessage: $clearSuccessMessage,
+            billViewModel: billViewModel,
+            paycheckViewModel: paycheckViewModel,
+            accountViewModel: accountViewModel
+        ))
+        .sheet(isPresented: $showingAccountEditor) {
+            AccountEditorSheet(account: accountToEdit) { name, type, startingBalance, isHidden, currency, btcDisplayFormat, feePercentage in
+                if let account = accountToEdit {
+                    accountViewModel.updateAccount(account,
+                                                   name: name,
+                                                   type: type,
+                                                   startingBalance: startingBalance,
+                                                   isHidden: isHidden,
+                                                   currency: currency,
+                                                   btcDisplayFormat: btcDisplayFormat,
+                                                   feePercentage: feePercentage)
+                } else {
+                    accountViewModel.addAccount(name: name,
+                                                type: type,
+                                                startingBalance: startingBalance,
+                                                isHidden: isHidden,
+                                                currency: currency,
+                                                btcDisplayFormat: btcDisplayFormat,
+                                                feePercentage: feePercentage)
+                }
+                accountViewModel.fetchAccounts()
+            }
+            .environmentObject(BitcoinPriceService.shared)
+            .id(accountToEdit?.objectID) // Force recreation when account changes
+        }
+        .onAppear {
+            accountViewModel.fetchAccounts()
+        }
+    }
+    
     
     private var accountsSection: some View {
         Section {
@@ -141,7 +110,20 @@ struct ManageAccountsView: View {
                     }
                     Spacer()
                     Button {
-                        accountToEdit = account
+                        // Capture the account objectID to ensure we have the right account
+                        let accountID = account.objectID
+                        // Refresh the account from context to ensure we have latest data
+                        if let context = account.managedObjectContext {
+                            context.refresh(account, mergeChanges: true)
+                            // Get the account again to ensure we have the latest version
+                            if let refreshedAccount = context.object(with: accountID) as? Account {
+                                accountToEdit = refreshedAccount
+                            } else {
+                                accountToEdit = account
+                            }
+                        } else {
+                            accountToEdit = account
+                        }
                         showingAccountEditor = true
                     } label: {
                         Image(systemName: "pencil")
@@ -231,3 +213,66 @@ struct ManageAccountsView: View {
     }
 }
 
+// MARK: - Alert Modifiers Helper
+private struct AlertModifiers: ViewModifier {
+    @Binding var showingClearBillsAlert: Bool
+    @Binding var showingClearIncomeAlert: Bool
+    @Binding var showingClearTransactionsAlert: Bool
+    @Binding var showingClearAllDataAlert: Bool
+    @Binding var showingClearSuccessAlert: Bool
+    @Binding var clearSuccessMessage: String
+    let billViewModel: BillViewModel
+    let paycheckViewModel: PaycheckViewModel
+    let accountViewModel: AccountViewModel
+    
+    func body(content: Content) -> some View {
+        content
+            .alert("Clear All Bills", isPresented: $showingClearBillsAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Clear All", role: .destructive) {
+                    let result = billViewModel.clearAllBills()
+                    clearSuccessMessage = result.message
+                    showingClearSuccessAlert = true
+                }
+            } message: {
+                Text("This will permanently delete all bills. This action cannot be undone.")
+            }
+            .alert("Clear All Income", isPresented: $showingClearIncomeAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Clear All", role: .destructive) {
+                    let result = paycheckViewModel.clearAllPaychecks()
+                    clearSuccessMessage = result.message
+                    showingClearSuccessAlert = true
+                }
+            } message: {
+                Text("This will permanently delete all income entries. This action cannot be undone.")
+            }
+            .alert("Clear All Transactions", isPresented: $showingClearTransactionsAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Clear All", role: .destructive) {
+                    let result = accountViewModel.clearAllLedgerEntries()
+                    clearSuccessMessage = result.message
+                    showingClearSuccessAlert = true
+                }
+            } message: {
+                Text("This will permanently delete all transactions. Account balances will remain, but all transaction history will be lost. This action cannot be undone.")
+            }
+            .alert("Clear All Data", isPresented: $showingClearAllDataAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Clear All", role: .destructive) {
+                    let billsResult = billViewModel.clearAllBills()
+                    let paychecksResult = paycheckViewModel.clearAllPaychecks()
+                    let dataResult = accountViewModel.clearAllData(keepAccounts: true)
+                    clearSuccessMessage = "\(billsResult.message). \(paychecksResult.message). \(dataResult.message)"
+                    showingClearSuccessAlert = true
+                }
+            } message: {
+                Text("This will permanently delete all bills, income, and transactions. Accounts will be kept but balances reset to $0. This action cannot be undone.")
+            }
+            .alert("Success", isPresented: $showingClearSuccessAlert) {
+                Button("OK") { }
+            } message: {
+                Text(clearSuccessMessage)
+            }
+    }
+}

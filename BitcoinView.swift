@@ -169,7 +169,9 @@ struct BitcoinView: View {
                     Button {
                         onClose?()
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
+                        Image(systemName: "xmark")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.primary)
                     }
                 }
             }
