@@ -1,0 +1,36 @@
+---
+description: BillsAndBalance design standard — toolbars, nav bar, modals, iOS
+alwaysApply: true
+---
+
+# BillsAndBalance Design Standard
+
+Use standard iOS design. Prefer system defaults (including iOS 26 liquid glass) — avoid custom toolbar backgrounds, extra layers, or non-standard chrome unless explicitly required.
+
+## Toolbars & Navigation
+
+- **Main tabs (Bills, Balance, Calendar):** Each has its own NavigationStack. Toolbar uses `ToolbarItemGroup(placement: .navigationBarTrailing)` with `Image(systemName:).font(.title2)`. No `toolbarBackground`; use default nav bar.
+- **Modal close (sheets / fullScreenCover):** Use `ToolbarItem(placement: .cancellationAction)` with `Image(systemName: "xmark.circle.fill").font(.title2).symbolRenderingMode(.hierarchical)`. Match ManageBillsView / ManageAccountsView.
+- **Pushed views (e.g. Account detail):** Use system back button. No custom leading button unless replacing back.
+
+## Activity Reports (fullScreenCover)
+
+- **Presentation:** `fullScreenCover`. Own NavigationStack. Main toolbar (Balance nav + tab bar) must **not** appear on Activity — the sheet replaces the screen.
+- **Toolbar:** Leading = X close (same as ManageBillsView). Principal = Week/Month/Year period picker (`Picker` with `.pickerStyle(.segmented).labelsHidden()`).
+- **Title:** Large title, period-based (`reportsPeriodTitle`). No redundant period title in list.
+
+## Period Picker
+
+- **In Activity toolbar:** Use native `Picker(.segmented)` for Week | Month | Year. Keep it simple; no custom pill unless we need drag-to-select and then match main app style (light gray bar, dark gray selected).
+
+## Don’t
+
+- Add `toolbarBackground` unless a specific view (e.g. List in modal) needs a solid bar and we’ve agreed.
+- Use hierarchical/multi-tone toolbar icons except where we match ManageBillsView (X).
+- Put the main tab toolbar or tab bar on modal sheets (Activity, Manage Bills, etc.).
+
+## Reference
+
+- **Balance:** `BalanceView` → `navigationContent` toolbar (plus, search, menu).
+- **Modals:** `ManageBillsView`, `ManageAccountsView` → X + `.symbolRenderingMode(.hierarchical)`.
+- **Activity:** `ReportsView` → fullScreenCover, X + segmented period picker in toolbar.
