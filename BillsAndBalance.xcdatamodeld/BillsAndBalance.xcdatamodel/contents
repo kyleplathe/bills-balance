@@ -51,6 +51,7 @@
         <attribute name="btcAmount" optional="YES" attributeType="Decimal" usesScalarValueType="NO"/>
         <attribute name="usdAmount" optional="YES" attributeType="Decimal" usesScalarValueType="NO"/>
         <attribute name="btcPriceAtTransaction" optional="YES" attributeType="Decimal" usesScalarValueType="NO"/>
+        <attribute name="feeAmount" optional="YES" attributeType="Decimal" defaultValueString="0.0" usesScalarValueType="NO"/>
         <relationship name="account" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Account" inverseName="ledgerEntries" inverseEntity="Account"/>
         <relationship name="bill" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Bill" inverseName="ledgerEntries" inverseEntity="Bill"/>
     </entity>

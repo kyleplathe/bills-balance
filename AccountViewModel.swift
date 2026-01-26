@@ -360,7 +360,8 @@ class AccountViewModel: ObservableObject {
     }
     
     func ledgerEntries(for account: Account) -> [LedgerEntry] {
-        if selectedAccount == account {
+        // Use objectID comparison for more reliable Core Data object matching
+        if let selected = selectedAccount, selected.objectID == account.objectID {
             return ledgerEntries
         }
         
@@ -372,7 +373,9 @@ class AccountViewModel: ObservableObject {
         ]
         
         do {
-            return try context.fetch(request)
+            let entries = try context.fetch(request)
+            print("AccountViewModel: Fetched \(entries.count) ledger entries for account: \(account.name ?? "Unknown")")
+            return entries
         } catch {
             print("Error fetching ledger entries for account: \(error)")
             return []
@@ -538,7 +541,8 @@ class AccountViewModel: ObservableObject {
                         notes: String?,
                         isReconciled: Bool,
                         category: String? = nil,
-                        paycheck: Paycheck? = nil) {
+                        paycheck: Paycheck? = nil,
+                        feeAmount: Decimal? = nil) {
         let entry = LedgerEntry(context: context)
         entry.id = UUID()
         entry.title = title
@@ -613,6 +617,11 @@ class AccountViewModel: ObservableObject {
             }
         }
         
+        // Store fee amount if provided (for both BTC and USD accounts)
+        if let fee = feeAmount {
+            entry.feeAmount = NSDecimalNumber(decimal: fee.magnitude)
+        }
+        
         // Store paycheck reference separately (not in user-visible notes)
         // Since we can't add a relationship without Core Data migration,
         // we'll store the paycheck ID in a way that doesn't show to users
@@ -641,6 +650,11 @@ class AccountViewModel: ObservableObject {
         entry.isReconciledFlag.toggle()
         saveContext()
         refreshLedgerEntries()
+        
+        // Refresh the account to ensure balance calculations update
+        if let account = entry.account {
+            context.refresh(account, mergeChanges: true)
+        }
     }
     
     func updateLedgerEntry(_ entry: LedgerEntry,
@@ -651,7 +665,8 @@ class AccountViewModel: ObservableObject {
                            btcPrice: Decimal?,
                            isReconciled: Bool,
                            notes: String?,
-                           category: String? = nil) {
+                           category: String? = nil,
+                           feeAmount: Decimal? = nil) {
         entry.date = date
         entry.title = title
         entry.notes = notes
@@ -688,6 +703,11 @@ class AccountViewModel: ObservableObject {
             }
         }
         
+        // Update fee amount if provided
+        if let fee = feeAmount {
+            entry.feeAmount = NSDecimalNumber(decimal: fee.magnitude)
+        }
+        
         saveContext()
         refreshLedgerEntries()
     }
@@ -696,6 +716,74 @@ class AccountViewModel: ObservableObject {
         context.delete(entry)
         saveContext()
         refreshLedgerEntries()
+    }
+    
+    // MARK: - Sample Data for Testing
+    /// Adds sample transactions across multiple categories and dates for testing bar charts
+    func addSampleDataForTesting(to account: Account) {
+        let calendar = Calendar.current
+        let now = Date()
+        
+        // Get current month start
+        guard let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) else { return }
+        
+        // Add transactions spread across the month (5 periods: 1-7, 8-14, 15-21, 22-28, 29-31)
+        let periods = [
+            (startDay: 1, endDay: 7, categories: [
+                ("Credit Card", Decimal(800.00)),
+                ("Housing", Decimal(400.00)),
+                ("Utilities", Decimal(50.00))
+            ]),
+            (startDay: 8, endDay: 14, categories: [
+                ("Credit Card", Decimal(600.00)),
+                ("Housing", Decimal(300.00)),
+                ("Food & Dining", Decimal(35.19))
+            ]),
+            (startDay: 15, endDay: 21, categories: [
+                ("Credit Card", Decimal(500.00)),
+                ("Housing", Decimal(300.00)),
+                ("Utilities", Decimal(50.00)),
+                ("Fee", Decimal(30.97))
+            ]),
+            (startDay: 22, endDay: 28, categories: [
+                ("Credit Card", Decimal(400.00)),
+                ("Housing", Decimal(264.80)),
+                ("Utilities", Decimal(48.92))
+            ]),
+            (startDay: 29, endDay: 31, categories: [
+                ("Credit Card", Decimal(109.08))
+            ])
+        ]
+        
+        for period in periods {
+            // Distribute transactions across the period
+            let daysInPeriod = period.endDay - period.startDay + 1
+            var dayOffset = 0
+            
+            for (categoryName, amount) in period.categories {
+                guard let transactionDate = calendar.date(byAdding: .day, value: period.startDay - 1 + dayOffset, to: monthStart) else { continue }
+                
+                addManualEntry(
+                    to: account,
+                    title: "\(categoryName) Payment",
+                    btcAmount: nil,
+                    usdAmount: -amount, // Negative for expenses
+                    btcPriceAtTransaction: nil,
+                    date: transactionDate,
+                    notes: "Sample data for testing",
+                    isReconciled: true,
+                    category: categoryName,
+                    paycheck: nil,
+                    feeAmount: nil
+                )
+                
+                dayOffset = (dayOffset + 1) % daysInPeriod
+            }
+        }
+        
+        saveContext()
+        refreshLedgerEntries()
+        print("✅ Added sample data for testing bar chart")
     }
     
     func updatePaycheckOccurrenceTransaction(paycheck: Paycheck,
@@ -1147,6 +1235,10 @@ extension LedgerEntry {
     
     var btcPriceAtTransactionDecimal: Decimal {
         btcPriceAtTransaction?.decimalValue ?? .zero
+    }
+    
+    var feeAmountDecimal: Decimal {
+        feeAmount?.decimalValue ?? .zero
     }
     
     // Returns the amount in the account's currency

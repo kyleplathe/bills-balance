@@ -74,6 +74,28 @@ class CategoryManager: ObservableObject {
         customCategories.remove(atOffsets: offsets)
     }
     
+    /// Removes custom categories that haven't been used in the last 60 days.
+    /// Default categories are never removed.
+    /// - Parameter usage: Category usage data from AccountViewModel.categoryUsage()
+    func cleanupUnusedCategories(usage: [String: CategoryUsage]) {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -60, to: Date()) ?? Date()
+        
+        customCategories.removeAll { category in
+            // Never remove if it's a default category
+            if defaultCategories.contains(where: { $0.caseInsensitiveCompare(category) == .orderedSame }) {
+                return false
+            }
+            
+            // If never used, keep it (might be newly added)
+            guard let u = usage[category] else {
+                return false
+            }
+            
+            // Remove if last used more than 60 days ago
+            return u.lastUsed < cutoff
+        }
+    }
+    
     private func save() {
         UserDefaults.standard.set(customCategories, forKey: storageKey)
     }

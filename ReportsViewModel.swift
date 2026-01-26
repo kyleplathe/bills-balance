@@ -774,7 +774,7 @@ final class ReportsViewModel: ObservableObject {
                 let formatter: (Date) -> String = { date in
                     let f = DateFormatter()
                     f.dateFormat = "EEE"
-                    return f.string(from: date)
+                    return f.string(from: date).prefix(3).uppercased()
                 }
                 return (weekStart, weekEnd, 7, formatter)
             case .month:
@@ -782,15 +782,10 @@ final class ReportsViewModel: ObservableObject {
                 guard let monthEnd = calendar.date(byAdding: .month, value: 1, to: monthStart) else {
                     return (monthStart, monthStart, 0, { _ in "" })
                 }
-                let range = calendar.range(of: .day, in: .month, for: selectedMonth)!
-                let dayCount = range.count
-                let daysPerWeek = max(1, (dayCount + 4) / 5)
+                // The formatter won't be used for month view - labels are generated directly in the loop
                 let formatter: (Date) -> String = { date in
-                    let day = calendar.component(.day, from: date)
-                    let weekIndex = (day - 1) / daysPerWeek
-                    let startDay = weekIndex * daysPerWeek + 1
-                    let endDay = min((weekIndex + 1) * daysPerWeek, dayCount)
-                    return "\(startDay)-\(endDay)"
+                    // This won't be used - we'll generate labels directly in the loop
+                    return ""
                 }
                 return (monthStart, monthEnd, 5, formatter)
             case .year:
@@ -801,7 +796,7 @@ final class ReportsViewModel: ObservableObject {
                 let formatter: (Date) -> String = { date in
                     let f = DateFormatter()
                     f.dateFormat = "MMM"
-                    return f.string(from: date)
+                    return f.string(from: date).prefix(3).uppercased()
                 }
                 return (yearStart, yearEnd, 12, formatter)
             }
@@ -823,6 +818,7 @@ final class ReportsViewModel: ObservableObject {
         for periodIndex in 0..<periodCount {
             let periodStart: Date?
             let periodEnd: Date?
+            var periodLabel: String?
             
             switch period {
             case .week:
@@ -836,17 +832,23 @@ final class ReportsViewModel: ObservableObject {
                 periodStart = dayStart
                 periodEnd = dayEnd
             case .month:
-                let range = calendar.range(of: .day, in: .month, for: selectedMonth)!
-                let dayCount = range.count
-                let daysPerWeek = max(1, (dayCount + 4) / 5)
+                let dayCount = calendar.range(of: .day, in: .month, for: selectedMonth)?.count ?? 30
+                let daysPerWeek = max(1, (dayCount + 4) / 5) // Divide month into 5 roughly equal weeks
                 let startDay = periodIndex * daysPerWeek + 1
                 let endDay = min((periodIndex + 1) * daysPerWeek, dayCount)
-                guard let periodStartDate = calendar.date(byAdding: .day, value: startDay - 1, to: start),
-                      let periodEndDate = calendar.date(byAdding: .day, value: endDay - startDay + 1, to: periodStartDate) else {
+                guard let periodStartDate = calendar.date(byAdding: .day, value: startDay - 1, to: start) else {
+                    continue
+                }
+                // Calculate end date correctly
+                let daysInPeriod = endDay - startDay + 1
+                guard let periodEndDate = calendar.date(byAdding: .day, value: daysInPeriod, to: periodStartDate) else {
                     continue
                 }
                 periodStart = periodStartDate
                 periodEnd = periodEndDate
+                
+                // Generate period label directly from day range
+                periodLabel = "\(startDay)-\(endDay)"
             case .year:
                 guard let monthDate = calendar.date(byAdding: .month, value: periodIndex, to: start) else {
                     continue
@@ -874,17 +876,22 @@ final class ReportsViewModel: ObservableObject {
                 categoryAmounts[cat, default: 0] += abs(usd)
             }
             
-            // Create sorted category list for this period
+            // Create sorted category list for this period (only categories with spending)
             let categories = sortedCategories.compactMap { category -> (name: String, amount: Decimal)? in
                 let amount = categoryAmounts[category] ?? 0
                 guard amount > 0 else { return nil }
                 return (name: category, amount: amount)
             }.sorted { $0.amount > $1.amount }
             
-            if !categories.isEmpty {
-                let periodLabel = periodFormatter(periodStart)
-                result.append((period: periodLabel, categories: categories))
+            // Always add period, even if no categories (for proper date display)
+            // Generate period label - for month view, use the pre-calculated label, otherwise use formatter
+            let finalPeriodLabel: String
+            if let preCalculatedLabel = periodLabel {
+                finalPeriodLabel = preCalculatedLabel
+            } else {
+                finalPeriodLabel = periodFormatter(periodStart)
             }
+            result.append((period: finalPeriodLabel, categories: categories))
         }
         
         return result

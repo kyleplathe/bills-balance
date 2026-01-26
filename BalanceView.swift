@@ -246,6 +246,16 @@ struct BalanceView: View {
             } label: {
                 Label("Reports", systemImage: "chart.bar")
             }
+            
+            // Debug: Add sample data for testing bar chart
+            if let firstAccount = visibleAccounts.first {
+                Divider()
+                Button {
+                    accountViewModel.addSampleDataForTesting(to: firstAccount)
+                } label: {
+                    Label("Add Sample Data (Test)", systemImage: "chart.bar.doc.horizontal.fill")
+                }
+            }
         } label: {
             Image(systemName: "ellipsis.circle")
                 .font(.title2)
@@ -310,7 +320,7 @@ struct BalanceView: View {
     }
     
     private var activityBreakdownChart: some View {
-        HStack(spacing: 4) {
+        HStack(alignment: .bottom, spacing: 4) {
             ForEach(0..<activityBreakdown.count, id: \.self) { index in
                 let value = activityBreakdown[safe: index] ?? Decimal(0)
                 let hasData = value > Decimal(0.01) // Consider values less than 1 cent as no data
@@ -318,12 +328,16 @@ struct BalanceView: View {
                 let barColor = hasData ? (activityChartColors[safe: index] ?? .gray) : Color.gray.opacity(0.3)
                 let barHeight = hasData ? max(4, CGFloat(ratio * 24)) : 4
                 
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(barColor)
-                    .frame(height: barHeight)
+                VStack {
+                    Spacer()
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(barColor)
+                        .frame(height: barHeight)
+                }
+                .frame(height: 24)
             }
         }
-        .frame(height: 24, alignment: .bottom)
+        .frame(height: 24)
     }
     
     private var activityChartColors: [Color] {
@@ -331,7 +345,7 @@ struct BalanceView: View {
         case .week:
             return [.orange, .pink, .purple, .blue, .green, .cyan, .indigo]
         case .month:
-            return [.orange, .pink, .purple, .blue]
+            return [.orange, .pink, .purple, .blue, .green]
         case .year:
             return [.orange, .pink, .purple, .blue, .green, .cyan, .indigo, .mint, .teal, .yellow, .red, .brown]
         }
@@ -489,7 +503,7 @@ struct BalanceView: View {
         case .month:
             guard let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: now)),
                   let endOfMonth = calendar.date(byAdding: .month, value: 1, to: startOfMonth) else {
-                return Array(repeating: Decimal(0), count: 4)
+                return Array(repeating: Decimal(0), count: 5)
             }
             
             let monthEntries = entries.filter { entry in
@@ -497,9 +511,16 @@ struct BalanceView: View {
                 return date >= startOfMonth && date < endOfMonth
             }
             
-            var weekly: [Decimal] = Array(repeating: Decimal(0), count: 4)
-            let dayCount = calendar.range(of: .day, in: .month, for: now)?.count ?? 30
-            let daysPerWeek = max(1, (dayCount + 3) / 4)
+            var weekly: [Decimal] = Array(repeating: Decimal(0), count: 5)
+            
+            // Week ranges: 1-3, 4-10, 11-17, 18-24, 25-31
+            let weekRanges = [
+                (1, 3),
+                (4, 10),
+                (11, 17),
+                (18, 24),
+                (25, 31)
+            ]
             
             for entry in monthEntries {
                 guard let account = entry.account, !account.isHiddenFlag,
@@ -508,8 +529,14 @@ struct BalanceView: View {
                 guard amount < 0 else { continue }
                 
                 let day = calendar.component(.day, from: date)
-                let weekIndex = min(3, (day - 1) / daysPerWeek)
-                weekly[weekIndex] += abs(amount)
+                
+                // Find which week range this day falls into
+                for (index, (start, end)) in weekRanges.enumerated() {
+                    if day >= start && day <= end {
+                        weekly[index] += abs(amount)
+                        break
+                    }
+                }
             }
             
             return weekly
@@ -562,6 +589,7 @@ struct BalanceView: View {
 // MARK: - Chip Card Component
 
 private struct ChipCard<Content: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ViewBuilder let content: Content
     
     var body: some View {
@@ -570,7 +598,14 @@ private struct ChipCard<Content: View>: View {
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(Color(.systemBackground))
-                    .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
+                    .shadow(
+                        color: colorScheme == .dark 
+                            ? Color.black.opacity(0.3) 
+                            : Color.black.opacity(0.05),
+                        radius: colorScheme == .dark ? 12 : 8,
+                        x: 0,
+                        y: colorScheme == .dark ? 4 : 2
+                    )
             )
     }
 }

@@ -92,26 +92,19 @@ struct ReportsView: View {
                     Button {
                         showingStatementImportPicker = true
                     } label: {
-                        // iOS share/export style: credit card with gap (two segments + arrow)
+                        // Credit card icon with arrow in the middle (iOS share/export style)
                         ZStack(alignment: .center) {
-                            VStack(spacing: 4) {
-                                // Top segment of card
-                                RoundedRectangle(cornerRadius: 2.5)
-                                    .stroke(Color.primary, lineWidth: 1.5)
-                                    .frame(width: 20, height: 5)
-                                
-                                // Bottom segment of card (gap created by spacing)
-                                RoundedRectangle(cornerRadius: 2.5)
-                                    .stroke(Color.primary, lineWidth: 1.5)
-                                    .frame(width: 20, height: 5)
-                            }
+                            // Credit card outline
+                            RoundedRectangle(cornerRadius: 3)
+                                .stroke(Color.primary, lineWidth: 1.5)
+                                .frame(width: 20, height: 14)
                             
-                            // Down arrow centered in the gap
+                            // Down arrow centered in the middle of the card
                             Image(systemName: "arrow.down")
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(Color.primary)
                         }
-                        .frame(width: 20, height: 16)
+                        .frame(width: 20, height: 14)
                     }
                 }
             }
@@ -593,31 +586,17 @@ private struct WalletTotalSpendingAppleCard: View {
                 Text("Total Spending")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(formatter.string(from: expenses as NSDecimalNumber) ?? "$0.00")
-                        .font(.system(size: 28, weight: .bold))
-                        .monospacedDigit()
-                    if let arrow = arrowIcon {
-                        Image(systemName: arrow)
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(comparisonColor)
-                    }
-                }
-                if let comparison = comparisonText {
-                    Text(comparison)
-                        .font(.subheadline)
-                        .foregroundStyle(comparisonColor)
-                }
+                Text(formatter.string(from: expenses as NSDecimalNumber) ?? "$0.00")
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundStyle(.primary)
                 walletBarChart
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
             .background(
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(.secondarySystemBackground))
             )
-            .opacity(appeared ? 1 : 0)
-            .offset(y: appeared ? 0 : 8)
         }
         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 4, trailing: 16))
         .listRowBackground(Color.clear)
@@ -642,7 +621,7 @@ private struct WalletTotalSpendingAppleCard: View {
             return AnyView(WalletStackedCategoryBarChart(
                 period: .year,
                 appeared: appeared,
-                showEveryNthLabel: 3
+                showEveryNthLabel: 2  // Show every 2nd month (6 labels for 12 months)
             ))
         }
     }
@@ -689,17 +668,76 @@ private struct WalletStackedCategoryBarChart: View {
         return .gray
     }
     
-    // Create gradient that blends categories smoothly
+    // Create gradient that blends categories smoothly based on their values
     private func gradientForPeriod(_ categories: [(name: String, amount: Decimal)]) -> LinearGradient {
         guard !categories.isEmpty else {
-            return LinearGradient(colors: [.gray], startPoint: .bottom, endPoint: .top)
+            return LinearGradient(colors: [Color.gray.opacity(0.3)], startPoint: .bottom, endPoint: .top)
         }
         
-        // Get colors for all categories - SwiftUI LinearGradient will blend them smoothly
-        let colors = categories.map { colorForCategory($0.name) }
+        let totalAmount = categories.reduce(Decimal(0)) { $0 + $1.amount }
+        guard totalAmount > 0 else {
+            return LinearGradient(colors: [Color.gray.opacity(0.3)], startPoint: .bottom, endPoint: .top)
+        }
+        
+        // Sort categories by amount (largest first, at bottom)
+        let sortedCategories = categories.sorted { $0.amount > $1.amount }
+        
+        if sortedCategories.count == 1 {
+            let color = colorForCategory(sortedCategories[0].name)
+            return LinearGradient(
+                colors: [color, color],
+                startPoint: .bottom,
+                endPoint: .top
+            )
+        }
+        
+        // Create gradient stops - each category gets proportional space based on its value
+        // Larger category values = larger proportion = more dominant color in the gradient
+        var gradientStops: [Gradient.Stop] = []
+        var cumulativeLocation: Double = 0.0
+        
+        for (index, category) in sortedCategories.enumerated() {
+            // Calculate proportion: larger amounts = larger proportion = more color dominance
+            let categoryAmount = (category.amount as NSDecimalNumber).doubleValue
+            let proportion = categoryAmount / (totalAmount as NSDecimalNumber).doubleValue
+            let color = colorForCategory(category.name)
+            
+            // Add stop at start of this category's segment
+            // For the first category, start at 0.0
+            if index == 0 {
+                gradientStops.append(Gradient.Stop(color: color, location: 0.0))
+            } else {
+                // For subsequent categories, add blend point with previous color
+                let prevColor = colorForCategory(sortedCategories[index - 1].name)
+                gradientStops.append(Gradient.Stop(color: prevColor, location: cumulativeLocation))
+                gradientStops.append(Gradient.Stop(color: color, location: cumulativeLocation))
+            }
+            
+            // Move to end of this category's segment (proportional to its value)
+            cumulativeLocation += proportion
+            
+            // Add stop at end of this category's segment
+            gradientStops.append(Gradient.Stop(color: color, location: min(cumulativeLocation, 1.0)))
+        }
+        
+        // Ensure final stop is exactly at 1.0
+        if let lastStop = gradientStops.last, lastStop.location < 1.0 {
+            gradientStops.append(Gradient.Stop(color: lastStop.color, location: 1.0))
+        }
+        
+        // Sort stops by location and remove duplicates
+        var uniqueStops: [Gradient.Stop] = []
+        var lastLocation: Double = -1.0
+        for stop in gradientStops.sorted(by: { $0.location < $1.location }) {
+            // Only add if location is different (with small tolerance for floating point)
+            if abs(stop.location - lastLocation) > 0.0001 {
+                uniqueStops.append(stop)
+                lastLocation = stop.location
+            }
+        }
         
         return LinearGradient(
-            colors: colors,
+            gradient: Gradient(stops: uniqueStops),
             startPoint: .bottom,
             endPoint: .top
         )
@@ -715,9 +753,15 @@ private struct WalletStackedCategoryBarChart: View {
     }()
     
     private var maxValue: Double {
-        categoryBreakdown.map { period in
+        let values = categoryBreakdown.map { period in
             period.categories.reduce(Decimal(0)) { $0 + $1.amount }
-        }.map { ($0 as NSDecimalNumber).doubleValue }.max() ?? 0
+        }.map { ($0 as NSDecimalNumber).doubleValue }
+        return max(values.max() ?? 0, 1)
+    }
+    
+    private func actualValue(for periodData: (period: String, categories: [(name: String, amount: Decimal)])) -> Double {
+        let totalAmount = periodData.categories.reduce(Decimal(0)) { $0 + $1.amount }
+        return (totalAmount as NSDecimalNumber).doubleValue
     }
     
     private func formatAmount(_ value: Double) -> String {
@@ -731,81 +775,81 @@ private struct WalletStackedCategoryBarChart: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Chart {
-                ForEach(Array(categoryBreakdown.enumerated()), id: \.offset) { periodIndex, periodData in
-                    let totalAmount = periodData.categories.reduce(Decimal(0)) { $0 + $1.amount }
-                    let gradient = gradientForPeriod(periodData.categories)
+                // Create a bar for each period using the period string as X-axis value
+                ForEach(categoryBreakdown, id: \.period) { periodData in
+                    let totalAmount = actualValue(for: periodData)
                     
-                    // Use gradient for the entire bar to blend categories smoothly
-                    BarMark(
-                        x: .value("Period", periodData.period),
-                        y: .value("Amount", (totalAmount as NSDecimalNumber).doubleValue)
-                    )
-                    .foregroundStyle(gradient)
-                    .cornerRadius(6)
-                    
-                    // Add individual segments with slight transparency for structure
-                    // Calculate cumulative positions inline
-                    ForEach(Array(periodData.categories.enumerated()), id: \.offset) { catIndex, category in
-                        let segmentStart = periodData.categories.prefix(catIndex).reduce(Decimal(0)) { $0 + $1.amount }
-                        let segmentEnd = segmentStart + category.amount
-                        
+                    if totalAmount > 0 {
+                        let gradient = gradientForPeriod(periodData.categories)
                         BarMark(
                             x: .value("Period", periodData.period),
-                            yStart: .value("Amount", (segmentStart as NSDecimalNumber).doubleValue),
-                            yEnd: .value("Amount", (segmentEnd as NSDecimalNumber).doubleValue)
+                            y: .value("Amount", totalAmount)
                         )
-                        .foregroundStyle(colorForCategory(category.name))
-                        .opacity(0.3)
+                        .foregroundStyle(gradient)
+                        .cornerRadius(4)
+                    } else {
+                        // Empty period - show invisible bar to maintain X-axis spacing
+                        BarMark(
+                            x: .value("Period", periodData.period),
+                            y: .value("Amount", 0.0)
+                        )
+                        .foregroundStyle(Color.clear)
+                        .opacity(0)
                     }
                 }
             }
             .chartXAxis {
+                let periodValues = categoryBreakdown.map { $0.period }
+                
                 if let nth = showEveryNthLabel {
                     let labelIndices = (0..<categoryBreakdown.count).filter { $0 % nth == 0 }
+                    let visiblePeriods = labelIndices.compactMap { index -> String? in
+                        guard index < periodValues.count else { return nil }
+                        return periodValues[index]
+                    }
                     AxisMarks(values: .automatic) { value in
                         if let stringValue = value.as(String.self),
-                           let index = categoryBreakdown.firstIndex(where: { $0.period == stringValue }),
-                           labelIndices.contains(index) {
-                            AxisValueLabel()
-                                .font(.caption2)
+                           visiblePeriods.contains(stringValue) {
+                            AxisValueLabel {
+                                Text(stringValue)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                 } else {
-                    AxisMarks(values: .automatic) { _ in
-                        AxisValueLabel()
-                            .font(.caption2)
+                    AxisMarks(values: .automatic) { value in
+                        if let stringValue = value.as(String.self),
+                           periodValues.contains(stringValue) {
+                            AxisValueLabel {
+                                Text(stringValue)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
             }
             .chartYAxis {
-                let maxVal = max(maxValue, 100)
-                let quarter = maxVal / 4.0
-                let mainValues: [Double] = [0, quarter, quarter * 2, quarter * 3, maxVal]
-                let midpointValues: [Double] = [quarter * 0.5, quarter * 1.5, quarter * 2.5, quarter * 3.5]
-                let allValues = (mainValues + midpointValues).sorted()
+                let maxVal = max(maxValue, 1)
+                let step = maxVal / 4.0
+                let mainValues: [Double] = [0, step, step * 2, step * 3, maxVal]
                 
-                AxisMarks(position: .trailing, values: allValues) { value in
+                AxisMarks(position: .trailing, values: mainValues) { value in
                     if let doubleValue = value.as(Double.self) {
-                        let isMainValue = mainValues.contains { abs($0 - doubleValue) < 0.01 }
-                        
-                        if isMainValue {
-                            AxisValueLabel {
-                                Text(formatAmount(doubleValue))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
-                                .foregroundStyle(.secondary.opacity(0.3))
-                        } else {
-                            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2, 2]))
-                                .foregroundStyle(.secondary.opacity(0.2))
+                        AxisValueLabel {
+                            Text(formatAmount(doubleValue))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
+                        AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                            .foregroundStyle(.secondary.opacity(0.2))
                     }
                 }
             }
-            .frame(height: 160)
+            .frame(height: 180)
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 4)
         }
         .opacity(appeared ? 1 : 0)
     }
@@ -1849,33 +1893,100 @@ private struct LedgerEntryEditorView: View {
             Form {
                 Section {
                     DatePicker("Date", selection: $date, displayedComponents: .date)
-                    TextField("Title", text: $title)
+                    HStack {
+                        TextField("Title", text: $title)
+                        if !title.isEmpty {
+                            Button {
+                                title = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.secondary)
+                                    .font(.system(size: 16))
+                            }
+                        }
+                    }
                 }
                 
                 if let account = entry.account, account.currencyCode == "BTC" {
                     Section("Bitcoin Amount") {
-                        TextField("Sats", text: $btcSatsAmountString)
-                            .keyboardType(.numberPad)
+                        HStack {
+                            TextField("Sats", text: $btcSatsAmountString)
+                                .keyboardType(.numberPad)
+                            if !btcSatsAmountString.isEmpty {
+                                Button {
+                                    btcSatsAmountString = ""
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.secondary)
+                                        .font(.system(size: 16))
+                                }
+                            }
+                        }
                     }
                     Section("USD Amount") {
-                        TextField("Amount", text: $usdAmountString)
-                            .keyboardType(.decimalPad)
+                        HStack {
+                            TextField("Amount", text: $usdAmountString)
+                                .keyboardType(.decimalPad)
+                            if !usdAmountString.isEmpty {
+                                Button {
+                                    usdAmountString = ""
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.secondary)
+                                        .font(.system(size: 16))
+                                }
+                            }
+                        }
                     }
                     Section("BTC Price") {
-                        TextField("Price", text: $btcPriceString)
-                            .keyboardType(.decimalPad)
+                        HStack {
+                            TextField("Price", text: $btcPriceString)
+                                .keyboardType(.decimalPad)
+                            if !btcPriceString.isEmpty {
+                                Button {
+                                    btcPriceString = ""
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.secondary)
+                                        .font(.system(size: 16))
+                                }
+                            }
+                        }
                     }
                 } else {
                     Section("Amount") {
-                        TextField("Amount", text: $usdAmountString)
-                            .keyboardType(.decimalPad)
+                        HStack {
+                            TextField("Amount", text: $usdAmountString)
+                                .keyboardType(.decimalPad)
+                            if !usdAmountString.isEmpty {
+                                Button {
+                                    usdAmountString = ""
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.secondary)
+                                        .font(.system(size: 16))
+                                }
+                            }
+                        }
                     }
                 }
                 
                 Section {
                     Toggle("Reconciled", isOn: $isCleared)
-                    TextField("Notes", text: $notes, axis: .vertical)
-                        .lineLimit(3...6)
+                    HStack(alignment: .top) {
+                        TextField("Notes", text: $notes, axis: .vertical)
+                            .lineLimit(3...6)
+                        if !notes.isEmpty {
+                            Button {
+                                notes = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.secondary)
+                                    .font(.system(size: 16))
+                            }
+                            .padding(.top, 4)
+                        }
+                    }
                 }
                 
                 Section {
@@ -2033,11 +2144,135 @@ struct CategoryPicker: View {
     let usage: [String: CategoryUsage]
     @EnvironmentObject private var categoryManager: CategoryManager
     
+    @State private var showingAddCategorySheet = false
+    @State private var newCategoryName = ""
+    
+    private let addNewCategoryTag = "___ADD_NEW_CATEGORY___"
+    
     var body: some View {
-        Picker("Category", selection: $selection) {
-            Text("None").tag("")
-            ForEach(categoryManager.displayCategories(usage: usage, selected: selection), id: \.self) { category in
-                Text(category).tag(category)
+        HStack {
+            Menu {
+                Button {
+                    selection = ""
+                } label: {
+                    HStack {
+                        Text("None")
+                        if selection.isEmpty {
+                            Spacer()
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(.blue)
+                        }
+                    }
+                }
+                
+                ForEach(categoryManager.displayCategories(usage: usage, selected: selection), id: \.self) { category in
+                    Button {
+                        selection = category
+                    } label: {
+                        HStack {
+                            Text(category)
+                            if selection == category {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+                    }
+                }
+                
+                Divider()
+                
+                Button {
+                    showingAddCategorySheet = true
+                } label: {
+                    Label("Add Category", systemImage: "plus.circle")
+                }
+            } label: {
+                Text("Category")
+                    .foregroundStyle(.primary)
+            }
+            .buttonStyle(.plain)
+            
+            Spacer()
+            
+            HStack(spacing: 4) {
+                Text(selection.isEmpty ? "None" : selection)
+                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .sheet(isPresented: $showingAddCategorySheet) {
+            AddCategorySheet(
+                categoryName: $newCategoryName,
+                onSave: {
+                    let trimmed = newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        categoryManager.addCategory(trimmed)
+                        selection = trimmed
+                        newCategoryName = ""
+                    }
+                    showingAddCategorySheet = false
+                },
+                onCancel: {
+                    newCategoryName = ""
+                    showingAddCategorySheet = false
+                }
+            )
+        }
+    }
+}
+
+private struct AddCategorySheet: View {
+    @Binding var categoryName: String
+    let onSave: () -> Void
+    let onCancel: () -> Void
+    @FocusState private var isTextFieldFocused: Bool
+    
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack {
+                        TextField("Category Name", text: $categoryName)
+                            .focused($isTextFieldFocused)
+                            .autocapitalization(.words)
+                            .autocorrectionDisabled()
+                        if !categoryName.isEmpty {
+                            Button {
+                                categoryName = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.secondary)
+                                    .font(.system(size: 16))
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Enter a new category name")
+                } footer: {
+                    Text("This category will be added to your custom categories.")
+                }
+            }
+            .navigationTitle("New Category")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        onCancel()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        onSave()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(categoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .onAppear {
+                isTextFieldFocused = true
             }
         }
     }
