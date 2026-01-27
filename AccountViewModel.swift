@@ -85,7 +85,7 @@ class AccountViewModel: ObservableObject {
     
     // MARK: - Accounts
     @discardableResult
-    func addAccount(name: String, type: String, startingBalance: Decimal, isHidden: Bool = false, currency: String = "USD", btcDisplayFormat: String = "sats", feePercentage: Decimal = 0) -> Account {
+    func addAccount(name: String, type: String, startingBalance: Decimal, isHidden: Bool = false, currency: String = "USD", btcDisplayFormat: String = "sats", feePercentage: Decimal = 0, startingBalanceUSD: Decimal? = nil, startingBalanceBTCPrice: Decimal? = nil) -> Account {
         let account = Account(context: context)
         account.id = UUID()
         account.name = name
@@ -104,6 +104,14 @@ class AccountViewModel: ObservableObject {
         account.btcDisplayFormat = btcDisplayFormat
         account.feePercentageDecimal = feePercentage
         
+        // Store USD value and BTC price for BTC starting balances
+        if let usdValue = startingBalanceUSD {
+            account.startingBalanceUSD = NSDecimalNumber(decimal: usdValue)
+        }
+        if let btcPrice = startingBalanceBTCPrice {
+            account.startingBalanceBTCPrice = NSDecimalNumber(decimal: btcPrice)
+        }
+        
         saveContext()
         fetchAccounts()
         selectedAccount = account
@@ -111,7 +119,7 @@ class AccountViewModel: ObservableObject {
         return account
     }
     
-    func updateAccount(_ account: Account, name: String, type: String, startingBalance: Decimal, isHidden: Bool = false, currency: String = "USD", btcDisplayFormat: String = "sats", feePercentage: Decimal = 0) {
+    func updateAccount(_ account: Account, name: String, type: String, startingBalance: Decimal, isHidden: Bool = false, currency: String = "USD", btcDisplayFormat: String = "sats", feePercentage: Decimal = 0, startingBalanceUSD: Decimal? = nil, startingBalanceBTCPrice: Decimal? = nil) {
         account.name = name
         account.type = type
         account.startingBalance = NSDecimalNumber(decimal: startingBalance)
@@ -120,6 +128,19 @@ class AccountViewModel: ObservableObject {
         account.currencyCode = currency
         account.btcDisplayFormat = btcDisplayFormat
         account.feePercentageDecimal = feePercentage
+        
+        // Store USD value and BTC price for BTC starting balances
+        if let usdValue = startingBalanceUSD {
+            account.startingBalanceUSD = NSDecimalNumber(decimal: usdValue)
+        } else {
+            account.startingBalanceUSD = nil
+        }
+        if let btcPrice = startingBalanceBTCPrice {
+            account.startingBalanceBTCPrice = NSDecimalNumber(decimal: btcPrice)
+        } else {
+            account.startingBalanceBTCPrice = nil
+        }
+        
         saveContext()
         fetchAccounts()
         if let updated = accounts.first(where: { $0.objectID == account.objectID }) {
@@ -1306,6 +1327,16 @@ extension Account {
     var feePercentageDecimal: Decimal {
         get { (value(forKey: "feePercentage") as? NSDecimalNumber)?.decimalValue ?? 0 }
         set { setValue(NSDecimalNumber(decimal: newValue), forKey: "feePercentage") }
+    }
+    
+    // Core Data auto-generates startingBalanceUSD and startingBalanceBTCPrice as NSDecimalNumber?
+    // These computed properties provide Decimal conversions
+    var startingBalanceUSDDecimal: Decimal {
+        (value(forKey: "startingBalanceUSD") as? NSDecimalNumber)?.decimalValue ?? .zero
+    }
+    
+    var startingBalanceBTCPriceDecimal: Decimal {
+        (value(forKey: "startingBalanceBTCPrice") as? NSDecimalNumber)?.decimalValue ?? .zero
     }
 }
 

@@ -33,10 +33,10 @@ struct AccountDetailView: View {
     
     var body: some View {
         List {
-            // Balance chip card section
+            // Balance badge dropdown section
             Section {
-                balanceChipCard
-                    .listRowInsets(EdgeInsets())
+                balanceBadgeDropdown
+                    .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
             }
@@ -79,7 +79,6 @@ struct AccountDetailView: View {
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle(account.name ?? "Account")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
@@ -109,7 +108,7 @@ struct AccountDetailView: View {
             }
         }
         .sheet(isPresented: $showingEditAccount) {
-            AccountEditorSheet(account: account) { name, type, startingBalance, isHidden, currency, btcDisplayFormat, feePercentage in
+            AccountEditorSheet(account: account) { name, type, startingBalance, isHidden, currency, btcDisplayFormat, feePercentage, startingBalanceUSD, startingBalanceBTCPrice in
                 accountViewModel.updateAccount(account,
                                                name: name,
                                                type: type,
@@ -117,7 +116,9 @@ struct AccountDetailView: View {
                                                isHidden: isHidden,
                                                currency: currency,
                                                btcDisplayFormat: btcDisplayFormat,
-                                               feePercentage: feePercentage)
+                                               feePercentage: feePercentage,
+                                               startingBalanceUSD: startingBalanceUSD,
+                                               startingBalanceBTCPrice: startingBalanceBTCPrice)
                 accountViewModel.fetchAccounts()
             }
             .environmentObject(bitcoinPriceService)
@@ -234,7 +235,142 @@ struct AccountDetailView: View {
         }
     }
     
-    // MARK: - Balance Chip Card
+    // MARK: - Balance Badge Dropdown
+    
+    private var balanceBadgeDropdown: some View {
+        VStack(spacing: 16) {
+            // Large cleared balance at the top
+            VStack(spacing: 4) {
+                if account.currencyCode == "BTC" {
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            showingCurrencyToggle.toggle()
+                        }
+                    } label: {
+                        ZStack {
+                            if !showingCurrencyToggle {
+                                Text(formattedClearedBalance)
+                                    .font(.system(size: dynamicClearedBalanceFontSize, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.5)
+                                    .transition(.asymmetric(
+                                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                                        removal: .move(edge: .leading).combined(with: .opacity)
+                                    ))
+                            }
+                            
+                            if showingCurrencyToggle {
+                                Text(formattedClearedBalance)
+                                    .font(.system(size: dynamicClearedBalanceFontSize, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.5)
+                                    .transition(.asymmetric(
+                                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                                        removal: .move(edge: .leading).combined(with: .opacity)
+                                    ))
+                            }
+                        }
+                        .id(showingCurrencyToggle ? "btc" : "usd")
+                        .frame(height: dynamicClearedBalanceFontSize + 10)
+                    }
+                    .buttonStyle(.plain)
+                    
+                    Text(showingCurrencyToggle ? "≈ \(formattedClearedBalanceUSD)" : "≈ \(formattedClearedBalanceBTC)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(formattedClearedBalance)
+                        .font(.system(size: dynamicClearedBalanceFontSize, weight: .bold, design: .rounded))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                        .frame(height: dynamicClearedBalanceFontSize + 10)
+                }
+            }
+            
+            // Button below: Account Name + "Balance" + Arrow
+            Menu {
+                Button {
+                    // Shows Available balance
+                } label: {
+                    Text("Available: \(formattedAvailableBalance)")
+                }
+                
+                Button {
+                    // Shows Pending balance
+                } label: {
+                    Text("Pending: \(formattedPendingBalance)")
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(account.name ?? "Account")
+                        .font(.headline)
+                    
+                    Text("Balance")
+                        .font(.headline)
+                    
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background {
+                    Capsule()
+                        .fill(.ultraThinMaterial)
+                        .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+    
+    // MARK: - Cleared Balance Formatters
+    
+    private var clearedBalance: Decimal {
+        accountViewModel.clearedBalance(for: account)
+    }
+    
+    private var formattedClearedBalance: String {
+        if account.currencyCode == "BTC" {
+            if showingCurrencyToggle {
+                return formatBTCBalance(clearedBalance)
+            } else {
+                let usd = bitcoinPriceService.convertBTCToUSD(clearedBalance)
+                return formatUSDBalance(usd)
+            }
+        } else {
+            return formatUSDBalance(clearedBalance)
+        }
+    }
+    
+    private var formattedClearedBalanceUSD: String {
+        let usd = bitcoinPriceService.convertBTCToUSD(clearedBalance)
+        return formatUSDBalance(usd)
+    }
+    
+    private var formattedClearedBalanceBTC: String {
+        return formatBTCBalance(clearedBalance)
+    }
+    
+    private var dynamicClearedBalanceFontSize: CGFloat {
+        let balanceString = formattedClearedBalance
+        let characterCount = balanceString.count
+        let baseSize: CGFloat = 72
+        if characterCount <= 8 {
+            return baseSize
+        } else if characterCount <= 12 {
+            return baseSize - CGFloat((characterCount - 8) * 4)
+        } else if characterCount <= 16 {
+            return baseSize - CGFloat(16 + (characterCount - 12) * 3)
+        } else {
+            return max(32, baseSize - CGFloat(28 + (characterCount - 16) * 2))
+        }
+    }
+    
+    // MARK: - Balance Chip Card (Deprecated)
     
     private var balanceChipCard: some View {
         ZStack {
@@ -320,39 +456,44 @@ struct AccountDetailView: View {
                 
                 Spacer()
                 
-                // Account name and balance details - simple expand/collapse
-                VStack(spacing: 0) {
-                    Button {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            showingBalanceDetails.toggle()
-                        }
-                    } label: {
-                        HStack {
-                            Text("\(account.name ?? "Account") Balance")
-                                .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.9))
-                            Spacer()
-                            Image(systemName: showingBalanceDetails ? "chevron.up" : "chevron.down")
-                                .font(.caption)
-                                .foregroundColor(.white.opacity(0.9))
-                        }
+                // Account name and balance details - expands card
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        showingBalanceDetails.toggle()
                     }
-                    .buttonStyle(.plain)
-                    
-                    if showingBalanceDetails {
-                        VStack(spacing: 0) {
-                            balanceDetailRow(label: "Available", value: formattedAvailableBalance)
-                                .padding(.vertical, 8)
-                                .padding(.top, 8)
-                            
-                            Divider()
-                                .background(Color.white.opacity(0.2))
-                            
-                            balanceDetailRow(label: "Pending", value: formattedPendingBalance)
-                                .padding(.vertical, 8)
-                        }
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                } label: {
+                    HStack {
+                        Text("\(account.name ?? "Account") Balance")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.9))
+                        Spacer()
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.9))
+                            .rotationEffect(.degrees(showingBalanceDetails ? 180 : 0))
                     }
+                }
+                .buttonStyle(.plain)
+                
+                if showingBalanceDetails {
+                    VStack(spacing: 0) {
+                        Divider()
+                            .background(Color.white.opacity(0.2))
+                            .padding(.top, 12)
+                        
+                        balanceDetailRow(label: "Available", value: formattedAvailableBalance)
+                            .padding(.vertical, 12)
+                        
+                        Divider()
+                            .background(Color.white.opacity(0.2))
+                        
+                        balanceDetailRow(label: "Pending", value: formattedPendingBalance)
+                            .padding(.vertical, 12)
+                    }
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .move(edge: .bottom)),
+                        removal: .opacity.combined(with: .move(edge: .bottom))
+                    ))
                 }
             }
             .frame(maxWidth: .infinity)
@@ -376,12 +517,12 @@ struct AccountDetailView: View {
         HStack {
             Text(label)
                 .font(.subheadline)
-                .foregroundColor(.white.opacity(0.9))
+                .foregroundStyle(.secondary)
             Spacer()
             Text(value)
                 .font(.subheadline)
                 .fontWeight(.semibold)
-                .foregroundColor(.white)
+                .foregroundStyle(.primary)
         }
     }
     
@@ -453,18 +594,11 @@ struct AccountDetailView: View {
         // In checkbook terms: these are pending transactions that haven't cleared
         let entries = accountViewModel.ledgerEntries(for: account)
         if account.currencyCode == "BTC" {
-            // For BTC accounts: use sats if available, otherwise use USD for pending
+            // For BTC accounts: use signedAmountInCurrency which handles conversion properly
             let unreconciledSum = entries.reduce(Decimal.zero) { partial, entry in
                 guard !entry.isReconciledFlag else { return partial }
-                
-                // If transaction has sats, use sats amount
-                if entry.btcAmountDecimal > 0 {
-                    return partial + entry.signedAmountInCurrency(for: account)
-                } else {
-                    // No sats yet - use USD amount for pending (will convert for display)
-                    let usdAmount = entry.usdAmountDecimal
-                    return partial + (entry.isCredit ? usdAmount : -usdAmount)
-                }
+                // Use signedAmountInCurrency which properly handles BTC/sats conversion
+                return partial + entry.signedAmountInCurrency(for: account)
             }
             return unreconciledSum
         } else {
@@ -492,24 +626,25 @@ struct AccountDetailView: View {
     }
     
     private var formattedAvailableBalance: String {
+        let balance = availableBalance
+        
         if account.currencyCode == "BTC" {
             if showingCurrencyToggle {
                 // Show in BTC/sats format
-                return formatBTCBalance(availableBalance)
+                return formatBTCBalance(balance)
             } else {
                 // Convert BTC to USD for display
-                let usd = bitcoinPriceService.convertBTCToUSD(availableBalance)
-                print("🔍 Available Balance Formatting (BTC Account):")
-                print("   Available Balance (BTC): \(availableBalance)")
-                print("   Converted to USD: \(usd)")
+                let usd = bitcoinPriceService.convertBTCToUSD(balance)
                 return formatUSDBalance(usd)
             }
         } else {
-            return formatUSDBalance(availableBalance)
+            return formatUSDBalance(balance)
         }
     }
     
     private var formattedPendingBalance: String {
+        let pending = pendingBalance
+        
         if account.currencyCode == "BTC" {
             // Check if pending balance is in USD (from transactions without sats)
             let entries = accountViewModel.ledgerEntries(for: account)
@@ -534,7 +669,7 @@ struct AccountDetailView: View {
                     }
                     return formatBTCBalance(btcPending + btcPendingWithSats)
                 } else {
-                    return formatBTCBalance(pendingBalance)
+                    return formatBTCBalance(pending)
                 }
             } else {
                 // Showing USD - if pending has USD amounts, show them directly
@@ -554,12 +689,12 @@ struct AccountDetailView: View {
                     return formatUSDBalance(usdPending)
                 } else {
                     // All pending have sats - convert BTC to USD
-                    let usd = bitcoinPriceService.convertBTCToUSD(pendingBalance)
+                    let usd = bitcoinPriceService.convertBTCToUSD(pending)
                     return formatUSDBalance(usd)
                 }
             }
         } else {
-            return formatUSDBalance(pendingBalance)
+            return formatUSDBalance(pending)
         }
     }
     
@@ -573,16 +708,31 @@ struct AccountDetailView: View {
     }
     
     private func formatUSDBalance(_ balance: Decimal) -> String {
+        // Always show $0.00 for zero values
+        if balance == 0 {
+            return "$0.00"
+        }
+        
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = "USD"
         formatter.currencySymbol = "$"
         formatter.maximumFractionDigits = 2
         formatter.minimumFractionDigits = 2
-        return formatter.string(from: balance as NSDecimalNumber) ?? "$\(balance)"
+        return formatter.string(from: balance as NSDecimalNumber) ?? "$0.00"
     }
     
     private func formatBTCBalance(_ balance: Decimal) -> String {
+        // Always show 0 for zero values
+        if balance == 0 {
+            let displayFormat = account.btcDisplayFormat ?? "sats"
+            if displayFormat == "sats" {
+                return "₿ 0 sats"
+            } else {
+                return "₿ 0.00000000"
+            }
+        }
+        
         let displayFormat = account.btcDisplayFormat ?? "sats"
         
         if displayFormat == "sats" {

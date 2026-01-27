@@ -33,6 +33,8 @@
         <attribute name="currency" optional="YES" attributeType="String" defaultValueString="USD"/>
         <attribute name="btcDisplayFormat" optional="YES" attributeType="String" defaultValueString="sats"/>
         <attribute name="feePercentage" optional="YES" attributeType="Decimal" defaultValueString="0.0" usesScalarValueType="NO"/>
+        <attribute name="startingBalanceUSD" optional="YES" attributeType="Decimal" defaultValueString="0.0" usesScalarValueType="NO"/>
+        <attribute name="startingBalanceBTCPrice" optional="YES" attributeType="Decimal" defaultValueString="0.0" usesScalarValueType="NO"/>
         <relationship name="bills" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Bill" inverseName="account" inverseEntity="Bill"/>
         <relationship name="paychecks" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Paycheck" inverseName="account" inverseEntity="Paycheck"/>
         <relationship name="ledgerEntries" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="LedgerEntry" inverseName="account" inverseEntity="LedgerEntry"/>

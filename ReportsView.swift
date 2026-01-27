@@ -92,19 +92,19 @@ struct ReportsView: View {
                     Button {
                         showingStatementImportPicker = true
                     } label: {
-                        // Credit card icon with arrow in the middle (iOS share/export style)
+                        // Credit card with import arrow - combines credit card icon with import action
                         ZStack(alignment: .center) {
-                            // Credit card outline
+                            // Credit card outline (similar to creditcard SF Symbol)
                             RoundedRectangle(cornerRadius: 3)
                                 .stroke(Color.primary, lineWidth: 1.5)
-                                .frame(width: 20, height: 14)
+                                .frame(width: 19, height: 13.5)
                             
-                            // Down arrow centered in the middle of the card
+                            // Import arrow centered on the card
                             Image(systemName: "arrow.down")
-                                .font(.system(size: 10, weight: .semibold))
+                                .font(.system(size: 9, weight: .semibold))
                                 .foregroundStyle(Color.primary)
                         }
-                        .frame(width: 20, height: 14)
+                        .frame(width: 20, height: 16)
                     }
                 }
             }

@@ -58,7 +58,7 @@ struct ManageAccountsView: View {
             accountViewModel: accountViewModel
         ))
         .sheet(isPresented: $showingAccountEditor) {
-            AccountEditorSheet(account: accountToEdit) { name, type, startingBalance, isHidden, currency, btcDisplayFormat, feePercentage in
+            AccountEditorSheet(account: accountToEdit) { name, type, startingBalance, isHidden, currency, btcDisplayFormat, feePercentage, startingBalanceUSD, startingBalanceBTCPrice in
                 if let account = accountToEdit {
                     accountViewModel.updateAccount(account,
                                                    name: name,
@@ -67,7 +67,9 @@ struct ManageAccountsView: View {
                                                    isHidden: isHidden,
                                                    currency: currency,
                                                    btcDisplayFormat: btcDisplayFormat,
-                                                   feePercentage: feePercentage)
+                                                   feePercentage: feePercentage,
+                                                   startingBalanceUSD: startingBalanceUSD,
+                                                   startingBalanceBTCPrice: startingBalanceBTCPrice)
                 } else {
                     accountViewModel.addAccount(name: name,
                                                 type: type,
@@ -75,7 +77,9 @@ struct ManageAccountsView: View {
                                                 isHidden: isHidden,
                                                 currency: currency,
                                                 btcDisplayFormat: btcDisplayFormat,
-                                                feePercentage: feePercentage)
+                                                feePercentage: feePercentage,
+                                                startingBalanceUSD: startingBalanceUSD,
+                                                startingBalanceBTCPrice: startingBalanceBTCPrice)
                 }
                 accountViewModel.fetchAccounts()
             }

@@ -84,6 +84,7 @@ struct BalanceView: View {
     @State private var showInactiveAccounts = false
     @State private var showingImportPicker = false
     @State private var showingExportSheet = false
+    @State private var currentAccountPage = 0
     
     var body: some View {
         NavigationStack {
@@ -120,14 +121,16 @@ struct BalanceView: View {
                 .environmentObject(accountViewModel)
         }
         .sheet(isPresented: $showingAddAccount) {
-            AccountEditorSheet(account: nil) { name, type, startingBalance, isHidden, currency, btcDisplayFormat, feePercentage in
+            AccountEditorSheet(account: nil) { name, type, startingBalance, isHidden, currency, btcDisplayFormat, feePercentage, startingBalanceUSD, startingBalanceBTCPrice in
                 _ = accountViewModel.addAccount(name: name,
                                             type: type,
                                             startingBalance: startingBalance,
                                             isHidden: isHidden,
                                             currency: currency,
                                             btcDisplayFormat: btcDisplayFormat,
-                                            feePercentage: feePercentage)
+                                            feePercentage: feePercentage,
+                                            startingBalanceUSD: startingBalanceUSD,
+                                            startingBalanceBTCPrice: startingBalanceBTCPrice)
                 // Ensure view refreshes - fetchAccounts is already called in addAccount
                 // but we'll refresh again to be sure
                 accountViewModel.fetchAccounts()
@@ -365,15 +368,52 @@ struct BalanceView: View {
                     .foregroundColor(.secondary)
                     .padding(.vertical, 20)
             } else {
-                LazyVGrid(columns: [
-                    GridItem(.flexible(), spacing: 12),
-                    GridItem(.flexible(), spacing: 12)
-                ], spacing: 12) {
-                    ForEach(visibleAccounts.prefix(4), id: \.objectID) { account in
-                        AccountChipCard(account: account) {
-                            selectedAccount = account
-                            showingAccountDetail = true
+                // Calculate number of pages (4 accounts per page)
+                let accountsPerPage = 4
+                let totalPages = (visibleAccounts.count + accountsPerPage - 1) / accountsPerPage
+                
+                VStack(spacing: 8) {
+                    TabView(selection: $currentAccountPage) {
+                        ForEach(0..<totalPages, id: \.self) { pageIndex in
+                            let startIndex = pageIndex * accountsPerPage
+                            let endIndex = min(startIndex + accountsPerPage, visibleAccounts.count)
+                            let pageAccounts = Array(visibleAccounts[startIndex..<endIndex])
+                            
+                            LazyVGrid(columns: [
+                                GridItem(.flexible(), spacing: 12),
+                                GridItem(.flexible(), spacing: 12)
+                            ], alignment: .leading, spacing: 12) {
+                                // Fill with actual accounts first
+                                ForEach(pageAccounts, id: \.objectID) { account in
+                                    AccountChipCard(account: account) {
+                                        selectedAccount = account
+                                        showingAccountDetail = true
+                                    }
+                                }
+                                // Fill remaining slots with invisible spacers to maintain grid order
+                                ForEach(pageAccounts.count..<accountsPerPage, id: \.self) { _ in
+                                    Color.clear
+                                        .frame(height: 100)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4)
+                            .tag(pageIndex)
                         }
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+                    .frame(height: 220) // Height for 2 rows of cards (100px each + 12px spacing)
+                    
+                    // Custom page indicator below the chips
+                    if totalPages > 1 {
+                        HStack(spacing: 8) {
+                            ForEach(0..<totalPages, id: \.self) { index in
+                                Circle()
+                                    .fill(index == currentAccountPage ? Color.primary : Color.secondary.opacity(0.3))
+                                    .frame(width: 8, height: 8)
+                            }
+                        }
+                        .padding(.top, 4)
                     }
                 }
             }
