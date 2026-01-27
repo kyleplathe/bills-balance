@@ -17,6 +17,7 @@ struct ReportsView: View {
     @EnvironmentObject private var reportsViewModel: ReportsViewModel
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     @EnvironmentObject private var accountViewModel: AccountViewModel
+    @EnvironmentObject private var categoryManager: CategoryManager
     @State private var appeared = false
     @State private var showingStatementImportPicker = false
     @State private var showingStatementImportSheet = false
@@ -30,6 +31,9 @@ struct ReportsView: View {
     @State private var isStatementImportParsing = false
     @State private var selectedCategory: String?
     @State private var showingCategoryTransactions = false
+    @State private var expandedCategories: Set<String> = []
+    @State private var selectedTransaction: LedgerEntry?
+    @State private var showingTransactionEditor = false
 
     private var walletPeriod: ReportsViewModel.WalletPeriod {
         reportsViewModel.lastUsedWalletPeriod
@@ -44,23 +48,7 @@ struct ReportsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Group {
-                    walletSections
-                }
-                .animation(.spring(response: 0.45, dampingFraction: 0.82), value: reportsViewModel.monthlyReport != nil)
-                .animation(.spring(response: 0.45, dampingFraction: 0.82), value: reportsViewModel.usdBtcReport != nil)
-            }
-            .listStyle(.insetGrouped)
-            .listSectionSpacing(.custom(4))
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 44).onEnded { value in
-                    let dx = value.translation.width
-                    let dy = value.translation.height
-                    guard abs(dx) > abs(dy), abs(dx) > 50 else { return }
-                    walletSwipeNavigate(forward: dx < 0)
-                }
-            )
+            periodSwipeContainer
             .refreshable {
                 reportsViewModel.loadMonthlyReport()
                 reportsViewModel.loadYearWrapReport()
@@ -80,13 +68,7 @@ struct ReportsView: View {
                     }
                 }
                 ToolbarItem(placement: .principal) {
-                    Picker("", selection: walletPeriodBinding) {
-                        ForEach(ReportsViewModel.WalletPeriod.allCases, id: \.self) { p in
-                            Text(p.rawValue).tag(p)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
+                    periodPickerWithDoubleTap
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -157,6 +139,14 @@ struct ReportsView: View {
                     .environmentObject(bitcoinPriceService)
                 }
             }
+            .sheet(isPresented: $showingTransactionEditor) {
+                if let entry = selectedTransaction {
+                    TransactionEditorSheet(entry: entry)
+                        .environmentObject(accountViewModel)
+                        .environmentObject(bitcoinPriceService)
+                        .environmentObject(categoryManager)
+                }
+            }
             .onAppear {
                 reportsViewModel.loadMonthlyReport()
                 reportsViewModel.loadYearWrapReport()
@@ -190,6 +180,17 @@ struct ReportsView: View {
             }
             .onChange(of: reportsViewModel.usdBtcMonthsBack) { _, _ in
                 reportsViewModel.loadUsdBtcReport()
+            }
+            .onChange(of: reportsViewModel.creditCardViewMode) { _, _ in
+                // Reload reports when view mode changes
+                switch walletPeriod {
+                case .week:
+                    reportsViewModel.loadWeekReport()
+                case .month:
+                    reportsViewModel.loadMonthlyReport()
+                case .year:
+                    reportsViewModel.loadYearWrapReport()
+                }
             }
         }
     }
@@ -301,6 +302,7 @@ struct ReportsView: View {
             WalletIncomeFeesRows(
                 income: r.income,
                 fees: r.digitalWalletFees,
+                creditCardSpending: reportsViewModel.creditCardSpending(for: .week),
                 appeared: appeared,
                 onIncomeTap: {
                     selectedCategory = "Income"
@@ -315,9 +317,14 @@ struct ReportsView: View {
                 WalletCategorySection(
                     items: r.byCategory,
                     appeared: appeared,
+                    expandedCategories: $expandedCategories,
                     onCategoryTap: { category in
                         selectedCategory = category
                         showingCategoryTransactions = true
+                    },
+                    onTransactionTap: { entry in
+                        selectedTransaction = entry
+                        showingTransactionEditor = true
                     },
                     period: .week
                 )
@@ -335,6 +342,7 @@ struct ReportsView: View {
             WalletIncomeFeesRows(
                 income: r.income,
                 fees: r.digitalWalletFees,
+                creditCardSpending: reportsViewModel.creditCardSpending(for: .month),
                 appeared: appeared,
                 onIncomeTap: {
                     selectedCategory = "Income"
@@ -349,9 +357,14 @@ struct ReportsView: View {
                 WalletCategorySection(
                     items: r.byCategory,
                     appeared: appeared,
+                    expandedCategories: $expandedCategories,
                     onCategoryTap: { category in
                         selectedCategory = category
                         showingCategoryTransactions = true
+                    },
+                    onTransactionTap: { entry in
+                        selectedTransaction = entry
+                        showingTransactionEditor = true
                     },
                     period: .month
                 )
@@ -369,6 +382,7 @@ struct ReportsView: View {
             WalletIncomeFeesRows(
                 income: r.income,
                 fees: r.digitalWalletFees,
+                creditCardSpending: reportsViewModel.creditCardSpending(for: .year),
                 appeared: appeared,
                 onIncomeTap: {
                     selectedCategory = "Income"
@@ -383,9 +397,14 @@ struct ReportsView: View {
                 WalletCategorySection(
                     items: r.byCategory,
                     appeared: appeared,
+                    expandedCategories: $expandedCategories,
                     onCategoryTap: { category in
                         selectedCategory = category
                         showingCategoryTransactions = true
+                    },
+                    onTransactionTap: { entry in
+                        selectedTransaction = entry
+                        showingTransactionEditor = true
                     },
                     period: .year
                 )
@@ -459,23 +478,156 @@ struct ReportsView: View {
         return "\(startStr) – \(endStr)"
     }
 
-    private func walletSwipeNavigate(forward: Bool) {
-        let cal = Calendar.current
-        let delta = forward ? 1 : -1
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-            switch walletPeriod {
-            case .week:
-                let start = reportsViewModel.startOfWeek(for: reportsViewModel.selectedWeekStart)
-                guard let next = cal.date(byAdding: .day, value: delta * 7, to: start) else { return }
-                reportsViewModel.selectedWeekStart = next
-            case .month:
-                guard let next = cal.date(byAdding: .month, value: delta, to: reportsViewModel.selectedMonth) else { return }
-                reportsViewModel.selectedMonth = next
-            case .year:
-                reportsViewModel.selectedYear += delta
+    // MARK: - Period Picker with Double-Tap
+    
+    private var periodPickerWithDoubleTap: some View {
+        Picker("", selection: walletPeriodBinding) {
+            ForEach(ReportsViewModel.WalletPeriod.allCases, id: \.self) { p in
+                Text(p.rawValue).tag(p)
             }
         }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .simultaneousGesture(
+            TapGesture(count: 2)
+                .onEnded {
+                    // Double-tap to jump to current period
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        reportsViewModel.jumpToCurrentPeriod()
+                    }
+                }
+        )
     }
+    
+    // MARK: - Period Swipe Container (Apple Wallet Style)
+    
+    @State private var currentSwipeIndex: Int = 1
+    
+    private var periodSwipeContainer: some View {
+        TabView(selection: Binding(
+            get: { currentSwipeIndex },
+            set: { newIndex in
+                if newIndex != currentSwipeIndex {
+                    handleSwipeToIndex(newIndex)
+                }
+            }
+        )) {
+            // Previous period preview (if data exists)
+            if canNavigateToPreviousPeriod {
+                periodContentList
+                    .tag(0)
+            }
+            
+            // Current period (always shown)
+            periodContentList
+                .tag(1)
+            
+            // Next period preview (if data exists)
+            if canNavigateToNextPeriod {
+                periodContentList
+                    .tag(2)
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .padding(.horizontal, -20) // Show partial content on edges (Apple Wallet style)
+        .onAppear {
+            currentSwipeIndex = 1 // Start at center
+        }
+        .onChange(of: walletPeriod) { _, _ in
+            currentSwipeIndex = 1 // Reset to center when period type changes
+        }
+    }
+    
+    private var periodContentList: some View {
+        List {
+            Group {
+                walletSections
+            }
+            .animation(.spring(response: 0.45, dampingFraction: 0.82), value: reportsViewModel.monthlyReport != nil)
+            .animation(.spring(response: 0.45, dampingFraction: 0.82), value: reportsViewModel.usdBtcReport != nil)
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(.custom(4))
+    }
+    
+    private var canNavigateToPreviousPeriod: Bool {
+        let prevDate = getPreviousPeriodDate()
+        return reportsViewModel.hasDataForPeriod(walletPeriod, date: prevDate)
+    }
+    
+    private var canNavigateToNextPeriod: Bool {
+        let nextDate = getNextPeriodDate()
+        return reportsViewModel.hasDataForPeriod(walletPeriod, date: nextDate)
+    }
+    
+    private func getPreviousPeriodDate() -> Date {
+        let cal = Calendar.current
+        switch walletPeriod {
+        case .week:
+            let start = reportsViewModel.startOfWeek(for: reportsViewModel.selectedWeekStart)
+            return cal.date(byAdding: .day, value: -7, to: start) ?? start
+        case .month:
+            return cal.date(byAdding: .month, value: -1, to: reportsViewModel.selectedMonth) ?? reportsViewModel.selectedMonth
+        case .year:
+            return cal.date(from: DateComponents(year: reportsViewModel.selectedYear - 1, month: 1, day: 1)) ?? Date()
+        }
+    }
+    
+    private func getNextPeriodDate() -> Date {
+        let cal = Calendar.current
+        switch walletPeriod {
+        case .week:
+            let start = reportsViewModel.startOfWeek(for: reportsViewModel.selectedWeekStart)
+            return cal.date(byAdding: .day, value: 7, to: start) ?? start
+        case .month:
+            return cal.date(byAdding: .month, value: 1, to: reportsViewModel.selectedMonth) ?? reportsViewModel.selectedMonth
+        case .year:
+            return cal.date(from: DateComponents(year: reportsViewModel.selectedYear + 1, month: 1, day: 1)) ?? Date()
+        }
+    }
+    
+    private func handleSwipeToIndex(_ index: Int) {
+        let cal = Calendar.current
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+            switch index {
+            case 0: // Swiped to previous
+                switch walletPeriod {
+                case .week:
+                    let start = reportsViewModel.startOfWeek(for: reportsViewModel.selectedWeekStart)
+                    if let prev = cal.date(byAdding: .day, value: -7, to: start) {
+                        reportsViewModel.selectedWeekStart = prev
+                    }
+                case .month:
+                    if let prev = cal.date(byAdding: .month, value: -1, to: reportsViewModel.selectedMonth) {
+                        reportsViewModel.selectedMonth = prev
+                    }
+                case .year:
+                    reportsViewModel.selectedYear -= 1
+                }
+            case 2: // Swiped to next
+                switch walletPeriod {
+                case .week:
+                    let start = reportsViewModel.startOfWeek(for: reportsViewModel.selectedWeekStart)
+                    if let next = cal.date(byAdding: .day, value: 7, to: start) {
+                        reportsViewModel.selectedWeekStart = next
+                    }
+                case .month:
+                    if let next = cal.date(byAdding: .month, value: 1, to: reportsViewModel.selectedMonth) {
+                        reportsViewModel.selectedMonth = next
+                    }
+                case .year:
+                    reportsViewModel.selectedYear += 1
+                }
+            default:
+                break
+            }
+        }
+        // Reset to center after navigation to allow continuous swiping
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            currentSwipeIndex = 1
+        }
+    }
+    
 
     private func monthYearLabel(_ date: Date) -> String {
         let m = Calendar.current.component(.month, from: date)
@@ -523,6 +675,7 @@ private let appleWalletBarGradients: [LinearGradient] = [
 ]
 
 private struct WalletTotalSpendingAppleCard: View {
+    @EnvironmentObject private var reportsViewModel: ReportsViewModel
     let periodLabel: String
     let expenses: Decimal
     let previousPeriodExpenses: Decimal?
@@ -583,9 +736,13 @@ private struct WalletTotalSpendingAppleCard: View {
     var body: some View {
         Section {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Total Spending")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                HStack {
+                    Text("Total Spending")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    creditCardViewModeToggle
+                }
                 Text(formatter.string(from: expenses as NSDecimalNumber) ?? "$0.00")
                     .font(.system(size: 32, weight: .bold))
                     .foregroundStyle(.primary)
@@ -601,6 +758,20 @@ private struct WalletTotalSpendingAppleCard: View {
         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 4, trailing: 16))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
+    }
+    
+    private var creditCardViewModeToggle: some View {
+        Picker("", selection: Binding(
+            get: { reportsViewModel.creditCardViewMode },
+            set: { reportsViewModel.setCreditCardViewMode($0) }
+        )) {
+            ForEach(ReportsViewModel.CreditCardViewMode.allCases, id: \.self) { mode in
+                Text(mode.rawValue).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(width: 200)
     }
 
     private var walletBarChart: some View {
@@ -635,7 +806,7 @@ private struct WalletTotalSpendingAppleCard: View {
 
 // MARK: - Stacked Category Bar Chart
 
-private struct WalletStackedCategoryBarChart: View {
+struct WalletStackedCategoryBarChart: View {
     @EnvironmentObject private var reportsViewModel: ReportsViewModel
     let period: ReportsViewModel.WalletPeriod
     let appeared: Bool
@@ -831,9 +1002,13 @@ private struct WalletStackedCategoryBarChart: View {
                 }
             }
             .chartYAxis {
-                let maxVal = max(maxValue, 1)
+                // When there's no data, use sensible default values
+                let maxVal = maxValue > 0 ? maxValue : 100
                 let step = maxVal / 4.0
-                let mainValues: [Double] = [0, step, step * 2, step * 3, maxVal]
+                // Ensure step is at least 25 for readability when there's no data
+                let adjustedStep = max(step, 25.0)
+                let adjustedMax = maxVal > 0 ? maxVal : 100
+                let mainValues: [Double] = [0, adjustedStep, adjustedStep * 2, adjustedStep * 3, adjustedMax]
                 
                 AxisMarks(position: .trailing, values: mainValues) { value in
                     if let doubleValue = value.as(Double.self) {
@@ -851,6 +1026,150 @@ private struct WalletStackedCategoryBarChart: View {
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 4)
         }
+        .opacity(appeared ? 1 : 0)
+    }
+}
+
+// MARK: - Compact Stacked Category Bar Chart (for Balance page chip card)
+
+struct CompactWalletStackedCategoryBarChart: View {
+    @EnvironmentObject private var reportsViewModel: ReportsViewModel
+    let period: ReportsViewModel.WalletPeriod
+    let appeared: Bool
+    
+    // Enhanced color palette for categories
+    private let categoryColors: [Color] = [
+        .orange, .pink, .purple, .blue, .green, .mint, .cyan, .teal,
+        .indigo, .red, .yellow, .brown, .gray
+    ]
+    
+    private var categoryBreakdown: [(period: String, categories: [(name: String, amount: Decimal)])] {
+        reportsViewModel.categoryBreakdownByPeriod(period: period)
+    }
+    
+    private var allCategories: [String] {
+        var categories: Set<String> = []
+        for item in categoryBreakdown {
+            for cat in item.categories {
+                categories.insert(cat.name)
+            }
+        }
+        return Array(categories).sorted()
+    }
+    
+    private func colorForCategory(_ categoryName: String) -> Color {
+        if let index = allCategories.firstIndex(of: categoryName) {
+            return categoryColors[index % categoryColors.count]
+        }
+        return .gray
+    }
+    
+    // Create gradient that blends categories smoothly based on their values
+    private func gradientForPeriod(_ categories: [(name: String, amount: Decimal)]) -> LinearGradient {
+        guard !categories.isEmpty else {
+            return LinearGradient(colors: [Color.gray.opacity(0.3)], startPoint: .bottom, endPoint: .top)
+        }
+        
+        let totalAmount = categories.reduce(Decimal(0)) { $0 + $1.amount }
+        guard totalAmount > 0 else {
+            return LinearGradient(colors: [Color.gray.opacity(0.3)], startPoint: .bottom, endPoint: .top)
+        }
+        
+        // Sort categories by amount (largest first, at bottom)
+        let sortedCategories = categories.sorted { $0.amount > $1.amount }
+        
+        if sortedCategories.count == 1 {
+            let color = colorForCategory(sortedCategories[0].name)
+            return LinearGradient(
+                colors: [color, color],
+                startPoint: .bottom,
+                endPoint: .top
+            )
+        }
+        
+        // Create gradient stops - each category gets proportional space based on its value
+        var gradientStops: [Gradient.Stop] = []
+        var cumulativeLocation: Double = 0.0
+        
+        for (index, category) in sortedCategories.enumerated() {
+            let categoryAmount = (category.amount as NSDecimalNumber).doubleValue
+            let proportion = categoryAmount / (totalAmount as NSDecimalNumber).doubleValue
+            let color = colorForCategory(category.name)
+            
+            if index == 0 {
+                gradientStops.append(Gradient.Stop(color: color, location: 0.0))
+            } else {
+                let prevColor = colorForCategory(sortedCategories[index - 1].name)
+                gradientStops.append(Gradient.Stop(color: prevColor, location: cumulativeLocation))
+                gradientStops.append(Gradient.Stop(color: color, location: cumulativeLocation))
+            }
+            
+            cumulativeLocation += proportion
+            gradientStops.append(Gradient.Stop(color: color, location: min(cumulativeLocation, 1.0)))
+        }
+        
+        // Ensure final stop is exactly at 1.0
+        if let lastStop = gradientStops.last, lastStop.location < 1.0 {
+            gradientStops.append(Gradient.Stop(color: lastStop.color, location: 1.0))
+        }
+        
+        // Sort stops by location and remove duplicates
+        var uniqueStops: [Gradient.Stop] = []
+        var lastLocation: Double = -1.0
+        for stop in gradientStops.sorted(by: { $0.location < $1.location }) {
+            if abs(stop.location - lastLocation) > 0.0001 {
+                uniqueStops.append(stop)
+                lastLocation = stop.location
+            }
+        }
+        
+        return LinearGradient(
+            gradient: Gradient(stops: uniqueStops),
+            startPoint: .bottom,
+            endPoint: .top
+        )
+    }
+    
+    private var maxValue: Double {
+        let values = categoryBreakdown.map { period in
+            period.categories.reduce(Decimal(0)) { $0 + $1.amount }
+        }.map { ($0 as NSDecimalNumber).doubleValue }
+        return max(values.max() ?? 0, 1)
+    }
+    
+    private func actualValue(for periodData: (period: String, categories: [(name: String, amount: Decimal)])) -> Double {
+        let totalAmount = periodData.categories.reduce(Decimal(0)) { $0 + $1.amount }
+        return (totalAmount as NSDecimalNumber).doubleValue
+    }
+    
+    var body: some View {
+        Chart {
+            // Create a bar for each period using the period string as X-axis value
+            ForEach(categoryBreakdown, id: \.period) { periodData in
+                let totalAmount = actualValue(for: periodData)
+                
+                if totalAmount > 0 {
+                    let gradient = gradientForPeriod(periodData.categories)
+                    BarMark(
+                        x: .value("Period", periodData.period),
+                        y: .value("Amount", totalAmount)
+                    )
+                    .foregroundStyle(gradient)
+                    .cornerRadius(8)
+                } else {
+                    // Empty period - show gray bar to maintain X-axis spacing and visibility
+                    BarMark(
+                        x: .value("Period", periodData.period),
+                        y: .value("Amount", maxValue * 0.1) // Small visible bar height
+                    )
+                    .foregroundStyle(Color.gray.opacity(0.2))
+                    .cornerRadius(8)
+                }
+            }
+        }
+        .chartXAxis(.hidden)
+        .chartYAxis(.hidden)
+        .frame(height: 40)
         .opacity(appeared ? 1 : 0)
     }
 }
@@ -893,7 +1212,7 @@ private struct WalletAppleBarChart: View {
                         y: .value("Amount", (values[i] as NSDecimalNumber).doubleValue)
                     )
                     .foregroundStyle(appleWalletBarGradients[i % appleWalletBarGradients.count])
-                    .cornerRadius(6)
+                    .cornerRadius(10)
                 }
             }
             .chartXAxis {
@@ -918,11 +1237,15 @@ private struct WalletAppleBarChart: View {
                 }
             }
             .chartYAxis {
-                let maxVal = max(maxValue, 100) // Ensure we have a minimum range
+                // When there's no data, use sensible default values
+                let maxVal = maxValue > 0 ? max(maxValue, 100) : 100
                 let quarter = maxVal / 4.0
+                // Ensure quarter is at least 25 for readability when there's no data
+                let adjustedQuarter = max(quarter, 25.0)
+                let adjustedMax = maxValue > 0 ? maxVal : 100
                 // Create 4 main values (quarters) and 4 midpoints
-                let mainValues: [Double] = [0, quarter, quarter * 2, quarter * 3, maxVal]
-                let midpointValues: [Double] = [quarter * 0.5, quarter * 1.5, quarter * 2.5, quarter * 3.5]
+                let mainValues: [Double] = [0, adjustedQuarter, adjustedQuarter * 2, adjustedQuarter * 3, adjustedMax]
+                let midpointValues: [Double] = [adjustedQuarter * 0.5, adjustedQuarter * 1.5, adjustedQuarter * 2.5, adjustedQuarter * 3.5]
                 let allValues = (mainValues + midpointValues).sorted()
                 
                 AxisMarks(position: .trailing, values: allValues) { value in
@@ -964,6 +1287,7 @@ private struct WalletAppleBarChart: View {
 private struct WalletIncomeFeesRows: View {
     let income: Decimal
     let fees: Decimal
+    let creditCardSpending: Decimal
     let appeared: Bool
     let onIncomeTap: () -> Void
     let onFeesTap: () -> Void
@@ -998,6 +1322,21 @@ private struct WalletIncomeFeesRows: View {
                         formatter: formatter,
                         appeared: appeared,
                         onTap: onFeesTap
+                    )
+                }
+                if creditCardSpending > 0 {
+                    if fees > 0 || income > 0 {
+                        Divider()
+                            .padding(.leading, 52)
+                    }
+                    WalletSummaryRow(
+                        icon: "creditcard.fill",
+                        iconColor: .blue,
+                        title: "Credit Card Spending",
+                        amount: creditCardSpending,
+                        formatter: formatter,
+                        appeared: appeared,
+                        onTap: {}
                     )
                 }
             }
@@ -1052,9 +1391,12 @@ private struct WalletSummaryRow: View {
 private struct WalletCategorySection: View {
     let items: [(name: String, amount: Decimal)]
     let appeared: Bool
+    @Binding var expandedCategories: Set<String>
     let onCategoryTap: (String) -> Void
+    let onTransactionTap: (LedgerEntry) -> Void
     let period: ReportsViewModel.WalletPeriod
     @EnvironmentObject private var reportsViewModel: ReportsViewModel
+    @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     @State private var showingPieChart = false
     @State private var pieChartScale: CGFloat = 1.0
     @State private var pieChartRotation: Double = 0
@@ -1313,19 +1655,92 @@ private struct WalletCategorySection: View {
                     VStack(spacing: 0) {
                         ForEach(Array(items.prefix(8).enumerated()), id: \.offset) { i, item in
                             let previousAmount = reportsViewModel.previousPeriodCategorySpending(item.name, period: period)
-                            WalletCategoryRow(
-                                icon: iconForCategory(item.name),
-                                color: colorForIndex(i),
-                                name: item.name,
-                                amount: item.amount,
-                                previousAmount: previousAmount,
-                                formatter: formatter,
-                                appeared: appeared,
-                                onTap: {
-                                    onCategoryTap(item.name)
+                            let isExpanded = expandedCategories.contains(item.name)
+                            let transactions = reportsViewModel.transactionsForCategory(item.name, period: period)
+                            
+                            VStack(spacing: 0) {
+                                // Category row - tappable to expand/collapse
+                                Button {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                        if expandedCategories.contains(item.name) {
+                                            expandedCategories.remove(item.name)
+                                        } else {
+                                            expandedCategories.insert(item.name)
+                                        }
+                                    }
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: iconForCategory(item.name))
+                                            .font(.body.weight(.medium))
+                                            .foregroundStyle(colorForIndex(i))
+                                            .frame(width: 32, height: 32)
+                                            .background(RoundedRectangle(cornerRadius: 8).fill(colorForIndex(i).opacity(0.15)))
+                                        Text(item.name)
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(.primary)
+                                        Spacer()
+                                        VStack(alignment: .trailing, spacing: 2) {
+                                            Text(formatter.string(from: item.amount as NSDecimalNumber) ?? "$0")
+                                                .font(.subheadline.weight(.medium))
+                                                .foregroundStyle(.primary)
+                                        }
+                                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 12)
+                                    .opacity(appeared ? 1 : 0)
+                                    .contentShape(Rectangle())
                                 }
-                            )
+                                .buttonStyle(.plain)
+                                
+                                // Expanded transactions
+                                if isExpanded {
+                                    VStack(spacing: 0) {
+                                        if !transactions.isEmpty {
+                                            ForEach(transactions, id: \.objectID) { entry in
+                                                Button {
+                                                    onTransactionTap(entry)
+                                                } label: {
+                                                    CategoryTransactionRow(
+                                                        entry: entry,
+                                                        category: item.name,
+                                                        formatter: formatter,
+                                                        dateFormatter: {
+                                                            let f = DateFormatter()
+                                                            f.dateStyle = .short
+                                                            f.timeStyle = .none
+                                                            return f
+                                                        }(),
+                                                        onEdit: {
+                                                            onTransactionTap(entry)
+                                                        },
+                                                        onDelete: {}
+                                                    )
+                                                }
+                                                .buttonStyle(.plain)
+                                                .padding(.leading, 52)
+                                                .padding(.vertical, 8)
+                                                
+                                                if entry != transactions.last {
+                                                    Divider()
+                                                        .padding(.leading, 52)
+                                                }
+                                            }
+                                        } else {
+                                            Text("No transactions")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .padding(.leading, 52)
+                                                .padding(.vertical, 8)
+                                        }
+                                    }
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                                }
+                            }
                             .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                            
                             if i < min(8, items.count) - 1 {
                                 Divider()
                                     .padding(.leading, 52)
@@ -1500,9 +1915,6 @@ private struct WalletCategoryRow: View {
                             .foregroundStyle(indicator.color.opacity(0.8))
                     }
                 }
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -2144,83 +2556,14 @@ struct CategoryPicker: View {
     let usage: [String: CategoryUsage]
     @EnvironmentObject private var categoryManager: CategoryManager
     
-    @State private var showingAddCategorySheet = false
-    @State private var newCategoryName = ""
-    
-    private let addNewCategoryTag = "___ADD_NEW_CATEGORY___"
-    
     var body: some View {
-        HStack {
-            Menu {
-                Button {
-                    selection = ""
-                } label: {
-                    HStack {
-                        Text("None")
-                        if selection.isEmpty {
-                            Spacer()
-                            Image(systemName: "checkmark")
-                                .foregroundStyle(.blue)
-                        }
-                    }
-                }
-                
-                ForEach(categoryManager.displayCategories(usage: usage, selected: selection), id: \.self) { category in
-                    Button {
-                        selection = category
-                    } label: {
-                        HStack {
-                            Text(category)
-                            if selection == category {
-                                Spacer()
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(.blue)
-                            }
-                        }
-                    }
-                }
-                
-                Divider()
-                
-                Button {
-                    showingAddCategorySheet = true
-                } label: {
-                    Label("Add Category", systemImage: "plus.circle")
-                }
-            } label: {
-                Text("Category")
-                    .foregroundStyle(.primary)
-            }
-            .buttonStyle(.plain)
-            
-            Spacer()
-            
-            HStack(spacing: 4) {
-                Text(selection.isEmpty ? "None" : selection)
-                    .foregroundStyle(.secondary)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+        Picker("Category", selection: $selection) {
+            Text("None").tag("")
+            ForEach(categoryManager.displayCategories(usage: usage, selected: selection), id: \.self) { category in
+                Text(category).tag(category)
             }
         }
-        .sheet(isPresented: $showingAddCategorySheet) {
-            AddCategorySheet(
-                categoryName: $newCategoryName,
-                onSave: {
-                    let trimmed = newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmed.isEmpty {
-                        categoryManager.addCategory(trimmed)
-                        selection = trimmed
-                        newCategoryName = ""
-                    }
-                    showingAddCategorySheet = false
-                },
-                onCancel: {
-                    newCategoryName = ""
-                    showingAddCategorySheet = false
-                }
-            )
-        }
+        .pickerStyle(.menu)
     }
 }
 
@@ -2282,7 +2625,7 @@ private struct AddCategorySheet: View {
 
 #Preview {
     let ctx = PersistenceController.shared.container.viewContext
-    let vm = ReportsViewModel(context: ctx, bitcoinPriceService: .shared)
+    let vm = ReportsViewModel(context: ctx, bitcoinPriceService: .shared, creditCardManager: CreditCardManager())
     let accountVM = AccountViewModel(context: ctx)
     return ReportsView()
         .environmentObject(vm)

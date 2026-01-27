@@ -13,12 +13,11 @@ struct AccountEditorSheet: View {
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     
     let account: Account?
-    let onSave: (String, String, Decimal, Bool, String, String, Decimal, Decimal?, Decimal?) -> Void
+    let onSave: (String, String, Decimal, Bool, String, String, Decimal, Decimal?, Decimal?) -> Void // USD and BTC price params kept for compatibility but not used
     
     @State private var name: String
     @State private var type: String
     @State private var startingBalance: String
-    @State private var startingBalanceUSD: String // USD value for BTC starting balance
     @State private var isHidden: Bool
     @State private var currency: String
     @State private var btcDisplayFormat: String
@@ -27,7 +26,6 @@ struct AccountEditorSheet: View {
     @State private var validationMessage: String?
     @State private var balanceInputFormat: String = "sats" // "sats" or "bitcoin" for BTC starting balance input
     @FocusState private var isBalanceFocused: Bool
-    @FocusState private var isBalanceUSDFocused: Bool
     
     let accountTypes = ["checking", "savings", "credit", "cash", "investment", "digital wallet"]
     let currencies = ["USD", "BTC"]
@@ -119,19 +117,6 @@ struct AccountEditorSheet: View {
                 _startingBalance = State(initialValue: "")
             }
             
-            // Load USD value for BTC accounts
-            if account.currencyCode == "BTC", let usdValue = account.startingBalanceUSD, usdValue.decimalValue != 0 {
-                let usdFormatter = NumberFormatter()
-                usdFormatter.numberStyle = .decimal
-                usdFormatter.groupingSeparator = ","
-                usdFormatter.usesGroupingSeparator = true
-                usdFormatter.maximumFractionDigits = 2
-                usdFormatter.minimumFractionDigits = 2
-                _startingBalanceUSD = State(initialValue: usdFormatter.string(from: usdValue.decimalValue as NSDecimalNumber) ?? usdValue.decimalValue.description)
-            } else {
-                _startingBalanceUSD = State(initialValue: "")
-            }
-            
             _isHidden = State(initialValue: account.isHiddenFlag)
             _currency = State(initialValue: account.currencyCode)
             _btcDisplayFormat = State(initialValue: account.btcDisplayFormat ?? "sats")
@@ -146,7 +131,6 @@ struct AccountEditorSheet: View {
             _name = State(initialValue: "")
             _type = State(initialValue: "cash")
             _startingBalance = State(initialValue: "")
-            _startingBalanceUSD = State(initialValue: "")
             _isHidden = State(initialValue: false)
             _currency = State(initialValue: "USD")
             _btcDisplayFormat = State(initialValue: "sats")
@@ -166,6 +150,7 @@ struct AccountEditorSheet: View {
                             Text(accountTypeDisplayName(for: accountType)).tag(accountType)
                         }
                     }
+                    .pickerStyle(.menu)
                     
                     // Currency picker shown for digital wallet accounts
                     if type.lowercased() == "digital wallet" {
@@ -174,6 +159,7 @@ struct AccountEditorSheet: View {
                                 Text(curr).tag(curr)
                             }
                         }
+                        .pickerStyle(.menu)
                         
                         // Display Format only shown when BTC is selected
                         if currency == "BTC" {
@@ -182,6 +168,7 @@ struct AccountEditorSheet: View {
                                     Text(format == "sats" ? "Sats" : "Bitcoin").tag(format)
                                 }
                             }
+                            .pickerStyle(.menu)
                             .onChange(of: btcDisplayFormat) { oldValue, newValue in
                                 // Sync balance input format with display format
                                 balanceInputFormat = newValue
@@ -265,38 +252,6 @@ struct AccountEditorSheet: View {
                             if !startingBalance.isEmpty {
                                 Button {
                                     startingBalance = ""
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundColor(.secondary)
-                                        .font(.system(size: 16))
-                                }
-                            }
-                        }
-                        
-                        // USD value input for BTC accounts
-                        HStack {
-                            Text("$")
-                                .foregroundStyle(.secondary)
-                            ZStack(alignment: .leading) {
-                                if startingBalanceUSD.isEmpty {
-                                    Text("0.00")
-                                        .foregroundColor(.secondary)
-                                }
-                                TextField("USD Value", text: $startingBalanceUSD)
-                                    .keyboardType(.decimalPad)
-                                    .focused($isBalanceUSDFocused)
-                                    .onChange(of: isBalanceUSDFocused) { oldValue, newValue in
-                                        if !newValue {
-                                            // Format when field loses focus
-                                            formatUSDOnBlur()
-                                        }
-                                    }
-                            }
-                            Text("USD")
-                                .foregroundStyle(.secondary)
-                            if !startingBalanceUSD.isEmpty {
-                                Button {
-                                    startingBalanceUSD = ""
                                 } label: {
                                     Image(systemName: "xmark.circle.fill")
                                         .foregroundColor(.secondary)
@@ -450,37 +405,6 @@ struct AccountEditorSheet: View {
         startingBalance = formatted
     }
     
-    private func formatUSDOnBlur() {
-        // Remove any formatting characters (commas, currency symbols)
-        var cleaned = startingBalanceUSD.replacingOccurrences(of: "[^0-9.]", with: "", options: .regularExpression)
-        
-        // Handle multiple decimal points - keep only the first one
-        let components = cleaned.components(separatedBy: ".")
-        if components.count > 2 {
-            cleaned = components[0] + "." + components.dropFirst().joined()
-        }
-        
-        // Parse the number
-        guard let number = Decimal(string: cleaned), number > 0 else {
-            if cleaned.isEmpty {
-                startingBalanceUSD = ""
-            }
-            return
-        }
-        
-        // Format USD with commas and 2 decimals
-        let usdFormatter = NumberFormatter()
-        usdFormatter.numberStyle = .decimal
-        usdFormatter.groupingSeparator = ","
-        usdFormatter.usesGroupingSeparator = true
-        usdFormatter.maximumFractionDigits = 2
-        usdFormatter.minimumFractionDigits = 2
-        let formatted = usdFormatter.string(from: number as NSDecimalNumber) ?? cleaned
-        
-        // Update the formatted value
-        startingBalanceUSD = formatted
-    }
-    
     private func saveAccount() {
         // Validate name
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty else {
@@ -525,26 +449,7 @@ struct AccountEditorSheet: View {
             feeDecimal = fee
         }
         
-        // Parse USD value and calculate BTC price for BTC starting balances
-        var startingBalanceUSDValue: Decimal? = nil
-        var startingBalanceBTCPrice: Decimal? = nil
-        
-        if currency == "BTC" && balanceDecimal > 0 {
-            // Parse USD value
-            if !startingBalanceUSD.isEmpty && !startingBalanceUSD.trimmingCharacters(in: .whitespaces).isEmpty {
-                let cleanedUSD = startingBalanceUSD.replacingOccurrences(of: "[^0-9.]", with: "", options: .regularExpression)
-                if let usdValue = Decimal(string: cleanedUSD), usdValue > 0 {
-                    startingBalanceUSDValue = usdValue
-                    
-                    // Calculate BTC price from USD and BTC values
-                    if balanceDecimal > 0 {
-                        startingBalanceBTCPrice = usdValue / balanceDecimal
-                    }
-                }
-            }
-        }
-        
-        onSave(name, type, balanceDecimal, isHidden, currency, btcDisplayFormat, feeDecimal, startingBalanceUSDValue, startingBalanceBTCPrice)
+        onSave(name, type, balanceDecimal, isHidden, currency, btcDisplayFormat, feeDecimal, nil, nil)
         dismiss()
     }
 }

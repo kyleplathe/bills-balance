@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 
 // Cash register style balance text with digit rotation
 private struct CashRegisterBalanceText: View {
@@ -75,6 +76,7 @@ struct BalanceView: View {
     @EnvironmentObject private var billViewModel: BillViewModel
     @EnvironmentObject private var paycheckViewModel: PaycheckViewModel
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
+    @EnvironmentObject private var reportsViewModel: ReportsViewModel
     @State private var showingManageAccounts = false
     @State private var showingReports = false
     @State private var showingAddAccount = false
@@ -85,6 +87,7 @@ struct BalanceView: View {
     @State private var showingImportPicker = false
     @State private var showingExportSheet = false
     @State private var currentAccountPage = 0
+    @State private var activityChartAppeared = false
     
     var body: some View {
         NavigationStack {
@@ -141,6 +144,7 @@ struct BalanceView: View {
             ReportsView()
                 .environmentObject(accountViewModel)
                 .environmentObject(bitcoinPriceService)
+                .environmentObject(reportsViewModel)
         }
         .navigationDestination(isPresented: $showingAccountDetail) {
             if let account = selectedAccount {
@@ -280,78 +284,65 @@ struct BalanceView: View {
     // MARK: - Summary Chip Cards
     
     private var summaryChipCards: some View {
-        HStack(spacing: 12) {
-            totalBalanceCard
-            monthlyActivityCard
-        }
+        balanceSnapshotCard
     }
     
-    private var totalBalanceCard: some View {
-        ChipCard {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Total Balance")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Text(totalBalance, format: .currency(code: "USD"))
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .foregroundColor(.primary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        }
-        .frame(height: 100)
-    }
-    
-    private var monthlyActivityCard: some View {
+    private var balanceSnapshotCard: some View {
         Button {
             showingReports = true
         } label: {
             ChipCard {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("\(activityPeriodTitle) Activity")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text("-\(activitySpending, format: .currency(code: "USD")) Spending")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        .foregroundColor(.primary)
-                    activityBreakdownChart
+                HStack(spacing: 20) {
+                    // Left side: Total Balance
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Total Balance")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(totalBalance, format: .currency(code: "USD"))
+                            .font(.system(size: 36, weight: .bold, design: .rounded))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    // Divider
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.2))
+                        .frame(width: 1)
+                    
+                    // Right side: Activity
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(activityPeriodTitle) Activity")
+                            .font(.headline)
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
+                        Text("-\(activitySpending, format: .currency(code: "USD")) Spending")
+                            .font(.subheadline)
+                            .fontWeight(.regular)
+                            .foregroundColor(.primary)
+                        activityChart
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             }
-            .frame(height: 100)
+            .frame(height: 120)
         }
         .buttonStyle(.plain)
-    }
-    
-    private var activityBreakdownChart: some View {
-        HStack(alignment: .bottom, spacing: 4) {
-            ForEach(0..<activityBreakdown.count, id: \.self) { index in
-                let value = activityBreakdown[safe: index] ?? Decimal(0)
-                let hasData = value > Decimal(0.01) // Consider values less than 1 cent as no data
-                let ratio = hasData ? NSDecimalNumber(decimal: value).doubleValue / NSDecimalNumber(decimal: maxActivityValue).doubleValue : 0
-                let barColor = hasData ? (activityChartColors[safe: index] ?? .gray) : Color.gray.opacity(0.3)
-                let barHeight = hasData ? max(4, CGFloat(ratio * 24)) : 4
-                
-                VStack {
-                    Spacer()
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(barColor)
-                        .frame(height: barHeight)
-                }
-                .frame(height: 24)
+        .onAppear {
+            // Trigger chart animation
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                activityChartAppeared = true
             }
         }
-        .frame(height: 24)
     }
     
-    private var activityChartColors: [Color] {
-        switch activityPeriod {
-        case .week:
-            return [.orange, .pink, .purple, .blue, .green, .cyan, .indigo]
-        case .month:
-            return [.orange, .pink, .purple, .blue, .green]
-        case .year:
-            return [.orange, .pink, .purple, .blue, .green, .cyan, .indigo, .mint, .teal, .yellow, .red, .brown]
-        }
+    private var activityChart: some View {
+        CompactWalletStackedCategoryBarChart(
+            period: activityPeriod,
+            appeared: activityChartAppeared
+        )
+        .frame(height: 40)
     }
     
     // MARK: - Accounts Section
@@ -462,11 +453,7 @@ struct BalanceView: View {
     }
     
     private var activityPeriod: ReportsViewModel.WalletPeriod {
-        if let raw = UserDefaults.standard.string(forKey: "ReportsLastWalletPeriod"),
-           let period = ReportsViewModel.WalletPeriod(rawValue: raw) {
-            return period
-        }
-        return .month
+        reportsViewModel.lastUsedWalletPeriod
     }
     
     private var activityPeriodTitle: String {
@@ -510,112 +497,6 @@ struct BalanceView: View {
             }
     }
     
-    private var activityBreakdown: [Decimal] {
-        let calendar = Calendar.current
-        let now = Date()
-        let entries = accountViewModel.recentTransactions(limit: 1000, daysBack: nil)
-        
-        switch activityPeriod {
-        case .week:
-            let weekStart = startOfWeek(for: now, calendar: calendar)
-            var daily: [Decimal] = Array(repeating: Decimal(0), count: 7)
-            
-            for dayOffset in 0..<7 {
-                guard let day = calendar.date(byAdding: .day, value: dayOffset, to: weekStart),
-                      let dayStart = Optional(calendar.startOfDay(for: day)),
-                      let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { continue }
-                
-                let dayEntries = entries.filter { entry in
-                    guard let date = entry.date else { return false }
-                    return date >= dayStart && date < dayEnd
-                }
-                
-                for entry in dayEntries {
-                    guard let account = entry.account, !account.isHiddenFlag else { continue }
-                    let amount = entry.signedAmount
-                    if amount < 0 {
-                        daily[dayOffset] += abs(amount)
-                    }
-                }
-            }
-            return daily
-            
-        case .month:
-            guard let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: now)),
-                  let endOfMonth = calendar.date(byAdding: .month, value: 1, to: startOfMonth) else {
-                return Array(repeating: Decimal(0), count: 5)
-            }
-            
-            let monthEntries = entries.filter { entry in
-                guard let date = entry.date else { return false }
-                return date >= startOfMonth && date < endOfMonth
-            }
-            
-            var weekly: [Decimal] = Array(repeating: Decimal(0), count: 5)
-            
-            // Week ranges: 1-3, 4-10, 11-17, 18-24, 25-31
-            let weekRanges = [
-                (1, 3),
-                (4, 10),
-                (11, 17),
-                (18, 24),
-                (25, 31)
-            ]
-            
-            for entry in monthEntries {
-                guard let account = entry.account, !account.isHiddenFlag,
-                      let date = entry.date else { continue }
-                let amount = entry.signedAmount
-                guard amount < 0 else { continue }
-                
-                let day = calendar.component(.day, from: date)
-                
-                // Find which week range this day falls into
-                for (index, (start, end)) in weekRanges.enumerated() {
-                    if day >= start && day <= end {
-                        weekly[index] += abs(amount)
-                        break
-                    }
-                }
-            }
-            
-            return weekly
-            
-        case .year:
-            let year = calendar.component(.year, from: now)
-            guard let yearStart = calendar.date(from: DateComponents(year: year, month: 1, day: 1)),
-                  let _ = calendar.date(byAdding: .year, value: 1, to: yearStart) else {
-                return Array(repeating: Decimal(0), count: 12)
-            }
-            
-            var monthly: [Decimal] = Array(repeating: Decimal(0), count: 12)
-            
-            for monthOffset in 0..<12 {
-                guard let monthStart = calendar.date(byAdding: .month, value: monthOffset, to: yearStart),
-                      let monthEnd = calendar.date(byAdding: .month, value: 1, to: monthStart) else { continue }
-                
-                let monthEntries = entries.filter { entry in
-                    guard let date = entry.date else { return false }
-                    return date >= monthStart && date < monthEnd
-                }
-                
-                for entry in monthEntries {
-                    guard let account = entry.account, !account.isHiddenFlag else { continue }
-                    let amount = entry.signedAmount
-                    if amount < 0 {
-                        monthly[monthOffset] += abs(amount)
-                    }
-                }
-            }
-            
-            return monthly
-        }
-    }
-    
-    private var maxActivityValue: Decimal {
-        max(activityBreakdown.max() ?? Decimal(1), Decimal(1))
-    }
-    
     private func startOfWeek(for date: Date, calendar: Calendar) -> Date {
         guard let interval = calendar.dateInterval(of: .weekOfYear, for: date) else { return date }
         return interval.start
@@ -633,19 +514,24 @@ private struct ChipCard<Content: View>: View {
     @ViewBuilder let content: Content
     
     var body: some View {
+        // Match bills page styling exactly
+        let backgroundColor: Color = colorScheme == .dark 
+            ? Color.black.opacity(0.82) 
+            : Color(.secondarySystemBackground)
+        let borderColor: Color = colorScheme == .dark 
+            ? Color.white.opacity(0.08) 
+            : Color.black.opacity(0.06)
+        
         content
-            .padding(16)
+            .padding(.vertical, 20)
+            .padding(.horizontal, 18)
             .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(.systemBackground))
-                    .shadow(
-                        color: colorScheme == .dark 
-                            ? Color.black.opacity(0.3) 
-                            : Color.black.opacity(0.05),
-                        radius: colorScheme == .dark ? 12 : 8,
-                        x: 0,
-                        y: colorScheme == .dark ? 4 : 2
-                    )
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(backgroundColor)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(borderColor)
+                        )
             )
     }
 }
@@ -766,8 +652,29 @@ private struct TransactionChipCard: View {
                 
                 Spacer()
                 
-                if let amount = entry.amount {
-                    let formattedAmount = abs(amount.decimalValue).formatted(.currency(code: "USD"))
+                // Display USD amount for all transactions
+                let usdAmount: Decimal = {
+                    guard let account = entry.account else {
+                        return entry.usdAmountDecimal != .zero ? entry.usdAmountDecimal : entry.amountDecimal
+                    }
+                    if account.currencyCode == "BTC" {
+                        // For BTC accounts, use USD amount if available
+                        if entry.usdAmountDecimal != .zero {
+                            return entry.usdAmountDecimal
+                        } else if entry.btcAmountDecimal != .zero && entry.btcPriceAtTransactionDecimal > 0 {
+                            // Convert BTC to USD using transaction price
+                            return entry.btcAmountDecimal * entry.btcPriceAtTransactionDecimal
+                        }
+                        return .zero
+                    } else {
+                        // For USD accounts, use USD amount or regular amount
+                        return entry.usdAmountDecimal != .zero ? entry.usdAmountDecimal : entry.amountDecimal
+                    }
+                }()
+                
+                if usdAmount != .zero {
+                    let signedAmount = entry.isCredit ? usdAmount : -usdAmount
+                    let formattedAmount = abs(signedAmount).formatted(.currency(code: "USD"))
                     Text((entry.isCredit ? "+" : "-") + formattedAmount)
                         .font(.body)
                         .fontWeight(.semibold)

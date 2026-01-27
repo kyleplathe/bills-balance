@@ -33,6 +33,7 @@
 		DED579B02F06D6AC00FBBEDC /* ManualIncomeEntrySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DED579AF2F06D6AC00FBBEDC /* ManualIncomeEntrySheet.swift */; };
 		DED579B12F06D6AD00FBBEDC /* ManualTransactionEntrySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DED579B22F06D6AD00FBBEDC /* ManualTransactionEntrySheet.swift */; };
 		DED579B32F06D6AE00FBBEDC /* AccountDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DED579B42F06D6AE00FBBEDC /* AccountDetailView.swift */; };
+		DED579B52F06D6AF00FBBEDC /* TransferSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DED579B62F06D6AF00FBBEDC /* TransferSheet.swift */; };
 		DEF001002ED930F40056A7A2 /* AccountViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEF0010F2ED930F40056A7A2 /* AccountViewModel.swift */; };
 		DEF001012ED930F40056A7A2 /* BalanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEF001102ED930F40056A7A2 /* BalanceView.swift */; };
 		DEF001022ED930F50056A7A2 /* AccountEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEF001132ED930F50056A7A2 /* AccountEditorSheet.swift */; };
@@ -46,6 +47,7 @@
 		DE57B0012F08BB0001 /* TransactionCSVParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE57B0022F08BB0001 /* TransactionCSVParser.swift */; };
 		DE57C0012F08CC0001 /* YearWrapPopupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE57C0022F08CC0001 /* YearWrapPopupView.swift */; };
 		DE57E0052F08EE0001 /* FeeParsing.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE57E0042F08EE0001 /* FeeParsing.swift */; };
+		DE57F0012F09FF0001 /* LiveDateTimeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE57F0022F09FF0001 /* LiveDateTimeView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -78,6 +80,8 @@
 		DED579AF2F06D6AC00FBBEDC /* ManualIncomeEntrySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualIncomeEntrySheet.swift; sourceTree = "<group>"; };
 		DED579B22F06D6AD00FBBEDC /* ManualTransactionEntrySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualTransactionEntrySheet.swift; sourceTree = "<group>"; };
 		DED579B42F06D6AE00FBBEDC /* AccountDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountDetailView.swift; sourceTree = "<group>"; };
+		DED579B62F06D6AF00FBBEDC /* TransferSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferSheet.swift; sourceTree = "<group>"; };
+		DE57F0022F09FF0001 /* LiveDateTimeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveDateTimeView.swift; sourceTree = "<group>"; };
 		DEF0010F2ED930F40056A7A2 /* AccountViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountViewModel.swift; sourceTree = "<group>"; };
 		DEF001102ED930F40056A7A2 /* BalanceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BalanceView.swift; sourceTree = "<group>"; };
 		DEF001132ED930F50056A7A2 /* AccountEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountEditorSheet.swift; sourceTree = "<group>"; };
@@ -110,6 +114,8 @@
 				DED579AF2F06D6AC00FBBEDC /* ManualIncomeEntrySheet.swift */,
 				DED579B22F06D6AD00FBBEDC /* ManualTransactionEntrySheet.swift */,
 				DED579B42F06D6AE00FBBEDC /* AccountDetailView.swift */,
+				DED579B62F06D6AF00FBBEDC /* TransferSheet.swift */,
+				DE57F0022F09FF0001 /* LiveDateTimeView.swift */,
 				DED579AD2F06C25C00FBBEDC /* ManageBillsView.swift */,
 				DE546C272F04AEAE004F8E56 /* CategoryManager.swift */,
 				DE546C2A2F04AEB00048E56 /* CategorySuggester.swift */,
@@ -320,6 +326,8 @@
 				DED579B02F06D6AC00FBBEDC /* ManualIncomeEntrySheet.swift in Sources */,
 				DED579B12F06D6AD00FBBEDC /* ManualTransactionEntrySheet.swift in Sources */,
 				DED579B32F06D6AE00FBBEDC /* AccountDetailView.swift in Sources */,
+				DED579B52F06D6AF00FBBEDC /* TransferSheet.swift in Sources */,
+				DE57F0012F09FF0001 /* LiveDateTimeView.swift in Sources */,
 				DE57A0042F08AA0001 /* StatementImportSheet.swift in Sources */,
 				DE57B0012F08BB0001 /* TransactionCSVParser.swift in Sources */,
 				DE57C0012F08CC0001 /* YearWrapPopupView.swift in Sources */,

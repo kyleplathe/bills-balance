@@ -106,8 +106,14 @@ final class ReportsViewModel: ObservableObject {
         case month = "Month"
         case year = "Year"
     }
+    
+    enum CreditCardViewMode: String, CaseIterable {
+        case payments = "Payments"
+        case transactions = "Transactions"
+    }
 
     private static let lastPeriodKey = "ReportsLastWalletPeriod"
+    private static let lastCreditCardViewModeKey = "ReportsLastCreditCardViewMode"
 
     @Published var monthlyReport: MonthlyReportData?
     @Published var yearWrapReport: YearWrapData?
@@ -117,6 +123,7 @@ final class ReportsViewModel: ObservableObject {
     @Published var selectedYear: Int = Calendar.current.component(.year, from: Date())
     @Published var selectedWeekStart: Date = Date()
     @Published var lastUsedWalletPeriod: WalletPeriod = .month
+    @Published var creditCardViewMode: CreditCardViewMode = .transactions
     /// Number of months to include in USD vs BTC report (e.g. 48 = 4 years).
     @Published var usdBtcMonthsBack: Int = 48
     @Published var isLoading = false
@@ -130,14 +137,71 @@ final class ReportsViewModel: ObservableObject {
     private let context: NSManagedObjectContext
     private let bitcoinPriceService: BitcoinPriceService
     private let calendar = Calendar.current
+    private var creditCardManager: CreditCardManager?
 
-    init(context: NSManagedObjectContext, bitcoinPriceService: BitcoinPriceService) {
+    init(context: NSManagedObjectContext, bitcoinPriceService: BitcoinPriceService, creditCardManager: CreditCardManager? = nil) {
         self.context = context
         self.bitcoinPriceService = bitcoinPriceService
+        self.creditCardManager = creditCardManager
         if let raw = UserDefaults.standard.string(forKey: Self.lastPeriodKey),
            let p = WalletPeriod(rawValue: raw) {
             lastUsedWalletPeriod = p
         }
+        if let raw = UserDefaults.standard.string(forKey: Self.lastCreditCardViewModeKey),
+           let mode = CreditCardViewMode(rawValue: raw) {
+            creditCardViewMode = mode
+        }
+    }
+    
+    func setCreditCardViewMode(_ mode: CreditCardViewMode) {
+        creditCardViewMode = mode
+        UserDefaults.standard.set(mode.rawValue, forKey: Self.lastCreditCardViewModeKey)
+    }
+    
+    /// Jumps to the current period (today's week/month/year)
+    func jumpToCurrentPeriod() {
+        let now = Date()
+        switch lastUsedWalletPeriod {
+        case .week:
+            selectedWeekStart = startOfWeek(for: now)
+            loadWeekReport()
+        case .month:
+            selectedMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
+            loadMonthlyReport()
+        case .year:
+            selectedYear = calendar.component(.year, from: now)
+            loadYearWrapReport()
+        }
+    }
+    
+    /// Checks if there's data available for a specific period
+    func hasDataForPeriod(_ period: WalletPeriod, date: Date) -> Bool {
+        let (start, end): (Date, Date) = {
+            switch period {
+            case .week:
+                let weekStart = startOfWeek(for: date)
+                guard let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) else {
+                    return (weekStart, weekStart)
+                }
+                return (weekStart, weekEnd)
+            case .month:
+                let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: date)) ?? date
+                guard let monthEnd = calendar.date(byAdding: .month, value: 1, to: monthStart) else {
+                    return (monthStart, monthStart)
+                }
+                return (monthStart, monthEnd)
+            case .year:
+                let year = calendar.component(.year, from: date)
+                let yearStart = calendar.date(from: DateComponents(year: year, month: 1, day: 1)) ?? date
+                guard let yearEnd = calendar.date(byAdding: .year, value: 1, to: yearStart) else {
+                    return (yearStart, yearStart)
+                }
+                return (yearStart, yearEnd)
+            }
+        }()
+        
+        let entries = fetchEntries(from: start, to: end)
+        return !entries.isEmpty
     }
 
     func setLastUsedWalletPeriod(_ p: WalletPeriod) {
@@ -802,13 +866,26 @@ final class ReportsViewModel: ObservableObject {
             }
         }()
         
-        // Get all categories from the period
+        // Get all categories from the period (filtered by view mode)
         let entries = fetchEntries(from: start, to: end)
         var allCategories: Set<String> = []
         for entry in entries {
             guard let account = entry.account, !account.isHiddenFlag else { continue }
             let usd = reportUSDAmount(for: entry, account: account, btcService: bitcoinPriceService)
             guard usd < 0 else { continue }
+            
+            // Filter based on credit card view mode
+            let isCreditCardPayment = isCreditCardPaymentTransaction(entry)
+            
+            switch creditCardViewMode {
+            case .payments:
+                // Only include credit card payment transactions
+                guard isCreditCardPayment else { continue }
+            case .transactions:
+                // Exclude credit card payment transactions
+                guard !isCreditCardPayment else { continue }
+            }
+            
             let cat = entry.category?.isEmpty == false ? entry.category! : "Uncategorized"
             allCategories.insert(cat)
         }
@@ -872,6 +949,19 @@ final class ReportsViewModel: ObservableObject {
                 guard let account = entry.account, !account.isHiddenFlag else { continue }
                 let usd = reportUSDAmount(for: entry, account: account, btcService: bitcoinPriceService)
                 guard usd < 0 else { continue }
+                
+                // Filter based on credit card view mode
+                let isCreditCardPayment = isCreditCardPaymentTransaction(entry)
+                
+                switch creditCardViewMode {
+                case .payments:
+                    // Only show credit card payment transactions
+                    guard isCreditCardPayment else { continue }
+                case .transactions:
+                    // Exclude credit card payment transactions, show individual transactions
+                    guard !isCreditCardPayment else { continue }
+                }
+                
                 let cat = entry.category?.isEmpty == false ? entry.category! : "Uncategorized"
                 categoryAmounts[cat, default: 0] += abs(usd)
             }
@@ -895,5 +985,159 @@ final class ReportsViewModel: ObservableObject {
         }
         
         return result
+    }
+    
+    // MARK: - Credit Card Detection
+    
+    /// Determines if a transaction is a credit card payment (vs. an individual credit card transaction)
+    /// Credit card payments are the payments you make TO the credit card, not the individual transactions ON the card
+    private func isCreditCardPaymentTransaction(_ entry: LedgerEntry) -> Bool {
+        guard let title = entry.title else { return false }
+        let titleLower = title.lowercased()
+        
+        // 1. Check if title explicitly contains "Credit Card Payment" or "Credit Card" + "Payment"
+        if titleLower.contains("credit card payment") {
+            return true
+        }
+        if titleLower.contains("credit card") && titleLower.contains("payment") {
+            return true
+        }
+        
+        // 2. Check if title matches any card name from CreditCardManager AND contains "payment" or is a credit
+        if let cardManager = creditCardManager {
+            for cardName in cardManager.cards {
+                let cardNameLower = cardName.lowercased()
+                // If title contains the card name and either "payment" keyword or it's a credit transaction
+                if titleLower.contains(cardNameLower) {
+                    // If it contains "payment" or is a credit (payment TO the card), it's likely a payment
+                    if titleLower.contains("payment") || entry.isCredit {
+                        return true
+                    }
+                }
+            }
+        }
+        
+        return false
+    }
+    
+    // MARK: - Credit Card Spending Calculation
+    
+    /// Calculates total credit card spending (transactions, not payments) for a given period
+    func creditCardSpending(for period: WalletPeriod) -> Decimal {
+        let (start, end): (Date, Date) = {
+            switch period {
+            case .week:
+                let weekStart = startOfWeek(for: selectedWeekStart)
+                guard let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) else {
+                    return (weekStart, weekStart)
+                }
+                return (weekStart, weekEnd)
+            case .month:
+                let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: selectedMonth))!
+                guard let monthEnd = calendar.date(byAdding: .month, value: 1, to: monthStart) else {
+                    return (monthStart, monthStart)
+                }
+                return (monthStart, monthEnd)
+            case .year:
+                let yearStart = calendar.date(from: DateComponents(year: selectedYear, month: 1, day: 1))!
+                guard let yearEnd = calendar.date(byAdding: .year, value: 1, to: yearStart) else {
+                    return (yearStart, yearStart)
+                }
+                return (yearStart, yearEnd)
+            }
+        }()
+        
+        let entries = fetchEntries(from: start, to: end)
+        var totalSpending: Decimal = 0
+        
+        for entry in entries {
+            guard let account = entry.account, !account.isHiddenFlag else { continue }
+            let usd = reportUSDAmount(for: entry, account: account, btcService: bitcoinPriceService)
+            guard usd < 0 else { continue }
+            
+            // Only include credit card transactions (exclude payments)
+            let isCreditCardPayment = isCreditCardPaymentTransaction(entry)
+            guard !isCreditCardPayment else { continue }
+            
+            // Check if this is a credit card transaction (has credit card in title or matches card name)
+            if isCreditCardTransaction(entry) {
+                totalSpending += abs(usd)
+            }
+        }
+        
+        return totalSpending
+    }
+    
+    /// Determines if a transaction is a credit card transaction (individual spending on a card)
+    private func isCreditCardTransaction(_ entry: LedgerEntry) -> Bool {
+        guard let title = entry.title else { return false }
+        let titleLower = title.lowercased()
+        
+        // Check if title contains credit card keywords (but not "payment")
+        if titleLower.contains("credit card") && !titleLower.contains("payment") {
+            return true
+        }
+        
+        // Check if it matches any card name from CreditCardManager (but not a payment)
+        if let cardManager = creditCardManager {
+            for cardName in cardManager.cards {
+                let cardNameLower = cardName.lowercased()
+                if titleLower.contains(cardNameLower) && !titleLower.contains("payment") && !entry.isCredit {
+                    return true
+                }
+            }
+        }
+        
+        return false
+    }
+    
+    /// Gets all transactions for a specific category within a period
+    func transactionsForCategory(_ category: String, period: WalletPeriod) -> [LedgerEntry] {
+        let (start, end): (Date, Date) = {
+            switch period {
+            case .week:
+                let weekStart = startOfWeek(for: selectedWeekStart)
+                guard let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart) else {
+                    return (weekStart, weekStart)
+                }
+                return (weekStart, weekEnd)
+            case .month:
+                let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: selectedMonth))!
+                guard let monthEnd = calendar.date(byAdding: .month, value: 1, to: monthStart) else {
+                    return (monthStart, monthStart)
+                }
+                return (monthStart, monthEnd)
+            case .year:
+                let yearStart = calendar.date(from: DateComponents(year: selectedYear, month: 1, day: 1))!
+                guard let yearEnd = calendar.date(byAdding: .year, value: 1, to: yearStart) else {
+                    return (yearStart, yearStart)
+                }
+                return (yearStart, yearEnd)
+            }
+        }()
+        
+        let entries = fetchEntries(from: start, to: end)
+        let categoryName = category.isEmpty ? nil : category
+        
+        return entries.filter { entry in
+            guard let account = entry.account, !account.isHiddenFlag else { return false }
+            let usd = reportUSDAmount(for: entry, account: account, btcService: bitcoinPriceService)
+            guard usd < 0 else { return false }
+            
+            // Filter based on credit card view mode
+            let isCreditCardPayment = isCreditCardPaymentTransaction(entry)
+            
+            switch creditCardViewMode {
+            case .payments:
+                // Only show credit card payment transactions
+                guard isCreditCardPayment else { return false }
+            case .transactions:
+                // Exclude credit card payment transactions
+                guard !isCreditCardPayment else { return false }
+            }
+            
+            let entryCategory = entry.category?.isEmpty == false ? entry.category! : "Uncategorized"
+            return entryCategory == (categoryName ?? "Uncategorized")
+        }.sorted { ($0.date ?? Date.distantPast) > ($1.date ?? Date.distantPast) }
     }
 }

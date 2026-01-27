@@ -39,6 +39,7 @@ struct ManualIncomeEntrySheet: View {
                             Text(account.name ?? "Account").tag(account as Account?)
                         }
                     }
+                    .pickerStyle(.menu)
                 } header: {
                     Text("Account")
                 }

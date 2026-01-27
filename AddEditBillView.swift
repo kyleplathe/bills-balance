@@ -190,6 +190,7 @@ struct AddEditBillView: View {
                     Text(recurrenceDisplayName(for: option)).tag(option)
                 }
             }
+            .pickerStyle(.menu)
             .onChange(of: recurrenceType) { oldType, newType in
                 guard oldType != newType else { return }
                     switch newType {

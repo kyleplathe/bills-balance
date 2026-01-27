@@ -27,11 +27,13 @@ struct BillsAndBalanceApp: App {
         let accountVM = AccountViewModel(context: context)
         let billVM = BillViewModel(context: context, notificationManager: notifManager, accountViewModel: accountVM)
         let paycheckVM = PaycheckViewModel(context: context, accountViewModel: accountVM)
+        let creditCardMgr = CreditCardManager()
         _notificationManager = StateObject(wrappedValue: notifManager)
         _accountViewModel = StateObject(wrappedValue: accountVM)
         _billViewModel = StateObject(wrappedValue: billVM)
         _paycheckViewModel = StateObject(wrappedValue: paycheckVM)
-        _reportsViewModel = StateObject(wrappedValue: ReportsViewModel(context: context, bitcoinPriceService: BitcoinPriceService.shared))
+        _creditCardManager = StateObject(wrappedValue: creditCardMgr)
+        _reportsViewModel = StateObject(wrappedValue: ReportsViewModel(context: context, bitcoinPriceService: BitcoinPriceService.shared, creditCardManager: creditCardMgr))
     }
 
     var body: some Scene {

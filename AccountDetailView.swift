@@ -32,54 +32,9 @@ struct AccountDetailView: View {
     @State private var lastShakeTime: Date = Date.distantPast
     
     var body: some View {
-        List {
-            // Balance badge dropdown section
-            Section {
-                balanceBadgeDropdown
-                    .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-            }
-            
-            // Transactions section
-            if accountTransactions.isEmpty {
-                Section {
-                    Text("No transactions yet")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity)
-                        .listRowInsets(EdgeInsets(top: 32, leading: 20, bottom: 32, trailing: 20))
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                } header: {
-                    Text("Transactions")
-                        .font(.headline)
-                }
-            } else {
-                ForEach(groupedTransactions.keys.sorted(by: >), id: \.self) { monthDate in
-                    let transactions = transactionsForMonth(monthDate)
-                    Section(header: monthSectionHeader(for: monthDate)) {
-                    ForEach(transactions, id: \.objectID) { entry in
-                        TransactionRow(
-                            entry: entry,
-                            account: account,
-                            onReconcile: { entry in
-                                transactionToReconcile = entry
-                                showingReconcileDrawer = true
-                            }
-                        ) {
-                            selectedTransaction = entry
-                            showingTransactionEditor = true
-                        }
-                        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
-                        .listRowBackground(Color.clear)
-                    }
-                    }
-                }
-            }
-        }
-        .listStyle(.insetGrouped)
-        .navigationBarTitleDisplayMode(.inline)
+        accountList
+            .listStyle(.insetGrouped)
+            .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 // Edit account button
@@ -130,9 +85,9 @@ struct AccountDetailView: View {
                 .environmentObject(bitcoinPriceService)
         }
         .sheet(isPresented: $showingTransfer) {
-            // TODO: Implement transfer view
-            Text("Transfer functionality coming soon")
-                .padding()
+            TransferSheet(fromAccount: account)
+                .environmentObject(accountViewModel)
+                .environmentObject(bitcoinPriceService)
         }
         .sheet(isPresented: $showingTransactionEditor) {
             if let entry = selectedTransaction {
@@ -163,16 +118,29 @@ struct AccountDetailView: View {
             }
         }
         .onChange(of: showingReconcileDrawer) { oldValue, newValue in
-            if newValue, let entry = transactionToReconcile {
+            if newValue, let entry = transactionToReconcile, let account = entry.account {
                 // Initialize fields when drawer opens
+                let displayFormat = account.btcDisplayFormat ?? "sats"
+                
                 if entry.btcAmountDecimal > 0 {
-                    // Already has sats - populate fields
-                    let sats = entry.btcAmountDecimal * 100_000_000
-                    let formatter = NumberFormatter()
-                    formatter.numberStyle = .decimal
-                    formatter.maximumFractionDigits = 0
-                    formatter.groupingSeparator = ","
-                    reconcileSatsString = formatter.string(from: sats as NSDecimalNumber) ?? ""
+                    // Already has BTC amount - populate fields
+                    if displayFormat == "sats" {
+                        let sats = entry.btcAmountDecimal * 100_000_000
+                        let formatter = NumberFormatter()
+                        formatter.numberStyle = .decimal
+                        formatter.maximumFractionDigits = 0
+                        formatter.groupingSeparator = ","
+                        formatter.usesGroupingSeparator = true
+                        reconcileSatsString = formatter.string(from: sats as NSDecimalNumber) ?? ""
+                    } else {
+                        let formatter = NumberFormatter()
+                        formatter.numberStyle = .decimal
+                        formatter.groupingSeparator = ","
+                        formatter.usesGroupingSeparator = true
+                        formatter.minimumFractionDigits = 2
+                        formatter.maximumFractionDigits = 8
+                        reconcileSatsString = formatter.string(from: entry.btcAmountDecimal as NSDecimalNumber) ?? ""
+                    }
                 }
                 
                 if entry.btcPriceAtTransactionDecimal > 0 {
@@ -181,7 +149,7 @@ struct AccountDetailView: View {
                     formatter.maximumFractionDigits = 2
                     reconcileBTCPriceString = formatter.string(from: entry.btcPriceAtTransactionDecimal as NSDecimalNumber) ?? ""
                 } else {
-                    // Pre-fill with current BTC price
+                    // Pre-fill with current BTC price as a starting point
                     let currentPrice = bitcoinPriceService.btcToUsdRate
                     let formatter = NumberFormatter()
                     formatter.numberStyle = .decimal
@@ -230,6 +198,63 @@ struct AccountDetailView: View {
             if account.currencyCode == "BTC" {
                 withAnimation {
                     bitcoinPriceService.showInBitcoin.toggle()
+                }
+            }
+        }
+    }
+    
+    // MARK: - View Components
+    
+    private var accountList: some View {
+        List {
+            // Balance badge dropdown section
+            Section {
+                balanceBadgeDropdown
+                    .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            }
+            
+            // Transactions section
+            transactionsSection
+        }
+    }
+    
+    private var transactionsSection: some View {
+        Group {
+            if accountTransactions.isEmpty {
+                Section {
+                    Text("No transactions yet")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .listRowInsets(EdgeInsets(top: 32, leading: 20, bottom: 32, trailing: 20))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                } header: {
+                    Text("Transactions")
+                        .font(.headline)
+                }
+            } else {
+                ForEach(groupedTransactions.keys.sorted(by: >), id: \.self) { monthDate in
+                    let transactions = transactionsForMonth(monthDate)
+                    Section(header: monthSectionHeader(for: monthDate)) {
+                        ForEach(transactions, id: \.objectID) { entry in
+                            TransactionRow(
+                                entry: entry,
+                                account: account,
+                                onReconcile: { entry in
+                                    transactionToReconcile = entry
+                                    showingReconcileDrawer = true
+                                }
+                            ) {
+                                selectedTransaction = entry
+                                showingTransactionEditor = true
+                            }
+                            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+                            .listRowBackground(Color.clear)
+                        }
+                    }
                 }
             }
         }
@@ -837,14 +862,24 @@ struct AccountDetailView: View {
     }
     
     private func saveReconciledTransaction(entry: LedgerEntry) {
-        // Get sats amount
-        let cleanedSats = reconcileSatsString.replacingOccurrences(of: ",", with: "")
-        guard let sats = Int(cleanedSats), sats > 0 else {
-            return
-        }
+        guard let account = entry.account else { return }
         
-        // Convert sats to BTC
-        let btcAmount = Decimal(sats) / 100_000_000
+        // Get BTC amount (sats or BTC based on account display format)
+        let displayFormat = account.btcDisplayFormat ?? "sats"
+        let cleaned = reconcileSatsString.replacingOccurrences(of: ",", with: "")
+        
+        let btcAmount: Decimal
+        if displayFormat == "sats" {
+            guard let sats = Int(cleaned), sats > 0 else {
+                return
+            }
+            btcAmount = Decimal(sats) / 100_000_000
+        } else {
+            guard let btc = Decimal(string: cleaned), btc > 0 else {
+                return
+            }
+            btcAmount = btc
+        }
         
         // Get BTC price (use provided or calculate from USD and BTC)
         let btcPrice: Decimal
@@ -922,11 +957,14 @@ private struct TransactionReconcileDrawer: View {
                 
                 Section {
                     HStack {
-                        TextField("Sats", text: $satsString)
-                            .keyboardType(.numberPad)
+                        let account = entry.account
+                        let displayFormat = account?.btcDisplayFormat ?? "sats"
+                        let placeholder = displayFormat == "sats" ? "Sats" : "BTC Amount"
+                        TextField(placeholder, text: $satsString)
+                            .keyboardType(displayFormat == "sats" ? .numberPad : .decimalPad)
                             .focused($focusedField, equals: .sats)
                             .onChange(of: satsString) { _, newValue in
-                                // Auto-calculate BTC price when sats are entered
+                                // Auto-calculate BTC price when sats/BTC are entered
                                 autoCalculatePrice()
                             }
                         if !satsString.isEmpty {
@@ -955,12 +993,30 @@ private struct TransactionReconcileDrawer: View {
                 } header: {
                     Text("Bitcoin Details")
                 } footer: {
-                    if !satsString.isEmpty, let sats = Int(satsString.replacingOccurrences(of: ",", with: "")) {
-                        let btcAmount = Decimal(sats) / 100_000_000
+                    if !satsString.isEmpty {
+                        let account = entry.account
+                        let displayFormat = account?.btcDisplayFormat ?? "sats"
+                        let cleaned = satsString.replacingOccurrences(of: ",", with: "")
+                        
+                        let btcAmount: Decimal = {
+                            if displayFormat == "sats" {
+                                if let sats = Int(cleaned) {
+                                    return Decimal(sats) / 100_000_000
+                                } else {
+                                    return 0
+                                }
+                            } else {
+                                return Decimal(string: cleaned) ?? 0
+                            }
+                        }()
+                        
                         let calculatedPrice = usdAmount > 0 && btcAmount > 0 ? usdAmount / btcAmount : Decimal(0)
+                        
                         if calculatedPrice > 0 {
                             Text("Calculated price: $\(formatPrice(calculatedPrice))")
                                 .font(.caption)
+                        } else {
+                            EmptyView()
                         }
                     }
                 }
@@ -988,13 +1044,29 @@ private struct TransactionReconcileDrawer: View {
     }
     
     private func autoCalculatePrice() {
-        let cleanedSats = satsString.replacingOccurrences(of: ",", with: "")
-        guard let sats = Int(cleanedSats), sats > 0, usdAmount > 0 else {
+        guard let account = entry.account else {
             btcPriceString = ""
             return
         }
         
-        let btcAmount = Decimal(sats) / 100_000_000
+        let displayFormat = account.btcDisplayFormat ?? "sats"
+        let cleaned = satsString.replacingOccurrences(of: ",", with: "")
+        
+        let btcAmount: Decimal
+        if displayFormat == "sats" {
+            guard let sats = Int(cleaned), sats > 0, usdAmount > 0 else {
+                btcPriceString = ""
+                return
+            }
+            btcAmount = Decimal(sats) / 100_000_000
+        } else {
+            guard let btc = Decimal(string: cleaned), btc > 0, usdAmount > 0 else {
+                btcPriceString = ""
+                return
+            }
+            btcAmount = btc
+        }
+        
         guard btcAmount > 0 else {
             btcPriceString = ""
             return
@@ -1153,12 +1225,14 @@ private struct TransactionRow: View {
             // Transaction status icon - green circle with white checkmark for cleared
             // Tappable to toggle reconciled status
             Button {
-                // Check if this is a BTC account and transaction is missing sats
+                // When checking off (reconciling) a transaction:
+                // If it's a BTC account and missing sats, open reconcile drawer
+                // Otherwise, toggle reconciled status directly
                 if account.currencyCode == "BTC" && !entry.isReconciledFlag && entry.btcAmountDecimal == 0 {
-                    // Missing sats - show reconciliation drawer
+                    // About to reconcile but missing sats - show reconciliation drawer
                     onReconcile(entry)
                 } else {
-                    // Has sats or not BTC account - toggle directly
+                    // Has sats, not BTC account, or unreconciling - toggle directly
                     accountViewModel.toggleReconciled(for: entry)
                 }
             } label: {
@@ -1525,6 +1599,9 @@ private struct TransactionEditorSheet: View {
             .navigationTitle("Edit Transaction")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    LiveDateTimeView()
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         dismiss()

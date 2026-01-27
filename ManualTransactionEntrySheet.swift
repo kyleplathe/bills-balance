@@ -35,9 +35,14 @@ struct ManualTransactionEntrySheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                // Section 1: Basic Transaction Details (Traditional bookkeeping order)
                 Section {
+                    // 1. Date - When did this happen? (Most important context)
+                    DatePicker("Date", selection: $date, displayedComponents: .date)
+                    
+                    // 2. Description - What is this transaction?
                     HStack {
-                        TextField("Name", text: $title)
+                        TextField("Description", text: $title)
                             .onChange(of: title) { _, newValue in
                                 // Auto-categorize based on transaction name
                                 if category.isEmpty {
@@ -58,23 +63,24 @@ struct ManualTransactionEntrySheet: View {
                         }
                     }
                     
-                    DatePicker("Date", selection: $date, displayedComponents: .date)
-                    
+                    // 3. Type - Add or Subtract
                     Picker("", selection: $isCredit) {
                         Text("Add (+)").tag(true)
                         Text("Subtract (-)").tag(false)
                     }
                     .pickerStyle(.segmented)
-                    
-                    CategoryPicker(selection: $category, usage: accountViewModel.categoryUsage())
-                        .environmentObject(categoryManager)
-                    
+                } header: {
+                    Text("Transaction Details")
+                }
+                
+                // Section 2: Amount (Primary value)
+                Section {
                     if isBTCAccount {
                         // USD Amount
                         HStack {
                             Text("$")
                                 .foregroundColor(.secondary)
-                            TextField("0.00", text: $amountString)
+                            TextField("Amount", text: $amountString)
                                 .keyboardType(.decimalPad)
                                 .onChange(of: amountString) { _, newValue in
                                     // Auto-calculate fee when amount changes
@@ -128,18 +134,55 @@ struct ManualTransactionEntrySheet: View {
                                 let total = amount + fee
                                 Text(formatCurrency(total))
                                     .fontWeight(.semibold)
+                            } else if let amount = Decimal(string: amountString.replacingOccurrences(of: ",", with: "")) {
+                                Text(formatCurrency(amount))
+                                    .fontWeight(.semibold)
                             } else {
                                 Text("$0.00")
                                     .foregroundColor(.secondary)
                             }
                         }
-                        
-                        // Sats Amount
+                    } else {
+                        // USD accounts - simple amount field
                         HStack {
-                            TextField("Sats Amount", text: $satsAmountString)
-                                .keyboardType(.numberPad)
+                            Text("$")
+                                .foregroundColor(.secondary)
+                            TextField("Amount", text: $amountString)
+                                .keyboardType(.decimalPad)
+                            if !amountString.isEmpty {
+                                Button {
+                                    amountString = ""
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.secondary)
+                                        .font(.system(size: 16))
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Amount")
+                }
+                
+                // Section 3: Category (Organization)
+                Section {
+                    CategoryPicker(selection: $category, usage: accountViewModel.categoryUsage())
+                        .environmentObject(categoryManager)
+                } header: {
+                    Text("Category")
+                }
+                
+                // Section 4: Bitcoin Details (Optional - for reconciliation)
+                if isBTCAccount {
+                    Section {
+                        // BTC Amount (Sats or BTC based on account display format) - Optional for pending transactions
+                        HStack {
+                            let displayFormat = account.btcDisplayFormat ?? "sats"
+                            let placeholder = displayFormat == "sats" ? "Sats Amount (Optional)" : "BTC Amount (Optional)"
+                            TextField(placeholder, text: $satsAmountString)
+                                .keyboardType(displayFormat == "sats" ? .numberPad : .decimalPad)
                                 .onChange(of: satsAmountString) { _, newValue in
-                                    // Auto-calculate BTC price when sats are entered
+                                    // Auto-calculate BTC price when amount is entered
                                     autoCalculateBTCPrice()
                                 }
                             if !satsAmountString.isEmpty {
@@ -154,7 +197,7 @@ struct ManualTransactionEntrySheet: View {
                             }
                         }
                         
-                        // BTC Price (auto-calculated or current price)
+                        // BTC Price (auto-calculated from USD and BTC amounts, or shown when reconciling)
                         HStack {
                             Text("BTC Price")
                             Spacer()
@@ -162,33 +205,23 @@ struct ManualTransactionEntrySheet: View {
                                 Text("$\(btcPriceString)")
                                     .foregroundColor(.secondary)
                             } else {
-                                Text(formatCurrency(bitcoinPriceService.btcToUsdRate))
+                                Text("Enter BTC/Sats to calculate (optional for pending)")
                                     .foregroundColor(.secondary)
+                                    .font(.caption)
                             }
                         }
-                    } else {
-                        // USD accounts - simple amount field
-                        HStack {
-                            Text("$")
-                                .foregroundColor(.secondary)
-                            TextField("0.00", text: $amountString)
-                                .keyboardType(.decimalPad)
-                            if !amountString.isEmpty {
-                                Button {
-                                    amountString = ""
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundColor(.secondary)
-                                        .font(.system(size: 16))
-                                }
-                            }
-                        }
+                    } header: {
+                        Text("Bitcoin Details")
+                    } footer: {
+                        Text("Optional: Add BTC/Sats amount when reconciling pending transactions")
+                            .font(.caption)
                     }
-                    
-                    Toggle("Cleared", isOn: $isCleared)
                 }
                 
+                // Section 5: Status & Notes
                 Section {
+                    Toggle("Cleared", isOn: $isCleared)
+                    
                     HStack(alignment: .top) {
                         TextField("Notes", text: $notes, axis: .vertical)
                             .lineLimit(3...6)
@@ -203,11 +236,16 @@ struct ManualTransactionEntrySheet: View {
                             .padding(.top, 4)
                         }
                     }
+                } header: {
+                    Text("Additional Information")
                 }
             }
             .navigationTitle("New Transaction")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    LiveDateTimeView()
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         dismiss()
@@ -241,20 +279,31 @@ struct ManualTransactionEntrySheet: View {
         let fee = Decimal(string: feeCleaned) ?? 0
         let totalUSD = amount + fee
         
-        // Get sats amount
-        let cleanedSats = satsAmountString.replacingOccurrences(of: ",", with: "")
-        guard let sats = Int(cleanedSats), sats > 0 else {
-            btcPriceString = ""
-            return
+        // Get BTC amount (sats or BTC based on account display format)
+        let displayFormat = account.btcDisplayFormat ?? "sats"
+        let cleanedAmount = satsAmountString.replacingOccurrences(of: ",", with: "")
+        
+        let btcAmount: Decimal
+        if displayFormat == "sats" {
+            guard let sats = Int(cleanedAmount), sats > 0 else {
+                btcPriceString = ""
+                return
+            }
+            btcAmount = Decimal(sats) / 100_000_000
+        } else {
+            guard let btc = Decimal(string: cleanedAmount), btc > 0 else {
+                btcPriceString = ""
+                return
+            }
+            btcAmount = btc
         }
         
-        // Calculate BTC price: USD / BTC
-        let btcAmount = Decimal(sats) / 100_000_000
         guard btcAmount > 0 else {
             btcPriceString = ""
             return
         }
         
+        // Calculate BTC price: USD / BTC
         let calculatedPrice = totalUSD / btcAmount
         
         // Format and update BTC price string
@@ -357,29 +406,45 @@ struct ManualTransactionEntrySheet: View {
             
             let totalAmount = amount + feeAmount
             
-            // Get sats amount if provided
+            // Get BTC amount if provided (sats or BTC based on account display format)
             let satsAmount: Decimal? = {
-                let cleanedSats = satsAmountString.replacingOccurrences(of: ",", with: "")
-                if let sats = Int(cleanedSats), sats > 0 {
-                    return Decimal(sats) / 100_000_000 // Convert sats to BTC
+                let displayFormat = account.btcDisplayFormat ?? "sats"
+                let cleanedAmount = satsAmountString.replacingOccurrences(of: ",", with: "")
+                
+                if displayFormat == "sats" {
+                    if let sats = Int(cleanedAmount), sats > 0 {
+                        return Decimal(sats) / 100_000_000 // Convert sats to BTC
+                    }
+                } else {
+                    if let btc = Decimal(string: cleanedAmount), btc > 0 {
+                        return btc
+                    }
                 }
                 return nil
             }()
             
-            // Get BTC price (use calculated price if available, otherwise current price)
-            let btcPrice: Decimal = {
+            // Get BTC price - calculate from USD and BTC amounts if both are available
+            // For pending transactions, BTC amount and price can be nil (will be added during reconciliation)
+            let btcPrice: Decimal? = {
                 if !btcPriceString.isEmpty {
+                    // Use calculated price from autoCalculateBTCPrice
                     let cleanedPrice = btcPriceString.replacingOccurrences(of: ",", with: "").replacingOccurrences(of: "$", with: "")
-                    return Decimal(string: cleanedPrice) ?? bitcoinPriceService.btcToUsdRate
-                } else if let sats = satsAmount, sats > 0, totalAmount > 0 {
-                    // Auto-calculate from USD and BTC amounts
-                    return totalAmount / sats
-                } else {
-                    return bitcoinPriceService.btcToUsdRate
+                    if let price = Decimal(string: cleanedPrice), price > 0 {
+                        return price
+                    }
                 }
+                
+                // Calculate from USD and BTC amounts if both are available
+                if let sats = satsAmount, sats > 0, totalAmount > 0 {
+                    return totalAmount / sats
+                }
+                
+                // If we can't calculate, return nil (pending transaction - will be reconciled later)
+                return nil
             }()
             
             // Store fee separately (not in notes)
+            // For pending transactions, btcAmount and btcPrice can be nil
             accountViewModel.addManualEntry(
                 to: account,
                 title: title,

@@ -59,6 +59,7 @@ struct StatementImportSheet: View {
                             }
                         }
                         .pickerStyle(.menu)
+                        .pickerStyle(.menu)
                     }
                 } header: {
                     Text("Import into")

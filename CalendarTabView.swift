@@ -26,7 +26,10 @@ private struct DayDetailCard: View {
             } else {
                 VStack(spacing: 12) {
                     ForEach(occurrences) { occurrence in
-                        BillDueRow(occurrence: occurrence, currencyCode: currencyCode)
+                        BillDueRow(occurrence: occurrence, 
+                                 currencyCode: currencyCode,
+                                 onEdit: nil, // DayDetailCard doesn't have callbacks
+                                 onDelete: nil)
                         if occurrence.id != occurrences.last?.id {
                             Divider()
                                 .overlay(Color.white.opacity(colorScheme == .dark ? 0.06 : 0.12))
@@ -77,6 +80,10 @@ struct CalendarTabView: View {
     @State private var paycheckOccurrenceDate: Date?
     @State private var isLandscape: Bool = false
     @State private var showPaidBillsInLandscape: Bool = false
+    @State private var billToDelete: Bill?
+    @State private var paycheckToDelete: Paycheck?
+    @State private var showingDeleteBillAlert = false
+    @State private var showingDeletePaycheckAlert = false
     
     init(selectedMonth: Binding<Date?> = .constant(nil)) {
         self._selectedMonth = selectedMonth
@@ -133,6 +140,28 @@ struct CalendarTabView: View {
                               occurrenceDate: paycheckOccurrenceDate)
                 .environmentObject(paycheckViewModel)
                 .environmentObject(accountViewModel)
+        }
+        .alert("Delete Bill", isPresented: $showingDeleteBillAlert, presenting: billToDelete) { bill in
+            Button("Cancel", role: .cancel) {
+                billToDelete = nil
+            }
+            Button("Delete", role: .destructive) {
+                billViewModel.deleteBill(bill)
+                billToDelete = nil
+            }
+        } message: { bill in
+            Text("Are you sure you want to delete \"\(bill.name ?? "this bill")\"? This action cannot be undone.")
+        }
+        .alert("Delete Income", isPresented: $showingDeletePaycheckAlert, presenting: paycheckToDelete) { paycheck in
+            Button("Cancel", role: .cancel) {
+                paycheckToDelete = nil
+            }
+            Button("Delete", role: .destructive) {
+                paycheckViewModel.deletePaycheck(paycheck)
+                paycheckToDelete = nil
+            }
+        } message: { paycheck in
+            Text("Are you sure you want to delete \"\(paycheck.name ?? "this income")\"? This action cannot be undone.")
         }
         .onAppear {
             let today = Date()
@@ -592,6 +621,14 @@ struct CalendarTabView: View {
                                     let occurrenceDate = incomeOccurrences(for: selectedDate)
                                         .first(where: { $0.paycheck == paycheck })?.date
                                     presentPaycheckEditor(paycheck, occurrenceDate: occurrenceDate)
+                                },
+                                onDeleteBill: { bill in
+                                    billToDelete = bill
+                                    showingDeleteBillAlert = true
+                                },
+                                onDeleteIncome: { paycheck in
+                                    paycheckToDelete = paycheck
+                                    showingDeletePaycheckAlert = true
                                 }) {
                     dismissDayDrawer()
                 }
@@ -867,6 +904,8 @@ private struct DayDetailDrawer: View {
     let onAddIncomeTransaction: (() -> Void)?
     let onEditBill: ((Bill) -> Void)?
     let onEditIncome: ((Paycheck) -> Void)?
+    let onDeleteBill: ((Bill) -> Void)?
+    let onDeleteIncome: ((Paycheck) -> Void)?
     let onClose: () -> Void
     @State private var dragOffset: CGFloat = 0
     
@@ -967,7 +1006,10 @@ private struct DayDetailDrawer: View {
                             VStack(alignment: .leading, spacing: 12) {
                         if !bills.isEmpty {
                                 ForEach(bills) { occurrence in
-                                    BillDueRow(occurrence: occurrence, currencyCode: currencyCode)
+                                    BillDueRow(occurrence: occurrence, 
+                                             currencyCode: currencyCode,
+                                             onEdit: { onEditBill?(occurrence.bill) },
+                                             onDelete: { onDeleteBill?(occurrence.bill) })
                                         .padding(.vertical, 12)
                                         .padding(.horizontal, 14)
                                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1044,11 +1086,8 @@ private struct DayDetailDrawer: View {
                                                   // Enhanced feedback: haptic, sound, and visual confirmation
                                                   HapticManager.shared.success()
                                               },
-                                              onEdit: {
-                                                  if let handler = onEditIncome {
-                                                      handler(occurrence.paycheck)
-                                                  }
-                                              })
+                                              onEdit: { onEditIncome?(occurrence.paycheck) },
+                                              onDelete: { onDeleteIncome?(occurrence.paycheck) })
                                     .environmentObject(accountViewModel)
                                         .padding(.vertical, 12)
                                         .padding(.horizontal, 14)
@@ -1362,7 +1401,10 @@ private struct MonthBillList: View {
         if !bills.isEmpty {
             VStack(spacing: 10) {
                 ForEach(bills) { occurrence in
-                    BillDueRow(occurrence: occurrence, currencyCode: currencyCode)
+                    BillDueRow(occurrence: occurrence, 
+                             currencyCode: currencyCode,
+                             onEdit: nil, // MonthBillList doesn't have edit/delete callbacks
+                             onDelete: nil)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
                         .background(
@@ -1386,6 +1428,8 @@ private struct BillDueRow: View {
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     let occurrence: BillOccurrence
     let currencyCode: String
+    var onEdit: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
     
     var body: some View {
         let bill = occurrence.bill
@@ -1426,6 +1470,25 @@ private struct BillDueRow: View {
                 }
             }
         }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            if let onDelete = onDelete {
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            if let onEdit = onEdit {
+                Button {
+                    onEdit()
+                } label: {
+                    Label("Edit", systemImage: "pencil")
+                }
+                .tint(.blue)
+            }
+        }
     }
     
     @ViewBuilder
@@ -1464,6 +1527,7 @@ private struct PaycheckRow: View {
     let currencyCode: String
     let onAddToAccount: () -> Void
     var onEdit: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
     
     @State private var isAnimating = false
     
@@ -1562,7 +1626,16 @@ private struct PaycheckRow: View {
                 }
             }
         }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            if let onDelete = onDelete {
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
             if let onEdit = onEdit {
                 Button {
                     onEdit()
