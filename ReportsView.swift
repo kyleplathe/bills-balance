@@ -2,7 +2,7 @@
 //  ReportsView.swift
 //  BillsAndBalance
 //
-//  Activity reports: Week/Month/Year, Total Spending, Income, Fees, By Category, USD vs BTC.
+//  Activity reports: Week/Month/Year, Total Spending, Income, Fees, By Category.
 //  Presented as fullScreenCover — own NavigationStack, X + period picker in toolbar. Main toolbar (Balance/tab bar) not shown.
 //
 
@@ -49,152 +49,168 @@ struct ReportsView: View {
     var body: some View {
         NavigationStack {
             periodSwipeContainer
-            .refreshable {
-                reportsViewModel.loadMonthlyReport()
-                reportsViewModel.loadYearWrapReport()
-                reportsViewModel.loadWeekReport()
-                reportsViewModel.loadUsdBtcReport()
-            }
-            .navigationTitle(reportsPeriodTitle)
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(.primary)
-                    }
+                .refreshable {
+                    reportsViewModel.loadMonthlyReport()
+                    reportsViewModel.loadYearWrapReport()
+                    reportsViewModel.loadWeekReport()
                 }
-                ToolbarItem(placement: .principal) {
-                    periodPickerWithDoubleTap
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showingStatementImportPicker = true
-                    } label: {
-                        // Credit card with import arrow - combines credit card icon with import action
-                        ZStack(alignment: .center) {
-                            // Credit card outline (similar to creditcard SF Symbol)
-                            RoundedRectangle(cornerRadius: 3)
-                                .stroke(Color.primary, lineWidth: 1.5)
-                                .frame(width: 19, height: 13.5)
-                            
-                            // Import arrow centered on the card
-                            Image(systemName: "arrow.down")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(Color.primary)
+                .navigationTitle("Activity")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(.primary)
                         }
-                        .frame(width: 20, height: 16)
+                    }
+                    ToolbarItem(placement: .principal) {
+                        periodPickerWithDoubleTap
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
+                            showingStatementImportPicker = true
+                        } label: {
+                            ZStack(alignment: .center) {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .stroke(Color.primary, lineWidth: 1.5)
+                                    .frame(width: 19, height: 13.5)
+                                Image(systemName: "arrow.down")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(Color.primary)
+                            }
+                            .frame(width: 20, height: 16)
+                        }
                     }
                 }
-            }
-            .fileImporter(
-                isPresented: $showingStatementImportPicker,
-                allowedContentTypes: [.commaSeparatedText, .plainText],
-                allowsMultipleSelection: false
-            ) { result in
-                handleStatementImportResult(result)
-            }
-            .sheet(isPresented: $showingStatementImportSheet) {
-                StatementImportSheet(
-                    fileName: statementImportFileName,
-                    transactions: statementImportTransactions,
-                    onImport: handleStatementImport
-                )
-                .environmentObject(accountViewModel)
-            }
-            .overlay {
-                if isStatementImportParsing {
-                    Color.black.opacity(0.3)
-                        .ignoresSafeArea()
-                    ProgressView("Reading CSV…")
-                        .tint(.white)
-                        .scaleEffect(1.2)
+                .fileImporter(
+                    isPresented: $showingStatementImportPicker,
+                    allowedContentTypes: [.commaSeparatedText, .plainText],
+                    allowsMultipleSelection: false
+                ) { result in
+                    handleStatementImportResult(result)
                 }
-            }
-            .alert("Statement Import Error", isPresented: $showStatementImportErrorAlert) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text(statementImportErrorMessage ?? "Something went wrong.")
-            }
-            .alert("Import successful", isPresented: $showStatementImportSuccessAlert) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                if statementImportMatchedCount > 0 {
-                    Text("Imported \(statementImportSuccessCount - statementImportMatchedCount) new transaction\(statementImportSuccessCount - statementImportMatchedCount == 1 ? "" : "s") and matched \(statementImportMatchedCount) payment\(statementImportMatchedCount == 1 ? "" : "s") to existing transactions.")
-                } else {
-                    Text("Imported \(statementImportSuccessCount) transaction\(statementImportSuccessCount == 1 ? "" : "s").")
-                }
-            }
-            .sheet(isPresented: $showingCategoryTransactions) {
-                if let category = selectedCategory {
-                    CategoryTransactionsView(
-                        category: category,
-                        period: walletPeriod
+                .sheet(isPresented: $showingStatementImportSheet) {
+                    StatementImportSheet(
+                        fileName: statementImportFileName,
+                        transactions: statementImportTransactions,
+                        onImport: handleStatementImport
                     )
-                    .environmentObject(reportsViewModel)
                     .environmentObject(accountViewModel)
-                    .environmentObject(bitcoinPriceService)
                 }
-            }
-            .sheet(isPresented: $showingTransactionEditor) {
-                if let entry = selectedTransaction {
-                    TransactionEditorSheet(entry: entry)
-                        .environmentObject(accountViewModel)
-                        .environmentObject(bitcoinPriceService)
-                        .environmentObject(categoryManager)
+                .overlay(statementImportOverlay)
+                .alert("Statement Import Error", isPresented: $showStatementImportErrorAlert) {
+                    Button("OK", role: .cancel) { }
+                } message: {
+                    Text(statementImportErrorMessage ?? "Something went wrong.")
                 }
-            }
-            .onAppear {
-                reportsViewModel.loadMonthlyReport()
-                reportsViewModel.loadYearWrapReport()
-                reportsViewModel.loadWeekReport()
-                reportsViewModel.loadUsdBtcReport()
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { appeared = true }
-            }
-            .onChange(of: reportsViewModel.selectedMonth) { _, _ in
-                reportsViewModel.loadMonthlyReport()
-            }
-            .onChange(of: reportsViewModel.lastUsedWalletPeriod) { _, p in
-                switch p {
-                case .week:
-                    reportsViewModel.selectedWeekStart = reportsViewModel.startOfWeek(for: Date())
-                    reportsViewModel.loadWeekReport()
-                case .month:
+                .alert("Import successful", isPresented: $showStatementImportSuccessAlert) {
+                    Button("OK", role: .cancel) { }
+                } message: {
+                    importSuccessMessage
+                }
+                .sheet(isPresented: $showingCategoryTransactions) {
+                    categoryTransactionsSheet
+                }
+                .sheet(isPresented: $showingTransactionEditor) {
+                    transactionEditorSheet
+                }
+                .onAppear(perform: handleAppear)
+                .onChange(of: reportsViewModel.selectedMonth) { _, _ in
                     reportsViewModel.loadMonthlyReport()
-                case .year:
-                    reportsViewModel.loadYearWrapReport()
                 }
-            }
-            .onChange(of: reportsViewModel.selectedYear) { _, _ in
-                if walletPeriod == .year {
-                    reportsViewModel.loadYearWrapReport()
+                .onChange(of: reportsViewModel.lastUsedWalletPeriod) { _, p in
+                    handlePeriodChange(p)
                 }
-            }
-            .onChange(of: reportsViewModel.selectedWeekStart) { _, _ in
-                if walletPeriod == .week {
-                    reportsViewModel.loadWeekReport()
+                .onChange(of: reportsViewModel.selectedYear) { _, _ in
+                    if walletPeriod == .year {
+                        reportsViewModel.loadYearWrapReport()
+                    }
                 }
-            }
-            .onChange(of: reportsViewModel.usdBtcMonthsBack) { _, _ in
-                reportsViewModel.loadUsdBtcReport()
-            }
-            .onChange(of: reportsViewModel.creditCardViewMode) { _, _ in
-                // Reload reports when view mode changes
-                switch walletPeriod {
-                case .week:
-                    reportsViewModel.loadWeekReport()
-                case .month:
-                    reportsViewModel.loadMonthlyReport()
-                case .year:
-                    reportsViewModel.loadYearWrapReport()
+                .onChange(of: reportsViewModel.selectedWeekStart) { _, _ in
+                    if walletPeriod == .week {
+                        reportsViewModel.loadWeekReport()
+                    }
                 }
-            }
+                .onChange(of: reportsViewModel.creditCardViewMode) { _, _ in
+                    handleCreditCardViewModeChange()
+                }
         }
     }
-
+    
+    // MARK: - Computed Properties for View Modifiers
+    
+    @ViewBuilder
+    private var statementImportOverlay: some View {
+        if isStatementImportParsing {
+            Color.black.opacity(0.3)
+                .ignoresSafeArea()
+            ProgressView("Reading CSV…")
+                .tint(.white)
+                .scaleEffect(1.2)
+        }
+    }
+    
+    private var importSuccessMessage: Text {
+        Text("Imported \(statementImportSuccessCount) transaction\(statementImportSuccessCount == 1 ? "" : "s").")
+    }
+    
+    @ViewBuilder
+    private var categoryTransactionsSheet: some View {
+        if let category = selectedCategory {
+            CategoryTransactionsView(
+                category: category,
+                period: walletPeriod
+            )
+            .environmentObject(reportsViewModel)
+            .environmentObject(accountViewModel)
+            .environmentObject(bitcoinPriceService)
+        }
+    }
+    
+    @ViewBuilder
+    private var transactionEditorSheet: some View {
+        if let entry = selectedTransaction {
+            TransactionEditorSheetWrapper(entry: entry)
+                .environmentObject(accountViewModel)
+                .environmentObject(bitcoinPriceService)
+                .environmentObject(categoryManager)
+        }
+    }
+    
+    private func handleAppear() {
+        reportsViewModel.loadMonthlyReport()
+        reportsViewModel.loadYearWrapReport()
+        reportsViewModel.loadWeekReport()
+        reportsViewModel.loadUsdBtcReport()
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { appeared = true }
+    }
+    
+    private func handlePeriodChange(_ p: ReportsViewModel.WalletPeriod) {
+        switch p {
+        case .week:
+            reportsViewModel.selectedWeekStart = reportsViewModel.startOfWeek(for: Date())
+            reportsViewModel.loadWeekReport()
+        case .month:
+            reportsViewModel.loadMonthlyReport()
+        case .year:
+            reportsViewModel.loadYearWrapReport()
+        }
+    }
+    
+    private func handleCreditCardViewModeChange() {
+        switch walletPeriod {
+        case .week:
+            reportsViewModel.loadWeekReport()
+        case .month:
+            reportsViewModel.loadMonthlyReport()
+        case .year:
+            reportsViewModel.loadYearWrapReport()
+        }
+    }
+    
     private func handleStatementImportResult(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
@@ -230,37 +246,12 @@ struct ReportsView: View {
 
     private func handleStatementImport(account: Account, transactions: [ParsedStatementTransaction]) {
         var importedCount = 0
-        var matchedCount = 0
         
         for tx in transactions {
             let usdAmount = tx.isCredit ? tx.amount : -tx.amount
             
-            // For credit transactions (payments), try to match to existing transactions
-            // Payments are likely already reconciled on the account side, so we check both reconciled and unreconciled
-            if tx.isCredit {
-                if let matchedEntry = accountViewModel.findMatchingTransaction(
-                    account: account,
-                    amount: tx.amount,
-                    date: tx.date,
-                    title: tx.title
-                ) {
-                    // Match found - skip creating duplicate
-                    // If it's already reconciled, we just skip it
-                    // If it's unreconciled, mark it as reconciled
-                    if !matchedEntry.isReconciledFlag {
-                        matchedEntry.isReconciledFlag = true
-                        if matchedEntry.notes?.isEmpty != false {
-                            matchedEntry.notes = "Reconciled from CSV import"
-                        } else {
-                            matchedEntry.notes = (matchedEntry.notes ?? "") + " (Reconciled from CSV)"
-                        }
-                    }
-                    matchedCount += 1
-                    continue
-                }
-            }
-            
-            // No match found or not a credit - create new entry
+            // Import all transactions - treat credit card payments and transactions as the same dataset
+            // Users can toggle between viewing payments vs transactions in the reports
             accountViewModel.addManualEntry(
                 to: account,
                 title: tx.title,
@@ -277,8 +268,8 @@ struct ReportsView: View {
         
         accountViewModel.saveContext()
         accountViewModel.refreshLedgerEntries()
-        statementImportSuccessCount = importedCount + matchedCount
-        statementImportMatchedCount = matchedCount
+        statementImportSuccessCount = importedCount
+        statementImportMatchedCount = 0
         showStatementImportSuccessAlert = true
     }
 
@@ -329,7 +320,6 @@ struct ReportsView: View {
                     period: .week
                 )
             }
-            usdBtcBottomSection
         } else if walletPeriod == .month, let r = reportsViewModel.monthlyReport {
             WalletTotalSpendingAppleCard(
                 periodLabel: monthYearLabel(reportsViewModel.selectedMonth),
@@ -369,7 +359,6 @@ struct ReportsView: View {
                     period: .month
                 )
             }
-            usdBtcBottomSection
         } else if walletPeriod == .year, let r = reportsViewModel.yearWrapReport {
             WalletTotalSpendingAppleCard(
                 periodLabel: String(r.year),
@@ -409,34 +398,9 @@ struct ReportsView: View {
                     period: .year
                 )
             }
-            usdBtcBottomSection
         } else {
             emptySection
         }
-    }
-
-    @ViewBuilder
-    private var usdBtcBottomSection: some View {
-        if hasBtcActivity, let r = reportsViewModel.usdBtcReport {
-            UsdBtcRangePickerSection(monthsBack: Binding(get: { reportsViewModel.usdBtcMonthsBack }, set: { reportsViewModel.usdBtcMonthsBack = $0 }))
-            UsdBtcValueThenVsNowSection(
-                totalUsd: r.totalUsd,
-                totalBtcAtTime: r.totalBtcAtTime,
-                totalBtcValueNow: r.totalBtcValueNow,
-                appeared: appeared
-            )
-            if !r.months.isEmpty {
-                UsdBtcBarsSection(months: r.months, appeared: appeared)
-            }
-            if r.months.contains(where: { $0.avgBtcPrice > 0 }) {
-                UsdBtcPriceFluctuationSection(months: r.months, appeared: appeared)
-            }
-        }
-    }
-
-    private var hasBtcActivity: Bool {
-        guard let r = reportsViewModel.usdBtcReport else { return false }
-        return (r.totalBtcAtTime as NSDecimalNumber).doubleValue > 0 || (r.totalBtcValueNow as NSDecimalNumber).doubleValue > 0
     }
 
     private var walletHasReport: Bool {
@@ -502,16 +466,10 @@ struct ReportsView: View {
     // MARK: - Period Swipe Container (Apple Wallet Style)
     
     @State private var currentSwipeIndex: Int = 1
+    @State private var isResettingSwipeIndex: Bool = false
     
     private var periodSwipeContainer: some View {
-        TabView(selection: Binding(
-            get: { currentSwipeIndex },
-            set: { newIndex in
-                if newIndex != currentSwipeIndex {
-                    handleSwipeToIndex(newIndex)
-                }
-            }
-        )) {
+        TabView(selection: $currentSwipeIndex) {
             // Previous period preview (if data exists)
             if canNavigateToPreviousPeriod {
                 periodContentList
@@ -536,15 +494,31 @@ struct ReportsView: View {
         .onChange(of: walletPeriod) { _, _ in
             currentSwipeIndex = 1 // Reset to center when period type changes
         }
+        .onChange(of: currentSwipeIndex) { oldValue, newValue in
+            // Only handle swipe if it's a real change and not a reset
+            if !isResettingSwipeIndex && newValue != oldValue && newValue != 1 {
+                handleSwipeToIndex(newValue)
+            }
+        }
     }
     
     private var periodContentList: some View {
         List {
+            // Period title section (scrolls with content)
+            Section {
+                Text(reportsPeriodTitle)
+                    .font(.system(size: 34, weight: .bold))
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+            }
+            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 0, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            
             Group {
                 walletSections
             }
-            .animation(.spring(response: 0.45, dampingFraction: 0.82), value: reportsViewModel.monthlyReport != nil)
-            .animation(.spring(response: 0.45, dampingFraction: 0.82), value: reportsViewModel.usdBtcReport != nil)
         }
         .listStyle(.insetGrouped)
         .listSectionSpacing(.custom(4))
@@ -588,43 +562,50 @@ struct ReportsView: View {
     
     private func handleSwipeToIndex(_ index: Int) {
         let cal = Calendar.current
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-            switch index {
-            case 0: // Swiped to previous
-                switch walletPeriod {
-                case .week:
-                    let start = reportsViewModel.startOfWeek(for: reportsViewModel.selectedWeekStart)
-                    if let prev = cal.date(byAdding: .day, value: -7, to: start) {
-                        reportsViewModel.selectedWeekStart = prev
-                    }
-                case .month:
-                    if let prev = cal.date(byAdding: .month, value: -1, to: reportsViewModel.selectedMonth) {
-                        reportsViewModel.selectedMonth = prev
-                    }
-                case .year:
-                    reportsViewModel.selectedYear -= 1
+        
+        // Update period based on swipe direction
+        switch index {
+        case 0: // Swiped to previous
+            switch walletPeriod {
+            case .week:
+                let start = reportsViewModel.startOfWeek(for: reportsViewModel.selectedWeekStart)
+                if let prev = cal.date(byAdding: .day, value: -7, to: start) {
+                    reportsViewModel.selectedWeekStart = prev
                 }
-            case 2: // Swiped to next
-                switch walletPeriod {
-                case .week:
-                    let start = reportsViewModel.startOfWeek(for: reportsViewModel.selectedWeekStart)
-                    if let next = cal.date(byAdding: .day, value: 7, to: start) {
-                        reportsViewModel.selectedWeekStart = next
-                    }
-                case .month:
-                    if let next = cal.date(byAdding: .month, value: 1, to: reportsViewModel.selectedMonth) {
-                        reportsViewModel.selectedMonth = next
-                    }
-                case .year:
-                    reportsViewModel.selectedYear += 1
+            case .month:
+                if let prev = cal.date(byAdding: .month, value: -1, to: reportsViewModel.selectedMonth) {
+                    reportsViewModel.selectedMonth = prev
                 }
-            default:
-                break
+            case .year:
+                reportsViewModel.selectedYear -= 1
             }
+        case 2: // Swiped to next
+            switch walletPeriod {
+            case .week:
+                let start = reportsViewModel.startOfWeek(for: reportsViewModel.selectedWeekStart)
+                if let next = cal.date(byAdding: .day, value: 7, to: start) {
+                    reportsViewModel.selectedWeekStart = next
+                }
+            case .month:
+                if let next = cal.date(byAdding: .month, value: 1, to: reportsViewModel.selectedMonth) {
+                    reportsViewModel.selectedMonth = next
+                }
+            case .year:
+                reportsViewModel.selectedYear += 1
+            }
+        default:
+            break
         }
-        // Reset to center after navigation to allow continuous swiping
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        
+        // Reset to center after a brief delay to allow continuous swiping
+        // The delay allows the TabView animation to complete and the view model to update
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+            isResettingSwipeIndex = true
             currentSwipeIndex = 1
+            // Small delay before allowing swipe handling again
+            try? await Task.sleep(nanoseconds: 50_000_000) // 0.05 seconds
+            isResettingSwipeIndex = false
         }
     }
     
@@ -755,7 +736,7 @@ private struct WalletTotalSpendingAppleCard: View {
                     .fill(Color(.secondarySystemBackground))
             )
         }
-        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 4, trailing: 16))
+        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 4, trailing: 16))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
@@ -829,10 +810,19 @@ struct WalletStackedCategoryBarChart: View {
                 categories.insert(cat.name)
             }
         }
-        return Array(categories).sorted()
+        // Sort categories, but put Digital Wallet Fees at the end for better visual hierarchy
+        return Array(categories).sorted { cat1, cat2 in
+            if cat1 == "Digital Wallet Fees" { return false }
+            if cat2 == "Digital Wallet Fees" { return true }
+            return cat1 < cat2
+        }
     }
     
     private func colorForCategory(_ categoryName: String) -> Color {
+        // Digital Wallet Fees always use orange to match the icon
+        if categoryName == "Digital Wallet Fees" {
+            return .orange
+        }
         if let index = allCategories.firstIndex(of: categoryName) {
             return categoryColors[index % categoryColors.count]
         }
@@ -840,6 +830,7 @@ struct WalletStackedCategoryBarChart: View {
     }
     
     // Create gradient that blends categories smoothly based on their values
+    // This visually represents the category breakdown within each period
     private func gradientForPeriod(_ categories: [(name: String, amount: Decimal)]) -> LinearGradient {
         guard !categories.isEmpty else {
             return LinearGradient(colors: [Color.gray.opacity(0.3)], startPoint: .bottom, endPoint: .top)
@@ -957,7 +948,7 @@ struct WalletStackedCategoryBarChart: View {
                             y: .value("Amount", totalAmount)
                         )
                         .foregroundStyle(gradient)
-                        .cornerRadius(4)
+                        .cornerRadius(6, style: .continuous)
                     } else {
                         // Empty period - show invisible bar to maintain X-axis spacing
                         BarMark(
@@ -1054,10 +1045,19 @@ struct CompactWalletStackedCategoryBarChart: View {
                 categories.insert(cat.name)
             }
         }
-        return Array(categories).sorted()
+        // Sort categories, but put Digital Wallet Fees at the end for better visual hierarchy
+        return Array(categories).sorted { cat1, cat2 in
+            if cat1 == "Digital Wallet Fees" { return false }
+            if cat2 == "Digital Wallet Fees" { return true }
+            return cat1 < cat2
+        }
     }
     
     private func colorForCategory(_ categoryName: String) -> Color {
+        // Digital Wallet Fees always use orange to match the icon
+        if categoryName == "Digital Wallet Fees" {
+            return .orange
+        }
         if let index = allCategories.firstIndex(of: categoryName) {
             return categoryColors[index % categoryColors.count]
         }
@@ -1065,6 +1065,7 @@ struct CompactWalletStackedCategoryBarChart: View {
     }
     
     // Create gradient that blends categories smoothly based on their values
+    // This visually represents the category breakdown within each period
     private func gradientForPeriod(_ categories: [(name: String, amount: Decimal)]) -> LinearGradient {
         guard !categories.isEmpty else {
             return LinearGradient(colors: [Color.gray.opacity(0.3)], startPoint: .bottom, endPoint: .top)
@@ -1155,7 +1156,7 @@ struct CompactWalletStackedCategoryBarChart: View {
                         y: .value("Amount", totalAmount)
                     )
                     .foregroundStyle(gradient)
-                    .cornerRadius(8)
+                    .cornerRadius(6, style: .continuous)
                 } else {
                     // Empty period - show gray bar to maintain X-axis spacing and visibility
                     BarMark(
@@ -1163,7 +1164,7 @@ struct CompactWalletStackedCategoryBarChart: View {
                         y: .value("Amount", maxValue * 0.1) // Small visible bar height
                     )
                     .foregroundStyle(Color.gray.opacity(0.2))
-                    .cornerRadius(8)
+                    .cornerRadius(6, style: .continuous)
                 }
             }
         }
@@ -1212,7 +1213,7 @@ private struct WalletAppleBarChart: View {
                         y: .value("Amount", (values[i] as NSDecimalNumber).doubleValue)
                     )
                     .foregroundStyle(appleWalletBarGradients[i % appleWalletBarGradients.count])
-                    .cornerRadius(10)
+                    .cornerRadius(6, style: .continuous)
                 }
             }
             .chartXAxis {
@@ -1285,6 +1286,7 @@ private struct WalletAppleBarChart: View {
 }
 
 private struct WalletIncomeFeesRows: View {
+    @EnvironmentObject private var reportsViewModel: ReportsViewModel
     let income: Decimal
     let fees: Decimal
     let creditCardSpending: Decimal
@@ -1329,14 +1331,13 @@ private struct WalletIncomeFeesRows: View {
                         Divider()
                             .padding(.leading, 52)
                     }
-                    WalletSummaryRow(
+                    CreditCardSpendingRow(
                         icon: "creditcard.fill",
                         iconColor: .blue,
                         title: "Credit Card Spending",
                         amount: creditCardSpending,
                         formatter: formatter,
-                        appeared: appeared,
-                        onTap: {}
+                        appeared: appeared
                     )
                 }
             }
@@ -1388,6 +1389,59 @@ private struct WalletSummaryRow: View {
     }
 }
 
+// MARK: - Credit Card Spending Row (with tap to toggle)
+
+private struct CreditCardSpendingRow: View {
+    @EnvironmentObject private var reportsViewModel: ReportsViewModel
+    let icon: String
+    let iconColor: Color
+    let title: String
+    let amount: Decimal
+    let formatter: NumberFormatter
+    let appeared: Bool
+    
+    var body: some View {
+        Button {
+            // Toggle between Payments and Transactions view
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                let newMode: ReportsViewModel.CreditCardViewMode = reportsViewModel.creditCardViewMode == .payments ? .transactions : .payments
+                reportsViewModel.setCreditCardViewMode(newMode)
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundStyle(iconColor)
+                    .frame(width: 32, height: 32)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(iconColor.opacity(0.15)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(reportsViewModel.creditCardViewMode == .payments ? "Showing payments" : "Showing transactions")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(formatter.string(from: amount as NSDecimalNumber) ?? "$0.00")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .monospacedDigit()
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .opacity(appeared ? 1 : 0)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 private struct WalletCategorySection: View {
     let items: [(name: String, amount: Decimal)]
     let appeared: Bool
@@ -1397,6 +1451,17 @@ private struct WalletCategorySection: View {
     let period: ReportsViewModel.WalletPeriod
     @EnvironmentObject private var reportsViewModel: ReportsViewModel
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
+    
+    // Sort items by amount descending (largest first), with Digital Wallet Fees at the end
+    private var sortedItems: [(name: String, amount: Decimal)] {
+        items.sorted { item1, item2 in
+            // Digital Wallet Fees always at the end
+            if item1.name == "Digital Wallet Fees" { return false }
+            if item2.name == "Digital Wallet Fees" { return true }
+            // Otherwise sort by amount descending (largest first)
+            return item1.amount > item2.amount
+        }
+    }
     @State private var showingPieChart = false
     @State private var pieChartScale: CGFloat = 1.0
     @State private var pieChartRotation: Double = 0
@@ -1441,7 +1506,7 @@ private struct WalletCategorySection: View {
     
     // Calculate total spending across all categories
     private var totalSpending: Decimal {
-        items.reduce(0) { $0 + $1.amount }
+        sortedItems.reduce(0) { $0 + $1.amount }
     }
     
     // Get color for category based on its index (ensures each category gets a unique color)
@@ -1452,7 +1517,7 @@ private struct WalletCategorySection: View {
     
     // Get all colors for the items (used for pie chart)
     private var itemColors: [Color] {
-        return items.prefix(8).enumerated().map { index, _ in
+        return sortedItems.prefix(8).enumerated().map { index, _ in
             colorForIndex(index)
         }
     }
@@ -1633,7 +1698,7 @@ private struct WalletCategorySection: View {
                     VStack(spacing: 12) {
                         // Pie chart with its own animations
                         CategoryPieChart(
-                            items: items,
+                            items: sortedItems,
                             colors: itemColors,
                             appeared: appeared
                         )
@@ -1643,7 +1708,7 @@ private struct WalletCategorySection: View {
                         
                         // Legend with separate animations
                         CategoryPieChartLegend(
-                            items: items,
+                            items: sortedItems,
                             colors: itemColors,
                             legendOffset: legendOffset,
                             legendOpacity: legendOpacity
@@ -1653,8 +1718,7 @@ private struct WalletCategorySection: View {
                     .padding(.bottom, 12)
                 } else {
                     VStack(spacing: 0) {
-                        ForEach(Array(items.prefix(8).enumerated()), id: \.offset) { i, item in
-                            let previousAmount = reportsViewModel.previousPeriodCategorySpending(item.name, period: period)
+                        ForEach(Array(sortedItems.prefix(8).enumerated()), id: \.offset) { i, item in
                             let isExpanded = expandedCategories.contains(item.name)
                             let transactions = reportsViewModel.transactionsForCategory(item.name, period: period)
                             
@@ -1925,205 +1989,6 @@ private struct WalletCategoryRow: View {
     }
 }
 
-// MARK: - USD vs BTC
-
-private struct UsdBtcRangePickerSection: View {
-    @Binding var monthsBack: Int
-    private let options = [(12, "1 year"), (24, "2 years"), (48, "4 years")]
-
-    var body: some View {
-        Section {
-            Picker("Time range", selection: $monthsBack) {
-                ForEach(options, id: \.0) { months, label in
-                    Text(label).tag(months)
-                }
-            }
-            .pickerStyle(.menu)
-        } header: {
-            Text("USD vs BTC")
-        } footer: {
-            Text("Bills paid in USD vs Bitcoin. Bitcoin amounts shown in USD at payment time; \"value today\" uses current BTC price.")
-        }
-    }
-}
-
-private struct UsdBtcValueThenVsNowSection: View {
-    let totalUsd: Decimal
-    let totalBtcAtTime: Decimal
-    let totalBtcValueNow: Decimal
-    let appeared: Bool
-
-    private let formatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency
-        f.currencyCode = "USD"
-        f.maximumFractionDigits = 2
-        f.minimumFractionDigits = 2
-        return f
-    }()
-
-    var body: some View {
-        Section {
-            UsdBtcValueRow(
-                label: "Bills in USD",
-                icon: "dollarsign.circle.fill",
-                color: .blue,
-                amount: totalUsd,
-                formatter: formatter,
-                appeared: appeared
-            )
-            UsdBtcValueRow(
-                label: "BTC bills (value when paid)",
-                icon: "bitcoinsign.circle.fill",
-                color: .orange,
-                amount: totalBtcAtTime,
-                formatter: formatter,
-                appeared: appeared
-            )
-            UsdBtcValueRow(
-                label: "Same BTC (value today)",
-                icon: "chart.line.uptrend.xyaxis",
-                color: totalBtcValueNow >= totalBtcAtTime ? .green : .red,
-                amount: totalBtcValueNow,
-                formatter: formatter,
-                appeared: appeared
-            )
-            if totalBtcAtTime > 0 {
-                UsdBtcDeltaRow(
-                    totalBtcAtTime: totalBtcAtTime,
-                    totalBtcValueNow: totalBtcValueNow,
-                    formatter: formatter,
-                    appeared: appeared
-                )
-            }
-        } header: {
-            Text("Value then vs now")
-        }
-    }
-}
-
-private struct UsdBtcValueRow: View {
-    let label: String
-    let icon: String
-    let color: Color
-    let amount: Decimal
-    let formatter: NumberFormatter
-    let appeared: Bool
-    var body: some View {
-        HStack {
-            Label(label, systemImage: icon)
-                .foregroundStyle(color)
-            Spacer()
-            Text(formatter.string(from: amount as NSDecimalNumber) ?? "$0.00")
-                .fontWeight(.semibold)
-        }
-        .opacity(appeared ? 1 : 0)
-        .offset(y: appeared ? 0 : 6)
-    }
-}
-
-private struct UsdBtcDeltaRow: View {
-    let totalBtcAtTime: Decimal
-    let totalBtcValueNow: Decimal
-    let formatter: NumberFormatter
-    let appeared: Bool
-    private var delta: Decimal { totalBtcValueNow - totalBtcAtTime }
-    var body: some View {
-        HStack {
-            Text("Difference (price fluctuation)")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text((delta >= 0 ? "+" : "") + (formatter.string(from: delta as NSDecimalNumber) ?? "$0"))
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(delta >= 0 ? .green : .red)
-        }
-        .opacity(appeared ? 1 : 0)
-        .offset(y: appeared ? 0 : 6)
-    }
-}
-
-private struct UsdBtcBarsSection: View {
-    let months: [(month: Date, usdExpenses: Decimal, btcAtTime: Decimal, btcValueNow: Decimal, avgBtcPrice: Decimal)]
-    let appeared: Bool
-
-    private let monthFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "MMM yy"
-        return f
-    }()
-
-    var body: some View {
-        Section {
-            Chart {
-                ForEach(Array(months.enumerated()), id: \.offset) { _, m in
-                    BarMark(
-                        x: .value("Month", monthFormatter.string(from: m.month)),
-                        y: .value("USD", (m.usdExpenses as NSDecimalNumber).doubleValue)
-                    )
-                    .foregroundStyle(Color.blue.gradient)
-                    BarMark(
-                        x: .value("Month", monthFormatter.string(from: m.month)),
-                        y: .value("BTC", (m.btcAtTime as NSDecimalNumber).doubleValue)
-                    )
-                    .foregroundStyle(Color.orange.gradient)
-                }
-            }
-            .chartYAxis { AxisMarks(values: .automatic) }
-            .frame(height: 200)
-            .opacity(appeared ? 1 : 0)
-            .scaleEffect(appeared ? 1 : 0.95)
-        } header: {
-            Text("Bills over time")
-        }
-    }
-}
-
-private struct UsdBtcPriceFluctuationSection: View {
-    let months: [(month: Date, usdExpenses: Decimal, btcAtTime: Decimal, btcValueNow: Decimal, avgBtcPrice: Decimal)]
-    let appeared: Bool
-
-    private let monthFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "MMM yy"
-        return f
-    }()
-
-    var body: some View {
-        let withPrice = months.filter { $0.avgBtcPrice > 0 }
-        Group {
-            if !withPrice.isEmpty {
-                Section {
-                    Chart {
-                        ForEach(Array(withPrice.enumerated()), id: \.offset) { _, m in
-                            LineMark(
-                                x: .value("Month", monthFormatter.string(from: m.month)),
-                                y: .value("BTC price", (m.avgBtcPrice as NSDecimalNumber).doubleValue)
-                            )
-                            .foregroundStyle(Color.orange.gradient)
-                            .interpolationMethod(.catmullRom)
-                            PointMark(
-                                x: .value("Month", monthFormatter.string(from: m.month)),
-                                y: .value("BTC price", (m.avgBtcPrice as NSDecimalNumber).doubleValue)
-                            )
-                            .foregroundStyle(Color.orange)
-                            .symbolSize(20)
-                        }
-                    }
-                    .chartYAxis { AxisMarks(values: .automatic) }
-                    .frame(height: 160)
-                    .opacity(appeared ? 1 : 0)
-                    .scaleEffect(appeared ? 1 : 0.95)
-                } header: {
-                    Text("BTC price at payment")
-                } footer: {
-                    Text("Average BTC/USD price when you paid each bill. Shows fluctuation over time.")
-                }
-            }
-        }
-    }
-}
-
 // MARK: - Category Transactions View
 
 private struct CategoryTransactionsView: View {
@@ -2258,6 +2123,29 @@ private struct CategoryLedgerEntryEditorSheet: View {
     var body: some View {
         // Use the same editor structure as BalanceView
         LedgerEntryEditorView(entry: entry, onSave: onSave)
+    }
+}
+
+// Wrapper for TransactionEditorSheet (which is private in AccountDetailView)
+private struct TransactionEditorSheetWrapper: View {
+    @EnvironmentObject private var accountViewModel: AccountViewModel
+    let entry: LedgerEntry
+    
+    var body: some View {
+        // Use the same editor structure as AccountDetailView
+        LedgerEntryEditorView(entry: entry, onSave: { date, title, btcAmount, usdAmount, btcPrice, isCleared, notes, category in
+            accountViewModel.updateLedgerEntry(
+                entry,
+                date: date,
+                title: title,
+                btcAmount: btcAmount,
+                usdAmount: usdAmount,
+                btcPrice: btcPrice,
+                isReconciled: isCleared,
+                notes: notes,
+                category: category
+            )
+        })
     }
 }
 
@@ -2464,13 +2352,33 @@ private struct CategoryTransactionRow: View {
     let onDelete: () -> Void
     
     private var usdAmount: Decimal {
-        // For fees, extract fee amount from notes
+        guard let account = entry.account else { return .zero }
+        
+        // For Digital Wallet Fees, calculate from account fee percentage
         if category == "Digital Wallet Fees" {
-            return FeeParsing.feeFromNotes(entry.notes)
+            guard account.feePercentageDecimal > 0 else { return .zero }
+            
+            // Get the transaction amount in USD
+            let transactionAmount: Decimal
+            if account.currencyCode == "BTC" {
+                let usd = entry.usdAmountDecimal
+                if usd != 0 {
+                    transactionAmount = abs(usd)
+                } else {
+                    let btc = entry.amountInCurrency(for: account)
+                    let price = entry.btcPriceAtTransactionDecimal > 0 ? entry.btcPriceAtTransactionDecimal : bitcoinPriceService.btcToUsdRate
+                    transactionAmount = abs(btc * price)
+                }
+            } else {
+                let amt = entry.usdAmountDecimal != 0 ? entry.usdAmountDecimal : entry.amountDecimal
+                transactionAmount = abs(amt)
+            }
+            
+            // Calculate fee: amount * (feePercentage / 100)
+            return transactionAmount * (account.feePercentageDecimal / 100)
         }
         
-        guard let account = entry.account else { return .zero }
-        // Calculate USD amount similar to ReportsViewModel
+        // For regular categories, calculate USD amount similar to ReportsViewModel
         let signed: Decimal
         if account.currencyCode == "BTC" {
             let usd = entry.usdAmountDecimal

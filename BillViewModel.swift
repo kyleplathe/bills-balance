@@ -371,13 +371,41 @@ class BillViewModel: ObservableObject {
             // Only create ledger entry for non-zero bills
             if let amountDecimal = bill.amount?.decimalValue, amountDecimal > 0 {
                 let paidDate = bill.paidDate ?? Date()
-                accountViewModel?.recordLedgerEntry(for: bill,
-                                                    amount: amountDecimal,
-                                                    date: paidDate,
-                                                    isCredit: false,
-                                                    title: bill.name,
-                                                    notes: bill.notes,
-                                                    satsAmount: satsAmount)
+                
+                // Calculate total amount including digital wallet fees (if applicable)
+                var totalAmount = amountDecimal
+                var transactionNotes = bill.notes
+                
+                if let account = bill.account {
+                    // Check if this is a digital wallet account
+                    let accountType = (account.type ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+                    let isDigitalWallet = accountType == "digital wallet"
+                    
+                    // Only calculate and add fees for digital wallet accounts
+                    if isDigitalWallet && account.feePercentageDecimal > 0 {
+                        // Calculate fee: bill_amount * (feePercentage / 100)
+                        let fee = amountDecimal * (account.feePercentageDecimal / 100)
+                        totalAmount = amountDecimal + fee
+                        
+                        // Add fee note to transaction notes (ONLY for digital wallet accounts)
+                        let feeDouble = (fee as NSDecimalNumber).doubleValue
+                        let feePercentageDouble = (account.feePercentageDecimal as NSDecimalNumber).doubleValue
+                        let feeNote = "Digital Wallet Fee: \(String(format: "%.2f", feeDouble)) USD (\(String(format: "%.3f", feePercentageDouble))%)"
+                        transactionNotes = bill.notes?.isEmpty == false ? "\(bill.notes ?? "")\n\(feeNote)" : feeNote
+                    }
+                }
+                
+                // Create transaction as PENDING (unreconciled) so user can check it off when it clears
+                // This keeps it simple: bill is paid, transaction is pending until cleared
+                let entry = accountViewModel?.recordLedgerEntry(for: bill,
+                                                                amount: totalAmount,
+                                                                date: paidDate,
+                                                                isCredit: false,
+                                                                title: bill.name,
+                                                                notes: transactionNotes,
+                                                                satsAmount: satsAmount)
+                // Mark transaction as unreconciled (pending) so it shows up unchecked in account
+                entry?.isReconciledFlag = false
             }
             // For $0 bills, just mark as paid without creating ledger entry
         } else if !bill.isPaid && wasPaid {
@@ -434,15 +462,50 @@ class BillViewModel: ObservableObject {
         // Use due date or current date for the transaction
         let transactionDate = bill.dueDate ?? Date()
         
-        // Store USD amount only - no automatic BTC calculation
-        // User will enter sats when marking as paid or reconciling
-        accountViewModel?.recordLedgerEntry(for: bill,
-                                            amount: amountDecimal,
-                                            date: transactionDate,
-                                            isCredit: false,
-                                            title: bill.name,
-                                            notes: bill.notes,
-                                            satsAmount: nil) // No auto-calculation
+        // Calculate total amount including digital wallet fees
+        // IMPORTANT: Only apply fees for digital wallet accounts with a fee percentage set
+        var totalAmount = amountDecimal
+        var transactionNotes = bill.notes
+        
+        if let account = bill.account {
+            // Check if this is a digital wallet account (using same logic as ReportsViewModel)
+            let accountType = (account.type ?? "").trimmingCharacters(in: .whitespaces).lowercased()
+            let isDigitalWallet = accountType == "digital wallet"
+            
+            // Only calculate and add fees for digital wallet accounts
+            if isDigitalWallet && account.feePercentageDecimal > 0 {
+                // Calculate fee: bill_amount * (feePercentage / 100)
+                let fee = amountDecimal * (account.feePercentageDecimal / 100)
+                totalAmount = amountDecimal + fee
+                
+                // Add fee note to transaction notes (ONLY for digital wallet accounts)
+                // Convert Decimal to Double for String formatting
+                let feeDouble = (fee as NSDecimalNumber).doubleValue
+                let feePercentageDouble = (account.feePercentageDecimal as NSDecimalNumber).doubleValue
+                let feeNote = "Digital Wallet Fee: \(String(format: "%.2f", feeDouble)) USD (\(String(format: "%.3f", feePercentageDouble))%)"
+                transactionNotes = bill.notes?.isEmpty == false ? "\(bill.notes ?? "")\n\(feeNote)" : feeNote
+            }
+            // For non-digital-wallet accounts, totalAmount remains as amountDecimal (no fee added)
+            
+            // Store USD amount - include fee in total if digital wallet, otherwise just bill amount
+            // No automatic BTC calculation - user will enter sats when marking as paid or reconciling
+            accountViewModel?.recordLedgerEntry(for: bill,
+                                                amount: totalAmount,
+                                                date: transactionDate,
+                                                isCredit: false,
+                                                title: bill.name,
+                                                notes: transactionNotes,
+                                                satsAmount: nil) // No auto-calculation
+        } else {
+            // No account assigned - just use bill amount (no fees ever applied)
+            accountViewModel?.recordLedgerEntry(for: bill,
+                                                amount: amountDecimal,
+                                                date: transactionDate,
+                                                isCredit: false,
+                                                title: bill.name,
+                                                notes: bill.notes,
+                                                satsAmount: nil) // No auto-calculation
+        }
         
         saveContext()
     }

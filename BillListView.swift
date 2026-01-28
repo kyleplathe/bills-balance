@@ -1142,6 +1142,8 @@ struct BillListView: View {
                                         billViewModel.togglePaidStatus(for: billToMark)
                                         HapticManager.shared.billMarkedPaid()
                                     })
+                                        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+                                        .listRowBackground(Color.clear)
                                         .contentShape(Rectangle())
                                         .onTapGesture {
                                             HapticManager.shared.buttonTapped()
@@ -1163,19 +1165,6 @@ struct BillListView: View {
                                                 Label("Edit", systemImage: "pencil")
                                             }
                                             .tint(.blue)
-                                            
-                                            // Swipe right = Add Pending (creates ledger entry without marking as paid)
-                                            // Only show if bill doesn't already have a pending transaction
-                                            if bill.account != nil && !hasPendingTransaction(bill) {
-                                                Button {
-                                                    HapticManager.shared.buttonTapped()
-                                                    billViewModel.addPendingTransaction(for: bill)
-                                                    HapticManager.shared.billMarkedPaid()
-                                                } label: {
-                                                    Label("Add Pending", systemImage: "clock")
-                                                }
-                                                .tint(.orange)
-                                            }
                                             
                                             // Mark as Paid (cleared) - same as tapping circle
                                             if !bill.isPaid {
@@ -1216,6 +1205,8 @@ struct BillListView: View {
                                             HapticManager.shared.billMarkedPaid()
                                         }
                                     })
+                                        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+                                        .listRowBackground(Color.clear)
                                         .contentShape(Rectangle())
                                         .onTapGesture {
                                             HapticManager.shared.buttonTapped()
@@ -1257,6 +1248,8 @@ struct BillListView: View {
                                     billViewModel.togglePaidStatus(for: billToMark)
                                     HapticManager.shared.billMarkedPaid()
                                 })
+                                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+                                    .listRowBackground(Color.clear)
                                     .contentShape(Rectangle())
                                     .onTapGesture {
                                         HapticManager.shared.buttonTapped()
@@ -1278,19 +1271,6 @@ struct BillListView: View {
                                             Label("Edit", systemImage: "pencil")
                                         }
                                         .tint(.blue)
-                                        
-                                        // Swipe right = Add Pending (creates ledger entry without marking as paid)
-                                        // Only show if bill is unpaid, has an account, and doesn't already have a pending transaction
-                                        if !bill.isPaid && bill.account != nil && !hasPendingTransaction(bill) {
-                                            Button {
-                                                HapticManager.shared.buttonTapped()
-                                                billViewModel.addPendingTransaction(for: bill)
-                                                HapticManager.shared.billMarkedPaid()
-                                            } label: {
-                                                Label("Add Pending", systemImage: "clock")
-                                            }
-                                            .tint(.orange)
-                                        }
                                         
                                         // Mark as Paid (cleared) - same as tapping circle
                                         if !bill.isPaid {
@@ -1597,6 +1577,8 @@ struct BillRowView: View {
                 }
             }
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: bitcoinPriceService.showInBitcoin)
+            
+            // Removed arrow button - keeping it simple: just check off the bill
         }
         .padding(.vertical, 4)
         

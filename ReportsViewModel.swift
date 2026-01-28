@@ -97,6 +97,23 @@ private func reportUSDAmount(for entry: LedgerEntry, account: Account, btcServic
     return signed
 }
 
+// MARK: - Digital Wallet Fee Calculation
+
+/// Calculates the fee amount for a transaction on a digital wallet account
+/// Fee is calculated as: transaction_amount * (feePercentage / 100)
+private func calculateDigitalWalletFee(for entry: LedgerEntry, account: Account, btcService: BitcoinPriceService) -> Decimal {
+    guard isDigitalWallet(account) else { return 0 }
+    guard account.feePercentageDecimal > 0 else { return 0 }
+    
+    // Get the transaction amount in USD
+    let transactionAmount = abs(reportUSDAmount(for: entry, account: account, btcService: btcService))
+    
+    // Calculate fee: amount * (feePercentage / 100)
+    let fee = transactionAmount * (account.feePercentageDecimal / 100)
+    
+    return fee
+}
+
 // MARK: - ReportsViewModel
 
 @MainActor
@@ -263,6 +280,23 @@ final class ReportsViewModel: ObservableObject {
         for entry in entries {
             guard let account = entry.account, !account.isHiddenFlag else { continue }
             let usd = reportUSDAmount(for: entry, account: account, btcService: bitcoinPriceService)
+            
+            // Filter credit card data based on view mode
+            let isCreditCardPayment = isCreditCardPaymentTransaction(entry)
+            let isCreditCardTransaction = isCreditCardTransaction(entry)
+            
+            // Skip credit card data that doesn't match current view mode
+            if isCreditCardPayment || isCreditCardTransaction {
+                switch creditCardViewMode {
+                case .payments:
+                    // Only include payments, skip transactions
+                    if !isCreditCardPayment { continue }
+                case .transactions:
+                    // Only include transactions, skip payments
+                    if !isCreditCardTransaction { continue }
+                }
+            }
+            
             if usd > 0 {
                 income += usd
             } else {
@@ -271,7 +305,12 @@ final class ReportsViewModel: ObservableObject {
                 byCategory[cat, default: 0] += abs(usd)
             }
             if isDigitalWallet(account) {
-                fees += FeeParsing.feeFromNotes(entry.notes)
+                let fee = calculateDigitalWalletFee(for: entry, account: account, btcService: bitcoinPriceService)
+                fees += fee
+                // Add fees to category breakdown
+                if fee > 0 {
+                    byCategory["Digital Wallet Fees", default: 0] += fee
+                }
             }
         }
 
@@ -284,6 +323,20 @@ final class ReportsViewModel: ObservableObject {
             for e in es {
                 guard let acct = e.account, !acct.isHiddenFlag else { continue }
                 let u = reportUSDAmount(for: e, account: acct, btcService: bitcoinPriceService)
+                
+                // Filter credit card data based on view mode
+                let isCreditCardPayment = isCreditCardPaymentTransaction(e)
+                let isCreditCardTransaction = isCreditCardTransaction(e)
+                
+                if isCreditCardPayment || isCreditCardTransaction {
+                    switch creditCardViewMode {
+                    case .payments:
+                        if !isCreditCardPayment { continue }
+                    case .transactions:
+                        if !isCreditCardTransaction { continue }
+                    }
+                }
+                
                 if u > 0 { inc += u } else { exp += abs(u) }
             }
             return (mStart, inc, exp)
@@ -297,6 +350,20 @@ final class ReportsViewModel: ObservableObject {
             guard let account = entry.account, !account.isHiddenFlag else { continue }
             let usd = reportUSDAmount(for: entry, account: account, btcService: bitcoinPriceService)
             guard usd < 0 else { continue }
+            
+            // Filter credit card data based on view mode for weekly breakdown
+            let isCreditCardPayment = isCreditCardPaymentTransaction(entry)
+            let isCreditCardTransaction = isCreditCardTransaction(entry)
+            
+            if isCreditCardPayment || isCreditCardTransaction {
+                switch creditCardViewMode {
+                case .payments:
+                    if !isCreditCardPayment { continue }
+                case .transactions:
+                    if !isCreditCardTransaction { continue }
+                }
+            }
+            
             let d = calendar.component(.day, from: entry.date ?? start)
             let weekIndex = min(4, (d - 1) / daysPerWeek)
             weekly[weekIndex] += abs(usd)
@@ -341,13 +408,29 @@ final class ReportsViewModel: ObservableObject {
             for e in es {
                 guard let acct = e.account, !acct.isHiddenFlag else { continue }
                 let u = reportUSDAmount(for: e, account: acct, btcService: bitcoinPriceService)
+                
+                // Filter credit card data based on view mode
+                let isCreditCardPayment = isCreditCardPaymentTransaction(e)
+                let isCreditCardTransaction = isCreditCardTransaction(e)
+                
+                if isCreditCardPayment || isCreditCardTransaction {
+                    switch creditCardViewMode {
+                    case .payments:
+                        if !isCreditCardPayment { continue }
+                    case .transactions:
+                        if !isCreditCardTransaction { continue }
+                    }
+                }
+                
                 if u > 0 { inc += u } else { exp += abs(u) }
-                if isDigitalWallet(acct) { f += FeeParsing.feeFromNotes(e.notes) }
+                if isDigitalWallet(acct) {
+                    f += calculateDigitalWalletFee(for: e, account: acct, btcService: bitcoinPriceService)
+                }
             }
             monthly.append((mStart, inc, exp, f))
         }
 
-        // Yearly totals from all entries
+        // Yearly totals from all entries (with credit card filtering)
         income = 0
         expenses = 0
         fees = 0
@@ -355,12 +438,33 @@ final class ReportsViewModel: ObservableObject {
         for entry in entries {
             guard let account = entry.account, !account.isHiddenFlag else { continue }
             let u = reportUSDAmount(for: entry, account: account, btcService: bitcoinPriceService)
+            
+            // Filter credit card data based on view mode
+            let isCreditCardPayment = isCreditCardPaymentTransaction(entry)
+            let isCreditCardTransaction = isCreditCardTransaction(entry)
+            
+            if isCreditCardPayment || isCreditCardTransaction {
+                switch creditCardViewMode {
+                case .payments:
+                    if !isCreditCardPayment { continue }
+                case .transactions:
+                    if !isCreditCardTransaction { continue }
+                }
+            }
+            
             if u > 0 { income += u } else {
                 expenses += abs(u)
                 let cat = entry.category?.isEmpty == false ? entry.category! : "Uncategorized"
                 byCategory[cat, default: 0] += abs(u)
             }
-            if isDigitalWallet(account) { fees += FeeParsing.feeFromNotes(entry.notes) }
+            if isDigitalWallet(account) {
+                let fee = calculateDigitalWalletFee(for: entry, account: account, btcService: bitcoinPriceService)
+                fees += fee
+                // Add fees to category breakdown
+                if fee > 0 {
+                    byCategory["Digital Wallet Fees", default: 0] += fee
+                }
+            }
         }
 
         let rate: Decimal? = income > 0 ? (income - expenses) / income : nil
@@ -403,6 +507,20 @@ final class ReportsViewModel: ObservableObject {
             for e in es {
                 guard let acct = e.account, !acct.isHiddenFlag else { continue }
                 let u = reportUSDAmount(for: e, account: acct, btcService: bitcoinPriceService)
+                
+                // Filter credit card data based on view mode
+                let isCreditCardPayment = isCreditCardPaymentTransaction(e)
+                let isCreditCardTransaction = isCreditCardTransaction(e)
+                
+                if isCreditCardPayment || isCreditCardTransaction {
+                    switch creditCardViewMode {
+                    case .payments:
+                        if !isCreditCardPayment { continue }
+                    case .transactions:
+                        if !isCreditCardTransaction { continue }
+                    }
+                }
+                
                 if u > 0 { income += u } else {
                     let a = abs(u)
                     expenses += a
@@ -410,7 +528,14 @@ final class ReportsViewModel: ObservableObject {
                     let cat = e.category?.isEmpty == false ? e.category! : "Uncategorized"
                     byCategory[cat, default: 0] += a
                 }
-                if isDigitalWallet(acct) { fees += FeeParsing.feeFromNotes(e.notes) }
+                if isDigitalWallet(acct) {
+                    let fee = calculateDigitalWalletFee(for: e, account: acct, btcService: bitcoinPriceService)
+                    fees += fee
+                    // Add fees to category breakdown
+                    if fee > 0 {
+                        byCategory["Digital Wallet Fees", default: 0] += fee
+                    }
+                }
             }
             daily.append((day: dStart, expenses: exp))
         }
@@ -701,7 +826,8 @@ final class ReportsViewModel: ObservableObject {
             return entries.filter { entry in
                 guard let account = entry.account, !account.isHiddenFlag else { return false }
                 guard isDigitalWallet(account) else { return false }
-                let fee = FeeParsing.feeFromNotes(entry.notes)
+                guard account.feePercentageDecimal > 0 else { return false }
+                let fee = calculateDigitalWalletFee(for: entry, account: account, btcService: bitcoinPriceService)
                 return fee > 0
             }
         } catch {
@@ -869,6 +995,7 @@ final class ReportsViewModel: ObservableObject {
         // Get all categories from the period (filtered by view mode)
         let entries = fetchEntries(from: start, to: end)
         var allCategories: Set<String> = []
+        var hasFees = false
         for entry in entries {
             guard let account = entry.account, !account.isHiddenFlag else { continue }
             let usd = reportUSDAmount(for: entry, account: account, btcService: bitcoinPriceService)
@@ -888,8 +1015,25 @@ final class ReportsViewModel: ObservableObject {
             
             let cat = entry.category?.isEmpty == false ? entry.category! : "Uncategorized"
             allCategories.insert(cat)
+            
+            // Check if there are digital wallet fees
+            if isDigitalWallet(account) && account.feePercentageDecimal > 0 {
+                let fee = calculateDigitalWalletFee(for: entry, account: account, btcService: bitcoinPriceService)
+                if fee > 0 {
+                    hasFees = true
+                }
+            }
         }
-        let sortedCategories = Array(allCategories).sorted()
+        // Add Digital Wallet Fees category if fees exist
+        if hasFees {
+            allCategories.insert("Digital Wallet Fees")
+        }
+        // Sort categories, but put Digital Wallet Fees at the end for better visual hierarchy
+        let sortedCategories = Array(allCategories).sorted { cat1, cat2 in
+            if cat1 == "Digital Wallet Fees" { return false }
+            if cat2 == "Digital Wallet Fees" { return true }
+            return cat1 < cat2
+        }
         
         // Get category data for each period
         for periodIndex in 0..<periodCount {
@@ -964,6 +1108,14 @@ final class ReportsViewModel: ObservableObject {
                 
                 let cat = entry.category?.isEmpty == false ? entry.category! : "Uncategorized"
                 categoryAmounts[cat, default: 0] += abs(usd)
+                
+                // Add digital wallet fees to category breakdown
+                if isDigitalWallet(account) {
+                    let fee = calculateDigitalWalletFee(for: entry, account: account, btcService: bitcoinPriceService)
+                    if fee > 0 {
+                        categoryAmounts["Digital Wallet Fees", default: 0] += fee
+                    }
+                }
             }
             
             // Create sorted category list for this period (only categories with spending)
@@ -1022,7 +1174,7 @@ final class ReportsViewModel: ObservableObject {
     
     // MARK: - Credit Card Spending Calculation
     
-    /// Calculates total credit card spending (transactions, not payments) for a given period
+    /// Calculates total credit card spending or payments based on current view mode
     func creditCardSpending(for period: WalletPeriod) -> Decimal {
         let (start, end): (Date, Date) = {
             switch period {
@@ -1048,40 +1200,55 @@ final class ReportsViewModel: ObservableObject {
         }()
         
         let entries = fetchEntries(from: start, to: end)
-        var totalSpending: Decimal = 0
+        var total: Decimal = 0
         
         for entry in entries {
             guard let account = entry.account, !account.isHiddenFlag else { continue }
             let usd = reportUSDAmount(for: entry, account: account, btcService: bitcoinPriceService)
-            guard usd < 0 else { continue }
             
-            // Only include credit card transactions (exclude payments)
+            // Based on view mode, calculate either payments or transactions
             let isCreditCardPayment = isCreditCardPaymentTransaction(entry)
-            guard !isCreditCardPayment else { continue }
+            let isCreditCardTransaction = isCreditCardTransaction(entry)
             
-            // Check if this is a credit card transaction (has credit card in title or matches card name)
-            if isCreditCardTransaction(entry) {
-                totalSpending += abs(usd)
+            switch creditCardViewMode {
+            case .payments:
+                // Show credit card payments (positive amounts, payments TO the card)
+                if isCreditCardPayment && usd > 0 {
+                    total += usd
+                }
+            case .transactions:
+                // Show credit card transactions (spending on the card, negative amounts)
+                if isCreditCardTransaction && usd < 0 {
+                    total += abs(usd)
+                }
             }
         }
         
-        return totalSpending
+        return total
     }
     
     /// Determines if a transaction is a credit card transaction (individual spending on a card)
+    /// This includes both imported transactions and transactions from bills
     private func isCreditCardTransaction(_ entry: LedgerEntry) -> Bool {
         guard let title = entry.title else { return false }
         let titleLower = title.lowercased()
+        
+        // Exclude payments - we only want spending transactions
+        if isCreditCardPaymentTransaction(entry) {
+            return false
+        }
         
         // Check if title contains credit card keywords (but not "payment")
         if titleLower.contains("credit card") && !titleLower.contains("payment") {
             return true
         }
         
-        // Check if it matches any card name from CreditCardManager (but not a payment)
+        // Check if it matches any card name from CreditCardManager
+        // This will catch imported transactions that contain the card name
         if let cardManager = creditCardManager {
             for cardName in cardManager.cards {
                 let cardNameLower = cardName.lowercased()
+                // If title contains the card name and it's not a payment, it's a transaction
                 if titleLower.contains(cardNameLower) && !titleLower.contains("payment") && !entry.isCredit {
                     return true
                 }
@@ -1119,6 +1286,34 @@ final class ReportsViewModel: ObservableObject {
         let entries = fetchEntries(from: start, to: end)
         let categoryName = category.isEmpty ? nil : category
         
+        // Special handling for Digital Wallet Fees - return all transactions from digital wallet accounts
+        if category == "Digital Wallet Fees" {
+            return entries.filter { entry in
+                guard let account = entry.account, !account.isHiddenFlag else { return false }
+                guard isDigitalWallet(account) else { return false }
+                guard account.feePercentageDecimal > 0 else { return false }
+                
+                let usd = reportUSDAmount(for: entry, account: account, btcService: bitcoinPriceService)
+                // Include both positive and negative transactions (fees apply to all)
+                guard usd != 0 else { return false }
+                
+                // Filter based on credit card view mode
+                let isCreditCardPayment = isCreditCardPaymentTransaction(entry)
+                
+                switch creditCardViewMode {
+                case .payments:
+                    guard isCreditCardPayment else { return false }
+                case .transactions:
+                    guard !isCreditCardPayment else { return false }
+                }
+                
+                // Only include transactions that would have fees (non-zero amount)
+                let fee = calculateDigitalWalletFee(for: entry, account: account, btcService: bitcoinPriceService)
+                return fee > 0
+            }.sorted { ($0.date ?? Date.distantPast) > ($1.date ?? Date.distantPast) }
+        }
+        
+        // Regular category filtering
         return entries.filter { entry in
             guard let account = entry.account, !account.isHiddenFlag else { return false }
             let usd = reportUSDAmount(for: entry, account: account, btcService: bitcoinPriceService)

@@ -145,23 +145,58 @@ struct CalendarTabView: View {
             Button("Cancel", role: .cancel) {
                 billToDelete = nil
             }
-            Button("Delete", role: .destructive) {
-                billViewModel.deleteBill(bill)
-                billToDelete = nil
+            // Check if bill is recurring
+            if let recurrenceType = bill.recurrenceType, recurrenceType != "none" {
+                Button("This Bill Only", role: .destructive) {
+                    billViewModel.deleteBill(bill)
+                    billToDelete = nil
+                }
+                Button("This and Future Bills", role: .destructive) {
+                    billViewModel.deleteRecurringBillAndFuture(bill)
+                    billToDelete = nil
+                }
+            } else {
+                Button("Delete", role: .destructive) {
+                    billViewModel.deleteBill(bill)
+                    billToDelete = nil
+                }
             }
         } message: { bill in
-            Text("Are you sure you want to delete \"\(bill.name ?? "this bill")\"? This action cannot be undone.")
+            if let recurrenceType = bill.recurrenceType, recurrenceType != "none" {
+                Text("Do you want to delete just this bill, or delete this bill and all future bills in the series?")
+            } else {
+                Text("Are you sure you want to delete \"\(bill.name ?? "this bill")\"? This action cannot be undone.")
+            }
         }
         .alert("Delete Income", isPresented: $showingDeletePaycheckAlert, presenting: paycheckToDelete) { paycheck in
             Button("Cancel", role: .cancel) {
                 paycheckToDelete = nil
             }
-            Button("Delete", role: .destructive) {
-                paycheckViewModel.deletePaycheck(paycheck)
-                paycheckToDelete = nil
+            // Check if paycheck is recurring
+            if let recurrenceType = paycheck.recurrenceType, recurrenceType != "none" {
+                Button("This Income Only", role: .destructive) {
+                    // For recurring income, deleting the template removes all future occurrences
+                    // This is the same as "all future" since paychecks are templates
+                    paycheckViewModel.deletePaycheck(paycheck)
+                    paycheckToDelete = nil
+                }
+                Button("Delete All Future Income", role: .destructive) {
+                    // Delete the template which removes all future occurrences
+                    paycheckViewModel.deletePaycheck(paycheck)
+                    paycheckToDelete = nil
+                }
+            } else {
+                Button("Delete", role: .destructive) {
+                    paycheckViewModel.deletePaycheck(paycheck)
+                    paycheckToDelete = nil
+                }
             }
         } message: { paycheck in
-            Text("Are you sure you want to delete \"\(paycheck.name ?? "this income")\"? This action cannot be undone.")
+            if let recurrenceType = paycheck.recurrenceType, recurrenceType != "none" {
+                Text("Deleting this income will remove all future occurrences. This action cannot be undone.")
+            } else {
+                Text("Are you sure you want to delete \"\(paycheck.name ?? "this income")\"? This action cannot be undone.")
+            }
         }
         .onAppear {
             let today = Date()
@@ -714,9 +749,24 @@ let calendarWidth = min(max(size.width * 0.45, 360), 520)
                 MonthBillList(dayOccurrences: currentMonthDayOccurrences,
                               calendar: calendar,
                               selectedDate: selectedDate,
-                              currencyCode: currencyCode) { date in
-                    selectDate(date)
-                }
+                              currencyCode: currencyCode,
+                              onEditBill: { presentBillEditor($0) },
+                              onEditIncome: { paycheck in
+                                  paycheckToEdit = paycheck
+                                  paycheckOccurrenceDate = nil
+                                  showingPaycheckEditor = true
+                              },
+                              onDeleteBill: { bill in
+                                  billToDelete = bill
+                                  showingDeleteBillAlert = true
+                              },
+                              onDeleteIncome: { paycheck in
+                                  paycheckToDelete = paycheck
+                                  showingDeletePaycheckAlert = true
+                              },
+                              onSelect: { date in
+                                  selectDate(date)
+                              })
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
@@ -1235,6 +1285,10 @@ private struct MonthBillList: View {
     let calendar: Calendar
     let selectedDate: Date
     let currencyCode: String
+    let onEditBill: ((Bill) -> Void)?
+    let onEditIncome: ((Paycheck) -> Void)?
+    let onDeleteBill: ((Bill) -> Void)?
+    let onDeleteIncome: ((Paycheck) -> Void)?
     let onSelect: (Date) -> Void
     
     var body: some View {
@@ -1383,7 +1437,9 @@ private struct MonthBillList: View {
                                   
                                   // Enhanced feedback: haptic, sound, and visual confirmation
                                   HapticManager.shared.success()
-                              })
+                              },
+                              onEdit: onEditIncome != nil ? { onEditIncome?(occurrence.paycheck) } : nil,
+                              onDelete: onDeleteIncome != nil ? { onDeleteIncome?(occurrence.paycheck) } : nil)
                         .environmentObject(accountViewModel)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
@@ -1403,8 +1459,8 @@ private struct MonthBillList: View {
                 ForEach(bills) { occurrence in
                     BillDueRow(occurrence: occurrence, 
                              currencyCode: currencyCode,
-                             onEdit: nil, // MonthBillList doesn't have edit/delete callbacks
-                             onDelete: nil)
+                             onEdit: { onEditBill?(occurrence.bill) },
+                             onDelete: { onDeleteBill?(occurrence.bill) })
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
                         .background(

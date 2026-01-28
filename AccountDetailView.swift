@@ -330,10 +330,7 @@ struct AccountDetailView: View {
                 }
             } label: {
                 HStack(spacing: 8) {
-                    Text(account.name ?? "Account")
-                        .font(.headline)
-                    
-                    Text("Balance")
+                    Text("\(account.name ?? "Account") Balance")
                         .font(.headline)
                     
                     Image(systemName: "chevron.up.chevron.down")
