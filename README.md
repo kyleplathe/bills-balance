@@ -1,191 +1,79 @@
-# Bills & Balance - Personal Finance Management iOS App
+# Bills & Balance
 
-A clean, modern iOS app that combines bill tracking with disciplined financial practices through manual verification of all transactions.
+A simple, modern iOS app for tracking bills, managing your balance, projecting cash flow, and staying ahead of your bank — without the stress of traditional budgeting. 💸📅
 
-## Features
+**Bills & Balance** gives you clear visibility into when bills hit, how your projected income covers them, current account balances, spending trends, and more — all in a clean, low-pressure interface designed for real-life money management.
 
-### Phase 1: Core Bill Tracking (Implemented)
+### Core Philosophy
+When money is tight, complex budgets can feel overwhelming. This app keeps things simple: focus on bill timing, balance projection, ledger-style tracking, and calendar-based foresight so you can always be a few steps ahead of settlements.
 
-#### ✅ Bill Management
-- **Add/Edit Bills**: Create and modify bills with essential details
-- **Mark as Paid**: Quick toggle to mark bills as paid/unpaid
-- **Delete Bills**: Remove individual bills or recurring bill series
-- **Bill Details**: Name, amount, due date, notes, recurrence
+### Key Features
 
-#### ✅ Recurring Bills
-- Support for weekly, monthly, quarterly, yearly, and custom intervals
-- Smart handling of recurring bill series
-- Option to delete single occurrence or entire series
-- Automatic creation of next bill when current one is paid
+#### Bills Tab
+- Monthly snapshot with progress bar (paid vs. upcoming)
+- Clean, searchable list of bills with status colors (green paid, blue upcoming, red overdue)
+- Quick actions: check off as paid, edit, delete
+- **Toolbar — Bill tools:**
+  - Add new bill (+)
+  - Search bills
+  - Menu: **Manage Bills** (Import CSV, Export CSV/JSON, Add bill), **Show/Hide Paid Bills**
+- Recurring bills with smart series handling
+- Swipe actions for fast mark paid / edits
 
-#### ✅ Bill Organization
-- **Monthly View**: Group bills by month with clear headers
-- **Status Indicators**: Visual indicators for paid, unpaid, overdue, and auto-pay bills
-- **Smart Grouping**: Show current month + next 2 months by default
-- **Future Bills**: Expandable section for upcoming months
+#### Balance Tab
+- Total balance chip across all active accounts
+- Activity summary card (current spending trends — tappable to expand)
+- **Toolbar — Balance/Account tools:**
+  - Add new account (+)
+  - Search
+  - Menu: **Manage Accounts** (edit accounts), **Manage Data** (clear bills / income / transactions / all data), **Import/Export**, **Transfer** (move funds between accounts), **Show/Hide inactive accounts**, **Reports** (to full Activity Reports)
+- Full Activity Reports:
+  - Toggle weekly / monthly / yearly views
+  - "Spending more/less" indicators vs. previous period
+  - Categories ranked by highest amount
+  - Animated tappable pie chart with complex gradients (category color + value intensity)
+- Credit card statement import (CSV) for complete monthly spending view
+- Planned: Separate credit card payments (from balance accounts) vs. actual spending categories in reports
 
-#### ✅ Visual Design
-- **Clean List Interface**: Modern, card-based bill rows
-- **Status Colors**: Green (paid), Blue (upcoming), Red (overdue), Gray (inactive)
-- **Haptic Feedback**: Subtle haptic responses for interactions
-- **Swipe Actions**: Swipe to edit, mark paid, or delete
-- **Context Menus**: Long-press for additional options
+#### Calendar Tab
+- Monthly overview:
+  - Remaining projected balance
+  - Projected income
+  - Next 7 days owed
+  - Projected bills for next month
+- Tappable days: view/add/edit bills or income
+- Bottom insight: "You're living X% above or below your means" (projected income vs. known bills for the month)
+- Consistent edit flow + swipe actions (edit/delete); recurring delete options ("this only" vs "all future")
+- Delete confirmations for safety
 
-#### ✅ Notifications
-- Local notifications for bill reminders (3 days before due date)
-- Smart notification management (cancel when paid, reschedule when edited)
+#### Shake to Bitcoin Mode
+- Shake device → instantly view all bills and balances denominated in BTC / sats
+- Planned: USD vs BTC value-over-time reports for bills and income (track dollar inflation vs. BTC denomination changes)
 
-### Phase 2: Ledger Integration (Planned)
-- Checkbook-style ledger with running balance
-- Manual verification of all transactions
-- Bank integration and transaction sync
-- Smart matching between bills and bank transactions
-- Monthly reconciliation tools
+#### Additional Features
+- Local notifications (3 days before due)
+- Haptic feedback on key actions
+- Manual transaction / paycheck entry
+- Account & credit card management (add, edit, detail views with transaction history)
+- Onboarding + splash screen
+- Dark mode, Dynamic Type, VoiceOver support
 
-## Technical Architecture
+### Tech Stack
+- SwiftUI (iOS 17+)
+- Core Data
+- MVVM architecture
+- Charts framework (gradients, animations)
+- Local notifications + haptics
+- CSV parsing for imports
 
-### Core Technologies
-- **SwiftUI** for modern, declarative UI
-- **Core Data** for persistent storage
-- **MVVM Pattern** with ViewModels for clean separation of concerns
-- **iOS 17+** target for latest features
-- **Clean, modular code structure**
+### Screenshots
+(Add your latest ones here — e.g., Bills toolbar expanded, Balance activity pie chart animation, Calendar projection with means %, Shake-to-BTC view)
 
-### Core Data Model
-```swift
-Bill Entity:
-- id: UUID (unique identifier)
-- name: String (bill name)
-- amount: Decimal (bill amount)
-- dueDate: Date (due date)
-- isPaid: Bool (payment status)
-- paidDate: Date? (when paid)
-- notes: String? (optional notes)
-- recurrenceType: String (weekly, monthly, etc.)
-- recurrenceInterval: Int16 (interval for recurring)
-- seriesId: UUID? (links recurring bills)
-- autoPay: Bool (auto-pay indicator)
-- createdAt: Date
-- updatedAt: Date
-```
+### Roadmap
+- Full USD ↔ BTC historical value charts
+- Clear separation of credit card payments vs. spending in reports
+- Enhanced projected income & means-calculation polish
+- PDF/CSV detailed report exports
+- Ledger-style running balance verification
 
-### Key Components
-
-#### Views
-- `BillListView`: Main list with monthly grouping
-- `AddEditBillView`: Form for creating/editing bills
-- `BillRowView`: Individual bill row component
-- `BillSummaryHeader`: Monthly summary with totals
-
-#### ViewModels
-- `BillViewModel`: Core bill management logic
-- `PersistenceController`: Core Data stack management
-- `NotificationManager`: Local notifications for reminders
-- `HapticManager`: Haptic feedback management
-
-#### Models
-- `BillRecurrenceType`: Enum for recurrence patterns
-- `BillStatus`: Bill status with colors and display names
-
-## Getting Started
-
-### Prerequisites
-- Xcode 15.0 or later
-- iOS 17.0 or later
-- Swift 5.9 or later
-
-### Installation
-1. Clone the repository
-2. Open `BillsAndBalance.xcodeproj` in Xcode
-3. Build and run on iOS Simulator or device
-
-### First Launch
-1. Grant notification permissions when prompted
-2. Add your first bill using the "+" button
-3. Explore recurring bills and monthly organization
-
-## Usage Guide
-
-### Adding Bills
-1. Tap the "+" button in the top right
-2. Fill in bill details:
-   - Name (required)
-   - Amount (required)
-   - Due date (required)
-   - Recurrence (optional)
-   - Auto-pay toggle (optional)
-   - Notes (optional)
-3. Tap "Save"
-
-### Managing Bills
-- **Mark as Paid**: Tap the circle icon or swipe right
-- **Edit**: Tap on the bill or long-press for context menu
-- **Delete**: Swipe left or use context menu
-- **Recurring Bills**: Choose to delete single occurrence or entire series
-
-### Recurring Bills
-- Set recurrence type (weekly, monthly, quarterly, yearly)
-- Set interval (e.g., every 2 months)
-- When you mark a recurring bill as paid, the next occurrence is automatically created
-- Use series ID to link all occurrences of the same bill
-
-### Notifications
-- Bills send reminders 3 days before due date
-- Notifications are automatically managed (canceled when paid, rescheduled when edited)
-- Grant notification permissions in Settings if needed
-
-## Design Philosophy
-
-### Disciplined Financial Practices
-- Manual verification of all transactions (Phase 2)
-- Encourages regular balance checking
-- No automatic payments without explicit confirmation
-- Clear visual hierarchy for financial status
-
-### Modern iOS Design
-- Follows Apple's Human Interface Guidelines
-- Supports both Light and Dark modes
-- Optimized for iPhone and iPad
-- Accessibility support with VoiceOver and Dynamic Type
-
-### User Experience
-- Smooth animations and transitions
-- Haptic feedback for interactions
-- Intuitive swipe gestures
-- Clear visual status indicators
-
-## Future Roadmap
-
-### Phase 2: Ledger Integration
-- [ ] Checkbook-style transaction register
-- [ ] Running balance calculation
-- [ ] Bank account integration
-- [ ] Transaction import and matching
-- [ ] Monthly reconciliation tools
-
-### Additional Features
-- [ ] Export/Import functionality
-- [ ] Advanced filtering and search
-- [ ] Bill categories and tags
-- [ ] Spending analytics and reports
-- [ ] Multiple account support
-
-## Contributing
-
-This is a personal finance app focused on disciplined money management. The codebase is designed to be:
-- Clean and maintainable
-- Well-documented
-- Following iOS best practices
-- Accessible to all users
-
-## License
-
-This project is for personal use and educational purposes.
-
-## Support
-
-For questions or issues, please refer to the code documentation or create an issue in the repository.
-
----
-
-**Bills & Balance** - Take control of your finances with disciplined tracking and verification.
+Made with ❤️ in Minneapolis. Personal project — stars and feedback super welcome! 🚀
