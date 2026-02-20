@@ -230,15 +230,58 @@ class AccountViewModel: ObservableObject {
         }
     }
     
+    /// Starting balance in USD. For BTC accounts uses stored USD/price when available (no live price for that portion).
+    func startingBalanceInUSD(for account: Account, bitcoinPriceService: BitcoinPriceService) -> Decimal {
+        if account.currencyCode != "BTC" {
+            return account.startingBalanceDecimal
+        }
+        if account.startingBalanceUSDDecimal != .zero {
+            return account.startingBalanceUSDDecimal
+        }
+        if account.startingBalanceBTCPriceDecimal > 0 {
+            return account.startingBalanceDecimal * account.startingBalanceBTCPriceDecimal
+        }
+        return bitcoinPriceService.convertBTCToUSD(account.startingBalanceDecimal)
+    }
+    
+    /// Cleared balance in USD. For BTC accounts uses stored USD for reconciled transactions (no live price).
+    func clearedBalanceInUSD(for account: Account, bitcoinPriceService: BitcoinPriceService) -> Decimal {
+        if account.currencyCode != "BTC" {
+            return clearedBalance(for: account)
+        }
+        let entries = account.ledgerEntries as? Set<LedgerEntry> ?? []
+        let reconciledUSD = entries.reduce(Decimal.zero) { partial, entry in
+            guard entry.isReconciledFlag else { return partial }
+            return partial + entry.signedUSDAmount(for: account, bitcoinPriceService: bitcoinPriceService)
+        }
+        return startingBalanceInUSD(for: account, bitcoinPriceService: bitcoinPriceService) + reconciledUSD
+    }
+    
+    /// Total balance in USD. For BTC accounts uses stored USD for reconciled transactions; unreconciled use stored USD when available, else live price.
+    func totalBalanceInUSD(for account: Account, bitcoinPriceService: BitcoinPriceService) -> Decimal {
+        if account.currencyCode != "BTC" {
+            return totalBalance(for: account)
+        }
+        let clearedUSD = clearedBalanceInUSD(for: account, bitcoinPriceService: bitcoinPriceService)
+        let entries = account.ledgerEntries as? Set<LedgerEntry> ?? []
+        let pendingUSD = entries.reduce(Decimal.zero) { partial, entry in
+            guard !entry.isReconciledFlag else { return partial }
+            if entry.usdAmountDecimal != .zero {
+                return partial + (entry.isCredit ? entry.usdAmountDecimal : -entry.usdAmountDecimal)
+            }
+            let btc = entry.signedAmountInCurrency(for: account)
+            return partial + bitcoinPriceService.convertBTCToUSD(abs(btc)) * (btc >= 0 ? 1 : -1)
+        }
+        return clearedUSD + pendingUSD
+    }
+    
     func totalClearedBalance(bitcoinPriceService: BitcoinPriceService? = nil) -> Decimal {
-        accounts.reduce(Decimal.zero) { partial, account in
-            let balance = clearedBalance(for: account)
+        let priceService = bitcoinPriceService ?? BitcoinPriceService.shared
+        return accounts.reduce(Decimal.zero) { partial, account in
             if account.currencyCode == "BTC" {
-                // Convert BTC balance to USD for total
-                let priceService = bitcoinPriceService ?? BitcoinPriceService.shared
-                return partial + priceService.convertBTCToUSD(balance)
+                return partial + clearedBalanceInUSD(for: account, bitcoinPriceService: priceService)
             } else {
-                return partial + balance
+                return partial + clearedBalance(for: account)
             }
         }
     }
@@ -1291,6 +1334,21 @@ extension LedgerEntry {
     func signedAmountInCurrency(for account: Account) -> Decimal {
         let amt = amountInCurrency(for: account)
         return isCredit ? amt : amt * -1
+    }
+    
+    /// Signed amount in USD. For BTC accounts uses stored USD / btcPriceAtTransaction (no live price for reconciled).
+    func signedUSDAmount(for account: Account, bitcoinPriceService: BitcoinPriceService) -> Decimal {
+        if account.currencyCode != "BTC" {
+            return signedAmountInCurrency(for: account)
+        }
+        if usdAmountDecimal != .zero {
+            return isCredit ? usdAmountDecimal : -usdAmountDecimal
+        }
+        let btc = signedAmountInCurrency(for: account)
+        if btcPriceAtTransactionDecimal > 0 {
+            return btc * btcPriceAtTransactionDecimal
+        }
+        return bitcoinPriceService.convertBTCToUSD(abs(btc)) * (btc >= 0 ? 1 : -1)
     }
     
     var isReconciledFlag: Bool {

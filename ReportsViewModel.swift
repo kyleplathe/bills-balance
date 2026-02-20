@@ -1014,6 +1014,7 @@ final class ReportsViewModel: ObservableObject {
             }
             
             let cat = entry.category?.isEmpty == false ? entry.category! : "Uncategorized"
+            guard cat.lowercased() != "income" else { continue } // Exclude Income from spending bar chart
             allCategories.insert(cat)
             
             // Check if there are digital wallet fees
@@ -1107,6 +1108,7 @@ final class ReportsViewModel: ObservableObject {
                 }
                 
                 let cat = entry.category?.isEmpty == false ? entry.category! : "Uncategorized"
+                guard cat.lowercased() != "income" else { continue } // Exclude Income from spending bar chart
                 categoryAmounts[cat, default: 0] += abs(usd)
                 
                 // Add digital wallet fees to category breakdown

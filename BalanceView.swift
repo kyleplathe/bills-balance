@@ -1,5 +1,14 @@
 import SwiftUI
 import Charts
+import CoreData
+
+// Preference key to collect transaction row frames for two-finger drag hit-testing
+private struct TransactionRowFramesKey: PreferenceKey {
+    static var defaultValue: [URL: CGRect] { [:] }
+    static func reduce(value: inout [URL: CGRect], nextValue: () -> [URL: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
 
 // Cash register style balance text with digit rotation
 private struct CashRegisterBalanceText: View {
@@ -77,6 +86,7 @@ struct BalanceView: View {
     @EnvironmentObject private var paycheckViewModel: PaycheckViewModel
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     @EnvironmentObject private var reportsViewModel: ReportsViewModel
+    @EnvironmentObject private var categoryManager: CategoryManager
     @State private var showingManageAccounts = false
     @State private var showingReports = false
     @State private var showingAddAccount = false
@@ -88,6 +98,9 @@ struct BalanceView: View {
     @State private var showingExportSheet = false
     @State private var currentAccountPage = 0
     @State private var activityChartAppeared = false
+    @State private var isTransactionSelectionMode = false
+    @State private var selectedTransactionIDs: Set<NSManagedObjectID> = []
+    @State private var transactionRowFrames: [URL: CGRect] = [:]
     
     var body: some View {
         NavigationStack {
@@ -114,9 +127,19 @@ struct BalanceView: View {
         .navigationTitle("Balance")
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
-                addButton
-                searchButton
-                menuButton
+                if isTransactionSelectionMode {
+                    Text("\(selectedTransactionIDs.count) selected")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Button("Done") {
+                        isTransactionSelectionMode = false
+                        selectedTransactionIDs.removeAll()
+                    }
+                } else {
+                    addButton
+                    searchButton
+                    menuButton
+                }
             }
         }
         .sheet(isPresented: $showingManageAccounts) {
@@ -145,6 +168,7 @@ struct BalanceView: View {
                 .environmentObject(accountViewModel)
                 .environmentObject(bitcoinPriceService)
                 .environmentObject(reportsViewModel)
+                .environmentObject(categoryManager)
         }
         .navigationDestination(isPresented: $showingAccountDetail) {
             if let account = selectedAccount {
@@ -433,16 +457,67 @@ struct BalanceView: View {
     // MARK: - Recent Transactions Section
     
     private var recentTransactionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Recent Transactions")
-                .font(.headline)
-                .padding(.horizontal, 4)
-            
-            VStack(spacing: 8) {
-                ForEach(recentTransactions.prefix(5), id: \.objectID) { entry in
-                    TransactionChipCard(entry: entry)
+        let entries = Array(recentTransactions.prefix(5))
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Recent Transactions")
+                    .font(.headline)
+                Spacer()
+                if !isTransactionSelectionMode {
+                    Button("Select") {
+                        isTransactionSelectionMode = true
+                    }
+                    .font(.subheadline)
                 }
             }
+            .padding(.horizontal, 4)
+            .contentShape(Rectangle())
+            .onLongPressGesture(minimumDuration: 0.6) {
+                isTransactionSelectionMode = true
+            }
+            
+            VStack(spacing: 8) {
+                ForEach(entries, id: \.objectID) { entry in
+                    let isSelected = selectedTransactionIDs.contains(entry.objectID)
+                    TransactionChipCard(
+                        entry: entry,
+                        isSelectionMode: isTransactionSelectionMode,
+                        isSelected: isSelected
+                    ) {
+                        if isTransactionSelectionMode {
+                            if selectedTransactionIDs.contains(entry.objectID) {
+                                selectedTransactionIDs.remove(entry.objectID)
+                            } else {
+                                selectedTransactionIDs.insert(entry.objectID)
+                            }
+                        }
+                    }
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear
+                                .preference(
+                                    key: TransactionRowFramesKey.self,
+                                    value: [entry.objectID.uriRepresentation(): geo.frame(in: .named("recentTransactions"))]
+                                )
+                        }
+                    )
+                }
+            }
+            .coordinateSpace(name: "recentTransactions")
+            .overlay(alignment: .topLeading) {
+                if isTransactionSelectionMode {
+                    TwoFingerDragSelectView(
+                        coordinateSpace: "recentTransactions",
+                        rowFrames: transactionRowFrames,
+                        entries: entries,
+                        onSelectIDs: { ids in
+                            selectedTransactionIDs.formUnion(ids)
+                        }
+                    )
+                    .allowsHitTesting(true)
+                }
+            }
+            .onPreferenceChange(TransactionRowFramesKey.self) { transactionRowFrames = $0 }
         }
     }
     
@@ -547,7 +622,7 @@ private struct AccountChipCard: View {
     var body: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(formatAccountBalanceUSD(accountViewModel.totalBalance(for: account), account: account))
+                Text(formatAccountBalanceUSD(account.currencyCode == "BTC" ? accountViewModel.totalBalanceInUSD(for: account, bitcoinPriceService: bitcoinPriceService) : accountViewModel.totalBalance(for: account), account: account))
                     .font(.system(size: 24, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
                     .lineLimit(1)
@@ -590,14 +665,8 @@ private struct AccountChipCard: View {
     }
     
     private func formatAccountBalanceUSD(_ balance: Decimal, account: Account) -> String {
-        // Always display in USD on the balance page
-        let usdBalance: Decimal
-        if account.currencyCode == "BTC" {
-            // Convert BTC to USD using current price
-            usdBalance = bitcoinPriceService.convertBTCToUSD(balance)
-        } else {
-            usdBalance = balance
-        }
+        // Balance is already in USD (totalBalanceInUSD for BTC, totalBalance for USD accounts)
+        let usdBalance = balance
         
         // USD formatting with commas and decimals
         let formatter = NumberFormatter()
@@ -610,14 +679,104 @@ private struct AccountChipCard: View {
     }
 }
 
+// MARK: - Two-finger drag to select transactions (iOS)
+// Uses a passthrough overlay so single-finger taps still reach the cards; pan is on superview.
+
+private final class PassthroughOverlayView: UIView {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        return hit == self ? nil : hit
+    }
+}
+
+private struct TwoFingerDragSelectView: UIViewRepresentable {
+    let coordinateSpace: String
+    let rowFrames: [URL: CGRect]
+    let entries: [LedgerEntry]
+    let onSelectIDs: (Set<NSManagedObjectID>) -> Void
+    
+    func makeUIView(context: Context) -> PassthroughOverlayView {
+        let view = PassthroughOverlayView()
+        view.backgroundColor = .clear
+        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.panned(_:)))
+        pan.minimumNumberOfTouches = 2
+        pan.maximumNumberOfTouches = 2
+        context.coordinator.panGesture = pan
+        return view
+    }
+    
+    func updateUIView(_ uiView: PassthroughOverlayView, context: Context) {
+        context.coordinator.rowFrames = rowFrames
+        context.coordinator.entries = entries
+        context.coordinator.onSelectIDs = onSelectIDs
+        context.coordinator.overlayView = uiView
+        if panGestureNeedsParent(uiView, coordinator: context.coordinator) {
+            uiView.superview?.addGestureRecognizer(context.coordinator.panGesture!)
+        }
+    }
+    
+    private func panGestureNeedsParent(_ view: UIView, coordinator: Coordinator) -> Bool {
+        guard let pan = coordinator.panGesture, view.superview != nil else { return false }
+        if pan.view == view.superview { return false }
+        return true
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(rowFrames: rowFrames, entries: entries, onSelectIDs: onSelectIDs)
+    }
+    
+    class Coordinator: NSObject {
+        var rowFrames: [URL: CGRect]
+        var entries: [LedgerEntry]
+        var onSelectIDs: (Set<NSManagedObjectID>) -> Void
+        var panGesture: UIPanGestureRecognizer?
+        weak var overlayView: PassthroughOverlayView?
+        
+        init(rowFrames: [URL: CGRect], entries: [LedgerEntry], onSelectIDs: @escaping (Set<NSManagedObjectID>) -> Void) {
+            self.rowFrames = rowFrames
+            self.entries = entries
+            self.onSelectIDs = onSelectIDs
+        }
+        
+        @objc func panned(_ gesture: UIPanGestureRecognizer) {
+            guard gesture.numberOfTouches == 2 else { return }
+            let point: CGPoint
+            if let overlay = overlayView, overlay.superview != nil {
+                point = gesture.location(in: overlay)
+            } else if let view = gesture.view {
+                point = gesture.location(in: view)
+            } else {
+                return
+            }
+            var ids = Set<NSManagedObjectID>()
+            for (url, rect) in rowFrames where rect.contains(point) {
+                if let entry = entries.first(where: { $0.objectID.uriRepresentation() == url }) {
+                    ids.insert(entry.objectID)
+                }
+            }
+            if !ids.isEmpty {
+                onSelectIDs(ids)
+            }
+        }
+    }
+}
+
 // MARK: - Transaction Chip Card
 
 private struct TransactionChipCard: View {
     let entry: LedgerEntry
+    var isSelectionMode: Bool = false
+    var isSelected: Bool = false
+    var onTap: (() -> Void)? = nil
     
     var body: some View {
         ChipCard {
             HStack(spacing: 12) {
+                if isSelectionMode {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.title2)
+                        .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                }
                 // Transaction icon
                 Circle()
                     .fill(entry.isCredit ? Color.green.opacity(0.2) : Color.red.opacity(0.2))
@@ -681,6 +840,10 @@ private struct TransactionChipCard: View {
                         .foregroundColor(entry.isCredit ? .green : .red)
                 }
             }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onTap?()
         }
     }
     

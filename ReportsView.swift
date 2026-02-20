@@ -8,6 +8,7 @@
 
 import SwiftUI
 import Charts
+import UIKit
 
 // MARK: - Reports View
 
@@ -85,6 +86,7 @@ struct ReportsView: View {
                         }
                     }
                 }
+                .toolbarBackground(.hidden, for: .navigationBar)
                 .fileImporter(
                     isPresented: $showingStatementImportPicker,
                     allowedContentTypes: [.commaSeparatedText, .plainText],
@@ -133,9 +135,6 @@ struct ReportsView: View {
                     if walletPeriod == .week {
                         reportsViewModel.loadWeekReport()
                     }
-                }
-                .onChange(of: reportsViewModel.creditCardViewMode) { _, _ in
-                    handleCreditCardViewModeChange()
                 }
         }
     }
@@ -192,17 +191,6 @@ struct ReportsView: View {
         switch p {
         case .week:
             reportsViewModel.selectedWeekStart = reportsViewModel.startOfWeek(for: Date())
-            reportsViewModel.loadWeekReport()
-        case .month:
-            reportsViewModel.loadMonthlyReport()
-        case .year:
-            reportsViewModel.loadYearWrapReport()
-        }
-    }
-    
-    private func handleCreditCardViewModeChange() {
-        switch walletPeriod {
-        case .week:
             reportsViewModel.loadWeekReport()
         case .month:
             reportsViewModel.loadMonthlyReport()
@@ -292,15 +280,9 @@ struct ReportsView: View {
             )
             WalletIncomeFeesRows(
                 income: r.income,
-                fees: r.digitalWalletFees,
-                creditCardSpending: reportsViewModel.creditCardSpending(for: .week),
                 appeared: appeared,
                 onIncomeTap: {
                     selectedCategory = "Income"
-                    showingCategoryTransactions = true
-                },
-                onFeesTap: {
-                    selectedCategory = "Digital Wallet Fees"
                     showingCategoryTransactions = true
                 }
             )
@@ -331,15 +313,9 @@ struct ReportsView: View {
             )
             WalletIncomeFeesRows(
                 income: r.income,
-                fees: r.digitalWalletFees,
-                creditCardSpending: reportsViewModel.creditCardSpending(for: .month),
                 appeared: appeared,
                 onIncomeTap: {
                     selectedCategory = "Income"
-                    showingCategoryTransactions = true
-                },
-                onFeesTap: {
-                    selectedCategory = "Digital Wallet Fees"
                     showingCategoryTransactions = true
                 }
             )
@@ -370,15 +346,9 @@ struct ReportsView: View {
             )
             WalletIncomeFeesRows(
                 income: r.income,
-                fees: r.digitalWalletFees,
-                creditCardSpending: reportsViewModel.creditCardSpending(for: .year),
                 appeared: appeared,
                 onIncomeTap: {
                     selectedCategory = "Income"
-                    showingCategoryTransactions = true
-                },
-                onFeesTap: {
-                    selectedCategory = "Digital Wallet Fees"
                     showingCategoryTransactions = true
                 }
             )
@@ -470,24 +440,20 @@ struct ReportsView: View {
     
     private var periodSwipeContainer: some View {
         TabView(selection: $currentSwipeIndex) {
-            // Previous period preview (if data exists)
             if canNavigateToPreviousPeriod {
                 periodContentList
                     .tag(0)
             }
-            
-            // Current period (always shown)
             periodContentList
                 .tag(1)
-            
-            // Next period preview (if data exists)
             if canNavigateToNextPeriod {
                 periodContentList
                     .tag(2)
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
-        .padding(.horizontal, -20) // Show partial content on edges (Apple Wallet style)
+        .padding(.horizontal, -24) // Peek of previous/next period cards (Apple Wallet style)
+        .background(Color(.systemGroupedBackground))
         .onAppear {
             currentSwipeIndex = 1 // Start at center
         }
@@ -504,15 +470,15 @@ struct ReportsView: View {
     
     private var periodContentList: some View {
         List {
-            // Period title section (scrolls with content)
+            // Period title (Apple Wallet: large title right under toolbar)
             Section {
                 Text(reportsPeriodTitle)
                     .font(.system(size: 34, weight: .bold))
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 4)
+                    .padding(.vertical, 2)
             }
-            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 0, trailing: 16))
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
             
@@ -522,6 +488,8 @@ struct ReportsView: View {
         }
         .listStyle(.insetGrouped)
         .listSectionSpacing(.custom(4))
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemGroupedBackground))
     }
     
     private var canNavigateToPreviousPeriod: Bool {
@@ -655,7 +623,74 @@ private let appleWalletBarGradients: [LinearGradient] = [
     LinearGradient(colors: [.blue, .cyan], startPoint: .bottom, endPoint: .top),
 ]
 
+/// iOS design shape for Activity bar charts: corner radius and style used by main chart and chip card so they match.
+private let activityBarCornerRadius: CGFloat = 6
+
+/// Rich, hue-ordered palette for Activity bar gradients (category + value + period). More colors, smooth spectral flow.
+private let activityCategoryPalette: [Color] = [
+    Color(red: 0.95, green: 0.40, blue: 0.25),   // warm orange
+    Color(red: 0.90, green: 0.35, blue: 0.45),   // coral / pink
+    Color(red: 0.75, green: 0.30, blue: 0.55),   // magenta
+    Color(red: 0.55, green: 0.35, blue: 0.75),   // purple
+    Color(red: 0.40, green: 0.45, blue: 0.90),   // blue
+    Color(red: 0.30, green: 0.65, blue: 0.90),   // sky blue
+    Color(red: 0.25, green: 0.75, blue: 0.80),   // cyan
+    Color(red: 0.30, green: 0.80, blue: 0.65),  // teal
+    Color(red: 0.35, green: 0.78, blue: 0.45),  // green
+    Color(red: 0.55, green: 0.82, blue: 0.35),  // lime
+    Color(red: 0.75, green: 0.78, blue: 0.30),  // yellow-green
+    Color(red: 0.90, green: 0.72, blue: 0.25),  // gold
+    Color(red: 0.92, green: 0.55, blue: 0.28),  // orange
+    Color(red: 0.85, green: 0.35, blue: 0.38),  // red-pink
+    Color(red: 0.60, green: 0.45, blue: 0.75),   // violet
+    Color(red: 0.50, green: 0.55, blue: 0.85),  // periwinkle
+    Color(red: 0.45, green: 0.70, blue: 0.75),  // steel
+    Color(red: 0.55, green: 0.65, blue: 0.55), // sage
+]
+
+// MARK: - Activity chart color helpers (blend, lighten, period tint)
+
+private func activityBlend(_ a: Color, _ b: Color, t: CGFloat = 0.5) -> Color {
+    let uia = UIColor(a)
+    let uib = UIColor(b)
+    var (r1, g1, b1, a1): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 1)
+    var (r2, g2, b2, a2): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 1)
+    uia.getRed(&r1, green: &g1, blue: &b1, alpha: &a1)
+    uib.getRed(&r2, green: &g2, blue: &b2, alpha: &a2)
+    return Color(
+        red: r1 + (r2 - r1) * t,
+        green: g1 + (g2 - g1) * t,
+        blue: b1 + (b2 - b1) * t,
+        opacity: a1 + (a2 - a1) * t
+    )
+}
+
+private func activityLighten(_ color: Color, amount: CGFloat = 0.15) -> Color {
+    activityBlend(color, .white, t: amount)
+}
+
+/// Subtle period tint: earlier bars slightly cooler, later bars slightly warmer (for time flow).
+private func activityPeriodTint(_ color: Color, periodIndex: Int, totalPeriods: Int) -> Color {
+    guard totalPeriods > 1 else { return color }
+    let t = Double(periodIndex) / max(Double(totalPeriods - 1), 1)
+    let strength = 0.07
+    let cool = Color(red: 0.4, green: 0.5, blue: 0.9)
+    let warm = Color(red: 0.95, green: 0.6, blue: 0.35)
+    let tint = activityBlend(cool, warm, t: CGFloat(t))
+    return activityBlend(color, tint, t: CGFloat(strength))
+}
+
+/// One segment in a stacked bar: category color + value (height). Used for Apple Wallet–style stacked bars.
+private struct ActivityBarSegment: Identifiable {
+    let id: String
+    let period: String
+    let periodIndex: Int
+    let category: String
+    let amount: Double
+}
+
 private struct WalletTotalSpendingAppleCard: View {
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var reportsViewModel: ReportsViewModel
     let periodLabel: String
     let expenses: Decimal
@@ -672,27 +707,28 @@ private struct WalletTotalSpendingAppleCard: View {
         return f
     }()
     
+    /// Apple Wallet wording: "So far, you've spent $XXX.XX more/less than last month at this time."
     private var comparisonText: String? {
         guard let previous = previousPeriodExpenses, previous > 0 else { return nil }
         let difference = expenses - previous
         let absDifference = abs(difference)
-        let periodName: String = {
+        let periodPhrase: String = {
             switch periodType {
-            case .week: return "last week"
-            case .month: return "last month"
-            case .year: return "last year"
+            case .week: return "last week at this time"
+            case .month: return "last month at this time"
+            case .year: return "last year at this time"
             }
         }()
         
         if abs(difference) < 0.01 {
-            return "Same as \(periodName)"
+            return "So far, same as \(periodPhrase)"
         }
         
         let diffString = formatter.string(from: absDifference as NSDecimalNumber) ?? "$0.00"
         if difference > 0 {
-            return "\(diffString) more than \(periodName)"
+            return "So far, you've spent \(diffString) more than \(periodPhrase)."
         } else {
-            return "\(diffString) less than \(periodName)"
+            return "So far, you've spent \(diffString) less than \(periodPhrase)."
         }
     }
     
@@ -717,42 +753,38 @@ private struct WalletTotalSpendingAppleCard: View {
     var body: some View {
         Section {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Total Spending")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    creditCardViewModeToggle
+                Text("Total Spending")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(formatter.string(from: expenses as NSDecimalNumber) ?? "$0.00")
+                        .font(.system(size: 32, weight: .bold))
+                        .foregroundStyle(.primary)
+                    if let icon = arrowIcon {
+                        Image(systemName: icon)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(comparisonColor)
+                    }
                 }
-                Text(formatter.string(from: expenses as NSDecimalNumber) ?? "$0.00")
-                    .font(.system(size: 32, weight: .bold))
-                    .foregroundStyle(.primary)
+                if let comparison = comparisonText {
+                    Text(comparison)
+                        .font(.subheadline)
+                        .foregroundStyle(comparisonColor)
+                }
                 walletBarChart
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
             .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color(.secondarySystemBackground))
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color(.systemBackground))
             )
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.25 : 0.06), radius: 10, x: 0, y: 2)
         }
-        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 4, trailing: 16))
+        .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 8, trailing: 20))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
-    }
-    
-    private var creditCardViewModeToggle: some View {
-        Picker("", selection: Binding(
-            get: { reportsViewModel.creditCardViewMode },
-            set: { reportsViewModel.setCreditCardViewMode($0) }
-        )) {
-            ForEach(ReportsViewModel.CreditCardViewMode.allCases, id: \.self) { mode in
-                Text(mode.rawValue).tag(mode)
-            }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .frame(width: 200)
     }
 
     private var walletBarChart: some View {
@@ -793,116 +825,55 @@ struct WalletStackedCategoryBarChart: View {
     let appeared: Bool
     let showEveryNthLabel: Int?
     
-    // Enhanced color palette for categories
-    private let categoryColors: [Color] = [
-        .orange, .pink, .purple, .blue, .green, .mint, .cyan, .teal,
-        .indigo, .red, .yellow, .brown, .gray
-    ]
-    
     private var categoryBreakdown: [(period: String, categories: [(name: String, amount: Decimal)])] {
         reportsViewModel.categoryBreakdownByPeriod(period: period)
     }
     
     private var allCategories: [String] {
-        var categories: Set<String> = []
+        var set: Set<String> = []
         for item in categoryBreakdown {
-            for cat in item.categories {
-                categories.insert(cat.name)
-            }
+            for cat in item.categories { set.insert(cat.name) }
         }
-        // Sort categories, but put Digital Wallet Fees at the end for better visual hierarchy
-        return Array(categories).sorted { cat1, cat2 in
+        return Array(set).sorted { cat1, cat2 in
             if cat1 == "Digital Wallet Fees" { return false }
             if cat2 == "Digital Wallet Fees" { return true }
             return cat1 < cat2
         }
     }
     
-    private func colorForCategory(_ categoryName: String) -> Color {
-        // Digital Wallet Fees always use orange to match the icon
-        if categoryName == "Digital Wallet Fees" {
-            return .orange
-        }
-        if let index = allCategories.firstIndex(of: categoryName) {
-            return categoryColors[index % categoryColors.count]
-        }
-        return .gray
+    private func colorForCategory(_ name: String) -> Color {
+        if name == "Digital Wallet Fees" { return Color(red: 0.95, green: 0.55, blue: 0.28) }
+        guard let i = allCategories.firstIndex(of: name) else { return .gray }
+        return activityCategoryPalette[i % activityCategoryPalette.count]
     }
     
-    // Create gradient that blends categories smoothly based on their values
-    // This visually represents the category breakdown within each period
-    private func gradientForPeriod(_ categories: [(name: String, amount: Decimal)]) -> LinearGradient {
-        guard !categories.isEmpty else {
-            return LinearGradient(colors: [Color.gray.opacity(0.3)], startPoint: .bottom, endPoint: .top)
-        }
-        
-        let totalAmount = categories.reduce(Decimal(0)) { $0 + $1.amount }
-        guard totalAmount > 0 else {
-            return LinearGradient(colors: [Color.gray.opacity(0.3)], startPoint: .bottom, endPoint: .top)
-        }
-        
-        // Sort categories by amount (largest first, at bottom)
-        let sortedCategories = categories.sorted { $0.amount > $1.amount }
-        
-        if sortedCategories.count == 1 {
-            let color = colorForCategory(sortedCategories[0].name)
-            return LinearGradient(
-                colors: [color, color],
-                startPoint: .bottom,
-                endPoint: .top
-            )
-        }
-        
-        // Create gradient stops - each category gets proportional space based on its value
-        // Larger category values = larger proportion = more dominant color in the gradient
-        var gradientStops: [Gradient.Stop] = []
-        var cumulativeLocation: Double = 0.0
-        
-        for (index, category) in sortedCategories.enumerated() {
-            // Calculate proportion: larger amounts = larger proportion = more color dominance
-            let categoryAmount = (category.amount as NSDecimalNumber).doubleValue
-            let proportion = categoryAmount / (totalAmount as NSDecimalNumber).doubleValue
-            let color = colorForCategory(category.name)
-            
-            // Add stop at start of this category's segment
-            // For the first category, start at 0.0
-            if index == 0 {
-                gradientStops.append(Gradient.Stop(color: color, location: 0.0))
-            } else {
-                // For subsequent categories, add blend point with previous color
-                let prevColor = colorForCategory(sortedCategories[index - 1].name)
-                gradientStops.append(Gradient.Stop(color: prevColor, location: cumulativeLocation))
-                gradientStops.append(Gradient.Stop(color: color, location: cumulativeLocation))
-            }
-            
-            // Move to end of this category's segment (proportional to its value)
-            cumulativeLocation += proportion
-            
-            // Add stop at end of this category's segment
-            gradientStops.append(Gradient.Stop(color: color, location: min(cumulativeLocation, 1.0)))
-        }
-        
-        // Ensure final stop is exactly at 1.0
-        if let lastStop = gradientStops.last, lastStop.location < 1.0 {
-            gradientStops.append(Gradient.Stop(color: lastStop.color, location: 1.0))
-        }
-        
-        // Sort stops by location and remove duplicates
-        var uniqueStops: [Gradient.Stop] = []
-        var lastLocation: Double = -1.0
-        for stop in gradientStops.sorted(by: { $0.location < $1.location }) {
-            // Only add if location is different (with small tolerance for floating point)
-            if abs(stop.location - lastLocation) > 0.0001 {
-                uniqueStops.append(stop)
-                lastLocation = stop.location
+    /// Flatten to one segment per (period, category) with amount > 0, sorted so largest category is bottom of stack.
+    private var stackedSegments: [ActivityBarSegment] {
+        var out: [ActivityBarSegment] = []
+        for (periodIndex, periodData) in categoryBreakdown.enumerated() {
+            let sorted = periodData.categories.sorted { $0.amount > $1.amount }
+            for cat in sorted {
+                let amount = (cat.amount as NSDecimalNumber).doubleValue
+                if amount > 0 {
+                    out.append(ActivityBarSegment(
+                        id: "\(periodData.period)-\(cat.name)",
+                        period: periodData.period,
+                        periodIndex: periodIndex,
+                        category: cat.name,
+                        amount: amount
+                    ))
+                }
             }
         }
-        
-        return LinearGradient(
-            gradient: Gradient(stops: uniqueStops),
-            startPoint: .bottom,
-            endPoint: .top
-        )
+        return out
+    }
+    
+    /// Apple Wallet style: category color + subtle vertical gradient (darker bottom, lighter top) + optional period tint.
+    private func segmentStyle(for segment: ActivityBarSegment) -> LinearGradient {
+        let base = colorForCategory(segment.category)
+        let tinted = activityPeriodTint(base, periodIndex: segment.periodIndex, totalPeriods: categoryBreakdown.count)
+        let top = activityLighten(tinted, amount: 0.12)
+        return LinearGradient(colors: [tinted, top], startPoint: .bottom, endPoint: .top)
     }
     
     private let formatter: NumberFormatter = {
@@ -937,32 +908,30 @@ struct WalletStackedCategoryBarChart: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Chart {
-                // Create a bar for each period using the period string as X-axis value
-                ForEach(categoryBreakdown, id: \.period) { periodData in
+                ForEach(stackedSegments) { segment in
+                    BarMark(
+                        x: .value("Period", segment.period),
+                        y: .value("Amount", segment.amount)
+                    )
+                    .foregroundStyle(segmentStyle(for: segment))
+                    .cornerRadius(activityBarCornerRadius, style: .continuous)
+                }
+                ForEach(Array(categoryBreakdown.enumerated()), id: \.element.period) { _, periodData in
                     let totalAmount = actualValue(for: periodData)
-                    
-                    if totalAmount > 0 {
-                        let gradient = gradientForPeriod(periodData.categories)
-                        BarMark(
-                            x: .value("Period", periodData.period),
-                            y: .value("Amount", totalAmount)
-                        )
-                        .foregroundStyle(gradient)
-                        .cornerRadius(6, style: .continuous)
-                    } else {
-                        // Empty period - show invisible bar to maintain X-axis spacing
+                    if totalAmount == 0 {
                         BarMark(
                             x: .value("Period", periodData.period),
                             y: .value("Amount", 0.0)
                         )
                         .foregroundStyle(Color.clear)
                         .opacity(0)
+                        .cornerRadius(activityBarCornerRadius, style: .continuous)
                     }
                 }
             }
+            .id(categoryBreakdown.map(\.period).joined(separator: "-"))
             .chartXAxis {
                 let periodValues = categoryBreakdown.map { $0.period }
-                
                 if let nth = showEveryNthLabel {
                     let labelIndices = (0..<categoryBreakdown.count).filter { $0 % nth == 0 }
                     let visiblePeriods = labelIndices.compactMap { index -> String? in
@@ -993,29 +962,33 @@ struct WalletStackedCategoryBarChart: View {
                 }
             }
             .chartYAxis {
-                // When there's no data, use sensible default values
-                let maxVal = maxValue > 0 ? maxValue : 100
+                let maxVal = max(maxValue, 100) // 100 floor for readable axis when no data
                 let step = maxVal / 4.0
-                // Ensure step is at least 25 for readability when there's no data
-                let adjustedStep = max(step, 25.0)
-                let adjustedMax = maxVal > 0 ? maxVal : 100
-                let mainValues: [Double] = [0, adjustedStep, adjustedStep * 2, adjustedStep * 3, adjustedMax]
+                let mainValues: [Double] = [0, step, step * 2, step * 3, maxVal]
+                let midpointValues: [Double] = [step * 0.5, step * 1.5, step * 2.5, step * 3.5]
+                let allValues = (mainValues + midpointValues).sorted()
                 
-                AxisMarks(position: .trailing, values: mainValues) { value in
+                AxisMarks(position: .trailing, values: allValues) { value in
                     if let doubleValue = value.as(Double.self) {
-                        AxisValueLabel {
-                            Text(formatAmount(doubleValue))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                        let isMainValue = mainValues.contains { abs($0 - doubleValue) < 0.01 }
+                        if isMainValue {
+                            AxisValueLabel {
+                                Text(formatAmount(doubleValue))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                                .foregroundStyle(.secondary.opacity(0.3))
+                        } else {
+                            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2, 2]))
+                                .foregroundStyle(.secondary.opacity(0.2))
                         }
-                        AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
-                            .foregroundStyle(.secondary.opacity(0.2))
                     }
                 }
             }
             .frame(height: 180)
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, 4)
+            .padding(EdgeInsets(top: 10, leading: 4, bottom: 4, trailing: 4))
         }
         .opacity(appeared ? 1 : 0)
     }
@@ -1028,107 +1001,53 @@ struct CompactWalletStackedCategoryBarChart: View {
     let period: ReportsViewModel.WalletPeriod
     let appeared: Bool
     
-    // Enhanced color palette for categories
-    private let categoryColors: [Color] = [
-        .orange, .pink, .purple, .blue, .green, .mint, .cyan, .teal,
-        .indigo, .red, .yellow, .brown, .gray
-    ]
-    
     private var categoryBreakdown: [(period: String, categories: [(name: String, amount: Decimal)])] {
         reportsViewModel.categoryBreakdownByPeriod(period: period)
     }
     
     private var allCategories: [String] {
-        var categories: Set<String> = []
+        var set: Set<String> = []
         for item in categoryBreakdown {
-            for cat in item.categories {
-                categories.insert(cat.name)
-            }
+            for cat in item.categories { set.insert(cat.name) }
         }
-        // Sort categories, but put Digital Wallet Fees at the end for better visual hierarchy
-        return Array(categories).sorted { cat1, cat2 in
+        return Array(set).sorted { cat1, cat2 in
             if cat1 == "Digital Wallet Fees" { return false }
             if cat2 == "Digital Wallet Fees" { return true }
             return cat1 < cat2
         }
     }
     
-    private func colorForCategory(_ categoryName: String) -> Color {
-        // Digital Wallet Fees always use orange to match the icon
-        if categoryName == "Digital Wallet Fees" {
-            return .orange
-        }
-        if let index = allCategories.firstIndex(of: categoryName) {
-            return categoryColors[index % categoryColors.count]
-        }
-        return .gray
+    private func colorForCategory(_ name: String) -> Color {
+        if name == "Digital Wallet Fees" { return Color(red: 0.95, green: 0.55, blue: 0.28) }
+        guard let i = allCategories.firstIndex(of: name) else { return .gray }
+        return activityCategoryPalette[i % activityCategoryPalette.count]
     }
     
-    // Create gradient that blends categories smoothly based on their values
-    // This visually represents the category breakdown within each period
-    private func gradientForPeriod(_ categories: [(name: String, amount: Decimal)]) -> LinearGradient {
-        guard !categories.isEmpty else {
-            return LinearGradient(colors: [Color.gray.opacity(0.3)], startPoint: .bottom, endPoint: .top)
-        }
-        
-        let totalAmount = categories.reduce(Decimal(0)) { $0 + $1.amount }
-        guard totalAmount > 0 else {
-            return LinearGradient(colors: [Color.gray.opacity(0.3)], startPoint: .bottom, endPoint: .top)
-        }
-        
-        // Sort categories by amount (largest first, at bottom)
-        let sortedCategories = categories.sorted { $0.amount > $1.amount }
-        
-        if sortedCategories.count == 1 {
-            let color = colorForCategory(sortedCategories[0].name)
-            return LinearGradient(
-                colors: [color, color],
-                startPoint: .bottom,
-                endPoint: .top
-            )
-        }
-        
-        // Create gradient stops - each category gets proportional space based on its value
-        var gradientStops: [Gradient.Stop] = []
-        var cumulativeLocation: Double = 0.0
-        
-        for (index, category) in sortedCategories.enumerated() {
-            let categoryAmount = (category.amount as NSDecimalNumber).doubleValue
-            let proportion = categoryAmount / (totalAmount as NSDecimalNumber).doubleValue
-            let color = colorForCategory(category.name)
-            
-            if index == 0 {
-                gradientStops.append(Gradient.Stop(color: color, location: 0.0))
-            } else {
-                let prevColor = colorForCategory(sortedCategories[index - 1].name)
-                gradientStops.append(Gradient.Stop(color: prevColor, location: cumulativeLocation))
-                gradientStops.append(Gradient.Stop(color: color, location: cumulativeLocation))
-            }
-            
-            cumulativeLocation += proportion
-            gradientStops.append(Gradient.Stop(color: color, location: min(cumulativeLocation, 1.0)))
-        }
-        
-        // Ensure final stop is exactly at 1.0
-        if let lastStop = gradientStops.last, lastStop.location < 1.0 {
-            gradientStops.append(Gradient.Stop(color: lastStop.color, location: 1.0))
-        }
-        
-        // Sort stops by location and remove duplicates
-        var uniqueStops: [Gradient.Stop] = []
-        var lastLocation: Double = -1.0
-        for stop in gradientStops.sorted(by: { $0.location < $1.location }) {
-            if abs(stop.location - lastLocation) > 0.0001 {
-                uniqueStops.append(stop)
-                lastLocation = stop.location
+    private var stackedSegments: [ActivityBarSegment] {
+        var out: [ActivityBarSegment] = []
+        for (periodIndex, periodData) in categoryBreakdown.enumerated() {
+            let sorted = periodData.categories.sorted { $0.amount > $1.amount }
+            for cat in sorted {
+                let amount = (cat.amount as NSDecimalNumber).doubleValue
+                if amount > 0 {
+                    out.append(ActivityBarSegment(
+                        id: "\(periodData.period)-\(cat.name)",
+                        period: periodData.period,
+                        periodIndex: periodIndex,
+                        category: cat.name,
+                        amount: amount
+                    ))
+                }
             }
         }
-        
-        return LinearGradient(
-            gradient: Gradient(stops: uniqueStops),
-            startPoint: .bottom,
-            endPoint: .top
-        )
+        return out
+    }
+    
+    private func segmentStyle(for segment: ActivityBarSegment) -> LinearGradient {
+        let base = colorForCategory(segment.category)
+        let tinted = activityPeriodTint(base, periodIndex: segment.periodIndex, totalPeriods: categoryBreakdown.count)
+        let top = activityLighten(tinted, amount: 0.12)
+        return LinearGradient(colors: [tinted, top], startPoint: .bottom, endPoint: .top)
     }
     
     private var maxValue: Double {
@@ -1145,26 +1064,23 @@ struct CompactWalletStackedCategoryBarChart: View {
     
     var body: some View {
         Chart {
-            // Create a bar for each period using the period string as X-axis value
-            ForEach(categoryBreakdown, id: \.period) { periodData in
+            ForEach(stackedSegments) { segment in
+                BarMark(
+                    x: .value("Period", segment.period),
+                    y: .value("Amount", segment.amount)
+                )
+                .foregroundStyle(segmentStyle(for: segment))
+                .cornerRadius(activityBarCornerRadius, style: .continuous)
+            }
+            ForEach(Array(categoryBreakdown.enumerated()), id: \.element.period) { _, periodData in
                 let totalAmount = actualValue(for: periodData)
-                
-                if totalAmount > 0 {
-                    let gradient = gradientForPeriod(periodData.categories)
+                if totalAmount == 0 {
                     BarMark(
                         x: .value("Period", periodData.period),
-                        y: .value("Amount", totalAmount)
-                    )
-                    .foregroundStyle(gradient)
-                    .cornerRadius(6, style: .continuous)
-                } else {
-                    // Empty period - show gray bar to maintain X-axis spacing and visibility
-                    BarMark(
-                        x: .value("Period", periodData.period),
-                        y: .value("Amount", maxValue * 0.1) // Small visible bar height
+                        y: .value("Amount", maxValue * 0.1)
                     )
                     .foregroundStyle(Color.gray.opacity(0.2))
-                    .cornerRadius(6, style: .continuous)
+                    .cornerRadius(activityBarCornerRadius, style: .continuous)
                 }
             }
         }
@@ -1213,7 +1129,7 @@ private struct WalletAppleBarChart: View {
                         y: .value("Amount", (values[i] as NSDecimalNumber).doubleValue)
                     )
                     .foregroundStyle(appleWalletBarGradients[i % appleWalletBarGradients.count])
-                    .cornerRadius(6, style: .continuous)
+                    .cornerRadius(activityBarCornerRadius, style: .continuous)
                 }
             }
             .chartXAxis {
@@ -1286,13 +1202,9 @@ private struct WalletAppleBarChart: View {
 }
 
 private struct WalletIncomeFeesRows: View {
-    @EnvironmentObject private var reportsViewModel: ReportsViewModel
     let income: Decimal
-    let fees: Decimal
-    let creditCardSpending: Decimal
     let appeared: Bool
     let onIncomeTap: () -> Void
-    let onFeesTap: () -> Void
     private let formatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .currency
@@ -1313,33 +1225,6 @@ private struct WalletIncomeFeesRows: View {
                     appeared: appeared,
                     onTap: onIncomeTap
                 )
-                if fees > 0 {
-                    Divider()
-                        .padding(.leading, 52)
-                    WalletSummaryRow(
-                        icon: "bitcoinsign.circle.fill",
-                        iconColor: .orange,
-                        title: "Digital Wallet Fees",
-                        amount: fees,
-                        formatter: formatter,
-                        appeared: appeared,
-                        onTap: onFeesTap
-                    )
-                }
-                if creditCardSpending > 0 {
-                    if fees > 0 || income > 0 {
-                        Divider()
-                            .padding(.leading, 52)
-                    }
-                    CreditCardSpendingRow(
-                        icon: "creditcard.fill",
-                        iconColor: .blue,
-                        title: "Credit Card Spending",
-                        amount: creditCardSpending,
-                        formatter: formatter,
-                        appeared: appeared
-                    )
-                }
             }
             .background(
                 RoundedRectangle(cornerRadius: 20)
@@ -1389,59 +1274,6 @@ private struct WalletSummaryRow: View {
     }
 }
 
-// MARK: - Credit Card Spending Row (with tap to toggle)
-
-private struct CreditCardSpendingRow: View {
-    @EnvironmentObject private var reportsViewModel: ReportsViewModel
-    let icon: String
-    let iconColor: Color
-    let title: String
-    let amount: Decimal
-    let formatter: NumberFormatter
-    let appeared: Bool
-    
-    var body: some View {
-        Button {
-            // Toggle between Payments and Transactions view
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                let newMode: ReportsViewModel.CreditCardViewMode = reportsViewModel.creditCardViewMode == .payments ? .transactions : .payments
-                reportsViewModel.setCreditCardViewMode(newMode)
-            }
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .font(.title2)
-                    .foregroundStyle(iconColor)
-                    .frame(width: 32, height: 32)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(iconColor.opacity(0.15)))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Text(reportsViewModel.creditCardViewMode == .payments ? "Showing payments" : "Showing transactions")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(formatter.string(from: amount as NSDecimalNumber) ?? "$0.00")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.primary)
-                        .monospacedDigit()
-                    Image(systemName: "arrow.left.arrow.right")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .opacity(appeared ? 1 : 0)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 private struct WalletCategorySection: View {
     let items: [(name: String, amount: Decimal)]
     let appeared: Bool
@@ -1452,15 +1284,9 @@ private struct WalletCategorySection: View {
     @EnvironmentObject private var reportsViewModel: ReportsViewModel
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     
-    // Sort items by amount descending (largest first), with Digital Wallet Fees at the end
+    // Sort items by amount descending (largest first)
     private var sortedItems: [(name: String, amount: Decimal)] {
-        items.sorted { item1, item2 in
-            // Digital Wallet Fees always at the end
-            if item1.name == "Digital Wallet Fees" { return false }
-            if item2.name == "Digital Wallet Fees" { return true }
-            // Otherwise sort by amount descending (largest first)
-            return item1.amount > item2.amount
-        }
+        items.sorted { $0.amount > $1.amount }
     }
     @State private var showingPieChart = false
     @State private var pieChartScale: CGFloat = 1.0
@@ -1510,19 +1336,26 @@ private struct WalletCategorySection: View {
     }
     
     // Get color for category based on its index (ensures each category gets a unique color)
-    // Colors are synced between list and pie chart
+    // Colors are synced between list and pie chart. Digital Wallet Fees always orange.
     private func colorForIndex(_ index: Int) -> Color {
         return categoryColorPalette[index % categoryColorPalette.count]
     }
     
-    // Get all colors for the items (used for pie chart)
+    private func colorForCategoryRow(_ name: String, index: Int) -> Color {
+        name == "Digital Wallet Fees" ? .orange : colorForIndex(index)
+    }
+    
+    // Get all colors for the items (used for pie chart). Digital Wallet Fees = orange.
     private var itemColors: [Color] {
-        return sortedItems.prefix(8).enumerated().map { index, _ in
-            colorForIndex(index)
+        return sortedItems.prefix(8).enumerated().map { index, item in
+            item.name == "Digital Wallet Fees" ? .orange : colorForIndex(index)
         }
     }
     
     private func iconForCategory(_ categoryName: String) -> String {
+        if categoryName == "Digital Wallet Fees" {
+            return "bitcoinsign.circle.fill"
+        }
         let lowercased = categoryName.lowercased()
         
         // Credit Card / Debt Payment
@@ -1736,9 +1569,9 @@ private struct WalletCategorySection: View {
                                     HStack(spacing: 12) {
                                         Image(systemName: iconForCategory(item.name))
                                             .font(.body.weight(.medium))
-                                            .foregroundStyle(colorForIndex(i))
+                                            .foregroundStyle(colorForCategoryRow(item.name, index: i))
                                             .frame(width: 32, height: 32)
-                                            .background(RoundedRectangle(cornerRadius: 8).fill(colorForIndex(i).opacity(0.15)))
+                                            .background(RoundedRectangle(cornerRadius: 8).fill(colorForCategoryRow(item.name, index: i).opacity(0.15)))
                                         Text(item.name)
                                             .font(.subheadline.weight(.semibold))
                                             .foregroundStyle(.primary)
@@ -2194,7 +2027,7 @@ private struct LedgerEntryEditorView: View {
                 Section {
                     DatePicker("Date", selection: $date, displayedComponents: .date)
                     HStack {
-                        TextField("Title", text: $title)
+                        TextField("Description", text: $title)
                         if !title.isEmpty {
                             Button {
                                 title = ""
@@ -2205,26 +2038,17 @@ private struct LedgerEntryEditorView: View {
                             }
                         }
                     }
+                    CategoryPicker(selection: $category, usage: accountViewModel.categoryUsage())
+                        .environmentObject(categoryManager)
+                } header: {
+                    Text("Transaction Details")
                 }
                 
                 if let account = entry.account, account.currencyCode == "BTC" {
-                    Section("Bitcoin Amount") {
+                    Section {
                         HStack {
-                            TextField("Sats", text: $btcSatsAmountString)
-                                .keyboardType(.numberPad)
-                            if !btcSatsAmountString.isEmpty {
-                                Button {
-                                    btcSatsAmountString = ""
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundColor(.secondary)
-                                        .font(.system(size: 16))
-                                }
-                            }
-                        }
-                    }
-                    Section("USD Amount") {
-                        HStack {
+                            Text("$")
+                                .foregroundColor(.secondary)
                             TextField("Amount", text: $usdAmountString)
                                 .keyboardType(.decimalPad)
                             if !usdAmountString.isEmpty {
@@ -2237,13 +2061,19 @@ private struct LedgerEntryEditorView: View {
                                 }
                             }
                         }
+                    } header: {
+                        Text("Amount")
                     }
-                    Section("BTC Price") {
+                    Section {
                         HStack {
-                            TextField("Price", text: $btcPriceString)
+                            TextField("sats/BTC Amount", text: $btcSatsAmountString)
                                 .keyboardType(.decimalPad)
-                            if !btcPriceString.isEmpty {
+                                .onChange(of: btcSatsAmountString) { _, _ in
+                                    btcPriceString = reportsEditorComputedBTCPrice()
+                                }
+                            if !btcSatsAmountString.isEmpty {
                                 Button {
+                                    btcSatsAmountString = ""
                                     btcPriceString = ""
                                 } label: {
                                     Image(systemName: "xmark.circle.fill")
@@ -2252,10 +2082,22 @@ private struct LedgerEntryEditorView: View {
                                 }
                             }
                         }
+                        HStack {
+                            Text("BTC Price")
+                            Spacer()
+                            if !btcPriceString.isEmpty {
+                                Text("$\(btcPriceString)")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } header: {
+                        Text("Bitcoin Details")
                     }
                 } else {
-                    Section("Amount") {
+                    Section {
                         HStack {
+                            Text("$")
+                                .foregroundColor(.secondary)
                             TextField("Amount", text: $usdAmountString)
                                 .keyboardType(.decimalPad)
                             if !usdAmountString.isEmpty {
@@ -2268,11 +2110,13 @@ private struct LedgerEntryEditorView: View {
                                 }
                             }
                         }
+                    } header: {
+                        Text("Amount")
                     }
                 }
                 
                 Section {
-                    Toggle("Reconciled", isOn: $isCleared)
+                    Toggle("Cleared", isOn: $isCleared)
                     HStack(alignment: .top) {
                         TextField("Notes", text: $notes, axis: .vertical)
                             .lineLimit(3...6)
@@ -2287,13 +2131,11 @@ private struct LedgerEntryEditorView: View {
                             .padding(.top, 4)
                         }
                     }
-                }
-                
-                Section {
-                    CategoryPicker(selection: $category, usage: accountViewModel.categoryUsage())
-                        .environmentObject(categoryManager)
+                } header: {
+                    Text("Additional Information")
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Edit Transaction")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -2311,12 +2153,36 @@ private struct LedgerEntryEditorView: View {
         }
     }
     
+    private func reportsEditorComputedBTCPrice() -> String {
+        guard entry.account?.currencyCode == "BTC" else { return "" }
+        let cleaned = btcSatsAmountString.replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces)
+        guard !cleaned.isEmpty else { return "" }
+        guard let usd = Decimal(string: usdAmountString.replacingOccurrences(of: ",", with: "")), usd > 0 else { return "" }
+        let btcAmount: Decimal
+        if cleaned.contains(".") {
+            guard let btc = Decimal(string: cleaned), btc > 0 else { return "" }
+            btcAmount = btc
+        } else {
+            guard let sats = Int(cleaned), sats > 0 else { return "" }
+            btcAmount = Decimal(sats) / 100_000_000
+        }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 2
+        return formatter.string(from: (usd / btcAmount) as NSDecimalNumber) ?? ""
+    }
+    
     private func saveEntry() {
+        let cleanedBtc = btcSatsAmountString.replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces)
         let btcAmount: Decimal? = {
-            if let sats = Int(btcSatsAmountString), sats != 0 {
-                return Decimal(sats)
+            guard !cleanedBtc.isEmpty else { return nil }
+            if cleanedBtc.contains(".") {
+                guard let btc = Decimal(string: cleanedBtc), btc != 0 else { return nil }
+                return btc
             }
-            return nil
+            guard let sats = Int(cleanedBtc), sats != 0 else { return nil }
+            return Decimal(sats) / 100_000_000
         }()
         
         let usdAmount: Decimal? = {
@@ -2327,13 +2193,14 @@ private struct LedgerEntryEditorView: View {
             return nil
         }()
         
-        let btcPrice: Decimal? = {
-            let cleaned = btcPriceString.replacingOccurrences(of: ",", with: "")
-            if let price = Decimal(string: cleaned), price > 0 {
-                return price
-            }
-            return nil
-        }()
+        var btcPrice: Decimal? = nil
+        if !btcPriceString.isEmpty {
+            let cleaned = btcPriceString.replacingOccurrences(of: ",", with: "").replacingOccurrences(of: "$", with: "")
+            if let price = Decimal(string: cleaned), price > 0 { btcPrice = price }
+        }
+        if btcPrice == nil, let usd = usdAmount, let btc = btcAmount, btc != 0 {
+            btcPrice = abs(usd) / abs(btc)
+        }
         
         let categoryValue = category.isEmpty ? nil : category
         

@@ -19,6 +19,7 @@ struct AccountDetailView: View {
     
     @State private var showingCurrencyToggle: Bool = false // false = USD, true = BTC (for chip card only)
     @State private var showingBalanceDetails: Bool = false
+    @State private var showingBalanceDrawer: Bool = false
     @State private var showingEditAccount = false
     @State private var showingAddTransaction = false
     @State private var showingTransfer = false
@@ -114,7 +115,8 @@ struct AccountDetailView: View {
                     }
                 )
                 .environmentObject(bitcoinPriceService)
-                .presentationDetents([.medium])
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
             }
         }
         .onChange(of: showingReconcileDrawer) { oldValue, newValue in
@@ -182,7 +184,9 @@ struct AccountDetailView: View {
             loadTransactions()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSManagedObjectContext.didSaveObjectsNotification)) { _ in
-            // Refresh transactions when Core Data saves (e.g., when reconciled status changes)
+            // Refresh when Core Data saves (e.g. reconciled status) but not while editing a transaction —
+            // that would refresh the list while the sheet is open and can cause a freeze when the entry’s date changes.
+            guard !showingTransactionEditor else { return }
             loadTransactions()
         }
         .onChange(of: bitcoinPriceService.showInBitcoin) { _, _ in
@@ -302,8 +306,8 @@ struct AccountDetailView: View {
                     }
                     .buttonStyle(.plain)
                     
-                    Text(showingCurrencyToggle ? "≈ \(formattedClearedBalanceUSD)" : "≈ \(formattedClearedBalanceBTC)")
-                        .font(.caption)
+                    Text(showingCurrencyToggle ? formattedClearedBalanceUSD : formattedClearedBalanceBTC)
+                        .font(.body)
                         .foregroundStyle(.secondary)
                 } else {
                     Text(formattedClearedBalance)
@@ -315,37 +319,102 @@ struct AccountDetailView: View {
                 }
             }
             
-            // Button below: Account Name + "Balance" + Arrow
-            Menu {
-                Button {
-                    // Shows Available balance
-                } label: {
-                    Text("Available: \(formattedAvailableBalance)")
-                }
+            // Floating pill chip that expands as a drawer to reveal Available and Pending
+            HStack {
+                Spacer(minLength: 0)
                 
-                Button {
-                    // Shows Pending balance
-                } label: {
-                    Text("Pending: \(formattedPendingBalance)")
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Text("\(account.name ?? "Account") Balance")
-                        .font(.headline)
+                VStack(spacing: 0) {
+                    Button {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            showingBalanceDrawer.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text("\(account.name ?? "Account") Balance")
+                                .font(.headline)
+                            
+                            Image(systemName: showingBalanceDrawer ? "chevron.down" : "chevron.up.chevron.down")
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
                     
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption2)
+                    if showingBalanceDrawer {
+                        VStack(spacing: 0) {
+                            Divider()
+                                .padding(.horizontal, 16)
+                            
+                            HStack {
+                                Text("Pending")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text(formattedPendingBalance)
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.primary)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            
+                            Divider()
+                                .padding(.horizontal, 16)
+                            
+                            HStack {
+                                Text("Available")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text(formattedAvailableBalance)
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.primary)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                        }
+                        .frame(minWidth: 240)
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .move(edge: .top)),
+                            removal: .opacity.combined(with: .move(edge: .top))
+                        ))
+                    }
                 }
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background {
-                    Capsule()
-                        .fill(.ultraThinMaterial)
-                        .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
-                }
+                .background(
+                    RoundedRectangle(
+                        cornerRadius: showingBalanceDrawer ? 16 : 50,
+                        style: .continuous
+                    )
+                    .fill(Color(.secondarySystemBackground))
+                    .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 2)
+                )
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: showingBalanceDrawer ? 16 : 50,
+                        style: .continuous
+                    )
+                )
+                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: showingBalanceDrawer)
+                .highPriorityGesture(
+                    DragGesture(minimumDistance: 20)
+                        .onEnded { value in
+                            let vertical = value.translation.height
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                if vertical < -30 {
+                                    showingBalanceDrawer = true
+                                } else if vertical > 30 {
+                                    showingBalanceDrawer = false
+                                }
+                            }
+                        }
+                )
+                
+                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity)
         }
     }
     
@@ -360,7 +429,7 @@ struct AccountDetailView: View {
             if showingCurrencyToggle {
                 return formatBTCBalance(clearedBalance)
             } else {
-                let usd = bitcoinPriceService.convertBTCToUSD(clearedBalance)
+                let usd = accountViewModel.clearedBalanceInUSD(for: account, bitcoinPriceService: bitcoinPriceService)
                 return formatUSDBalance(usd)
             }
         } else {
@@ -369,8 +438,12 @@ struct AccountDetailView: View {
     }
     
     private var formattedClearedBalanceUSD: String {
-        let usd = bitcoinPriceService.convertBTCToUSD(clearedBalance)
-        return formatUSDBalance(usd)
+        if account.currencyCode == "BTC" {
+            let usd = accountViewModel.clearedBalanceInUSD(for: account, bitcoinPriceService: bitcoinPriceService)
+            return formatUSDBalance(usd)
+        } else {
+            return formatUSDBalance(clearedBalance)
+        }
     }
     
     private var formattedClearedBalanceBTC: String {
@@ -462,15 +535,15 @@ struct AccountDetailView: View {
                             .frame(height: dynamicBalanceFontSize + 10)
                     }
                     
-                    // USD equivalent for BTC accounts when showing BTC
+                    // Secondary balance (USD when showing BTC, BTC when showing USD)
                     if account.currencyCode == "BTC" && showingCurrencyToggle {
-                        Text("≈ \(usdEquivalent)")
-                            .font(.caption)
+                        Text(usdEquivalent)
+                            .font(.body)
                             .foregroundColor(.white.opacity(0.8))
                             .transition(.opacity)
                     } else if account.currencyCode == "BTC" && !showingCurrencyToggle {
-                        Text("≈ \(btcEquivalent)")
-                            .font(.caption)
+                        Text(btcEquivalent)
+                            .font(.body)
                             .foregroundColor(.white.opacity(0.8))
                             .transition(.opacity)
                     }
@@ -503,13 +576,13 @@ struct AccountDetailView: View {
                             .background(Color.white.opacity(0.2))
                             .padding(.top, 12)
                         
-                        balanceDetailRow(label: "Available", value: formattedAvailableBalance)
+                        balanceDetailRow(label: "Pending", value: formattedPendingBalance)
                             .padding(.vertical, 12)
                         
                         Divider()
                             .background(Color.white.opacity(0.2))
                         
-                        balanceDetailRow(label: "Pending", value: formattedPendingBalance)
+                        balanceDetailRow(label: "Available", value: formattedAvailableBalance)
                             .padding(.vertical, 12)
                     }
                     .transition(.asymmetric(
@@ -524,14 +597,18 @@ struct AccountDetailView: View {
             .padding(.bottom, 12)
         }
         .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(accountGradient)
-                .shadow(
-                    color: Color.black.opacity(0.25),
-                    radius: 16,
-                    x: 0,
-                    y: 6
-                )
+            RoundedRectangle(
+                cornerRadius: showingBalanceDetails ? 20 : 50,
+                style: .continuous
+            )
+            .fill(accountGradient)
+            .shadow(
+                color: Color.black.opacity(0.25),
+                radius: 16,
+                x: 0,
+                y: 6
+            )
+            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: showingBalanceDetails)
         )
     }
     
@@ -582,52 +659,43 @@ struct AccountDetailView: View {
         accountViewModel.totalBalance(for: account)
     }
     
+    /// Available = what's available to spend after pending clears = Total (Cleared + Pending).
     private var availableBalance: Decimal {
-        // Available balance = Cleared Balance (traditional checkbook balancing)
-        // Available = Starting Balance + only reconciled (checked) transactions
-        // This is mathematically equivalent to: Total Balance - Pending Balance
-        // But using clearedBalance is more direct and matches checkbook logic
-        let cleared = accountViewModel.clearedBalance(for: account)
-        
-        // Debug logging for BTC accounts
+        totalBalance
+    }
+    
+    /// Pending debits: unreconciled expenses (positive number). For display/breakdown only.
+    private var pendingDebits: Decimal {
+        let entries = accountViewModel.ledgerEntries(for: account)
         if account.currencyCode == "BTC" {
-            let total = totalBalance
-            let pending = pendingBalance
-            print("🔍 Available Balance Calculation (BTC Account: \(account.name ?? "Unknown")):")
-            print("   Starting Balance: \(account.startingBalanceDecimal) BTC")
-            print("   Total Balance: \(total) BTC")
-            print("   Pending Balance: \(pending) BTC")
-            print("   Cleared Balance (Available): \(cleared) BTC")
-            print("   Verification (Total - Pending): \(total - pending) BTC")
-            if showingCurrencyToggle {
-                print("   Display Format: \(account.btcDisplayFormat ?? "sats")")
-            } else {
-                let usd = bitcoinPriceService.convertBTCToUSD(cleared)
-                print("   Available in USD: \(usd)")
+            return entries.reduce(Decimal.zero) { partial, entry in
+                guard !entry.isReconciledFlag else { return partial }
+                let amt = entry.signedAmountInCurrency(for: account)
+                return amt < 0 ? partial + abs(amt) : partial
+            }
+        } else {
+            return entries.reduce(Decimal.zero) { partial, entry in
+                guard !entry.isReconciledFlag else { return partial }
+                let amt = entry.signedAmount
+                return amt < 0 ? partial + abs(amt) : partial
             }
         }
-        
-        return cleared
     }
     
     private var pendingBalance: Decimal {
-        // Pending balance = sum of unreconciled (unchecked) transactions
-        // This represents transactions that haven't been reconciled yet
-        // In checkbook terms: these are pending transactions that haven't cleared
+        // Pending balance = net signed sum of unreconciled transactions
+        // Positive = more pending income than expenses, Negative = more pending expenses than income
+        // Displayed in the drawer; Used with Total: Total = Cleared + Pending
         let entries = accountViewModel.ledgerEntries(for: account)
         if account.currencyCode == "BTC" {
-            // For BTC accounts: use signedAmountInCurrency which handles conversion properly
-            let unreconciledSum = entries.reduce(Decimal.zero) { partial, entry in
+            return entries.reduce(Decimal.zero) { partial, entry in
                 guard !entry.isReconciledFlag else { return partial }
-                // Use signedAmountInCurrency which properly handles BTC/sats conversion
                 return partial + entry.signedAmountInCurrency(for: account)
             }
-            return unreconciledSum
         } else {
-            let unreconciledSum = entries.reduce(Decimal.zero) { partial, entry in
+            return entries.reduce(Decimal.zero) { partial, entry in
                 !entry.isReconciledFlag ? partial + entry.signedAmount : partial
             }
-            return unreconciledSum
         }
     }
     
@@ -637,8 +705,8 @@ struct AccountDetailView: View {
                 // Show in BTC/sats
                 return formatBTCBalance(totalBalance)
             } else {
-                // Show in USD (convert from BTC)
-                let usd = bitcoinPriceService.convertBTCToUSD(totalBalance)
+                // Show in USD (fixed for reconciled, no live price)
+                let usd = accountViewModel.totalBalanceInUSD(for: account, bitcoinPriceService: bitcoinPriceService)
                 return formatUSDBalance(usd)
             }
         } else {
@@ -649,14 +717,11 @@ struct AccountDetailView: View {
     
     private var formattedAvailableBalance: String {
         let balance = availableBalance
-        
         if account.currencyCode == "BTC" {
             if showingCurrencyToggle {
-                // Show in BTC/sats format
                 return formatBTCBalance(balance)
             } else {
-                // Convert BTC to USD for display
-                let usd = bitcoinPriceService.convertBTCToUSD(balance)
+                let usd = accountViewModel.totalBalanceInUSD(for: account, bitcoinPriceService: bitcoinPriceService)
                 return formatUSDBalance(usd)
             }
         } else {
@@ -721,7 +786,7 @@ struct AccountDetailView: View {
     }
     
     private var usdEquivalent: String {
-        let usd = bitcoinPriceService.convertBTCToUSD(totalBalance)
+        let usd = accountViewModel.totalBalanceInUSD(for: account, bitcoinPriceService: bitcoinPriceService)
         return formatUSDBalance(usd)
     }
     
@@ -859,35 +924,23 @@ struct AccountDetailView: View {
     }
     
     private func saveReconciledTransaction(entry: LedgerEntry) {
-        guard let account = entry.account else { return }
+        guard entry.account != nil else { return }
         
-        // Get BTC amount (sats or BTC based on account display format)
-        let displayFormat = account.btcDisplayFormat ?? "sats"
-        let cleaned = reconcileSatsString.replacingOccurrences(of: ",", with: "")
+        // Parse sats/BTC with same auto-detect as drawer: "." → BTC, else sats
+        let cleaned = reconcileSatsString.replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces)
+        guard !cleaned.isEmpty else { return }
         
         let btcAmount: Decimal
-        if displayFormat == "sats" {
-            guard let sats = Int(cleaned), sats > 0 else {
-                return
-            }
-            btcAmount = Decimal(sats) / 100_000_000
-        } else {
-            guard let btc = Decimal(string: cleaned), btc > 0 else {
-                return
-            }
+        if cleaned.contains(".") {
+            guard let btc = Decimal(string: cleaned), btc > 0 else { return }
             btcAmount = btc
+        } else {
+            guard let sats = Int(cleaned), sats > 0 else { return }
+            btcAmount = Decimal(sats) / 100_000_000
         }
         
-        // Get BTC price (use provided or calculate from USD and BTC)
-        let btcPrice: Decimal
-        if !reconcileBTCPriceString.isEmpty {
-            let cleanedPrice = reconcileBTCPriceString.replacingOccurrences(of: ",", with: "").replacingOccurrences(of: "$", with: "")
-            btcPrice = Decimal(string: cleanedPrice) ?? bitcoinPriceService.btcToUsdRate
-        } else {
-            // Calculate from USD amount and BTC amount
-            let usdAmount = entry.usdAmountDecimal
-            btcPrice = usdAmount > 0 && btcAmount > 0 ? usdAmount / btcAmount : bitcoinPriceService.btcToUsdRate
-        }
+        let usdAmount = entry.usdAmountDecimal
+        let btcPrice = usdAmount > 0 && btcAmount > 0 ? usdAmount / btcAmount : bitcoinPriceService.btcToUsdRate
         
         // Update the entry with sats and price
         entry.btcAmount = NSDecimalNumber(decimal: btcAmount)
@@ -919,12 +972,7 @@ private struct TransactionReconcileDrawer: View {
     @Binding var btcPriceString: String
     let onSave: () -> Void
     let onCancel: () -> Void
-    @FocusState private var focusedField: Field?
-    
-    enum Field {
-        case sats
-        case btcPrice
-    }
+    @FocusState private var focusedField: Bool
     
     private var usdAmount: Decimal {
         entry.usdAmountDecimal
@@ -936,6 +984,30 @@ private struct TransactionReconcileDrawer: View {
         formatter.currencyCode = "USD"
         formatter.maximumFractionDigits = 2
         return formatter.string(from: usdAmount as NSDecimalNumber) ?? "$0.00"
+    }
+    
+    /// Auto-detect: value contains "." → BTC; otherwise sats.
+    private var parsedBtcAmount: Decimal? {
+        let cleaned = satsString.replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces)
+        guard !cleaned.isEmpty else { return nil }
+        if cleaned.contains(".") {
+            guard let btc = Decimal(string: cleaned), btc > 0 else { return nil }
+            return btc
+        }
+        guard let sats = Int(cleaned), sats > 0 else { return nil }
+        return Decimal(sats) / 100_000_000
+    }
+    
+    /// True when input was interpreted as sats (show calculated BTC price). When BTC → leave price blank.
+    private var isAmountInSats: Bool {
+        let cleaned = satsString.replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces)
+        guard !cleaned.isEmpty else { return false }
+        return !cleaned.contains(".")
+    }
+    
+    private var calculatedPriceWhenSats: Decimal? {
+        guard isAmountInSats, let btc = parsedBtcAmount, btc > 0, usdAmount > 0 else { return nil }
+        return usdAmount / btc
     }
     
     var body: some View {
@@ -954,16 +1026,9 @@ private struct TransactionReconcileDrawer: View {
                 
                 Section {
                     HStack {
-                        let account = entry.account
-                        let displayFormat = account?.btcDisplayFormat ?? "sats"
-                        let placeholder = displayFormat == "sats" ? "Sats" : "BTC Amount"
-                        TextField(placeholder, text: $satsString)
-                            .keyboardType(displayFormat == "sats" ? .numberPad : .decimalPad)
-                            .focused($focusedField, equals: .sats)
-                            .onChange(of: satsString) { _, newValue in
-                                // Auto-calculate BTC price when sats/BTC are entered
-                                autoCalculatePrice()
-                            }
+                        TextField("sats/BTC Amount", text: $satsString)
+                            .keyboardType(.decimalPad)
+                            .focused($focusedField)
                         if !satsString.isEmpty {
                             Button {
                                 satsString = ""
@@ -975,49 +1040,27 @@ private struct TransactionReconcileDrawer: View {
                             }
                         }
                     }
-                    
+                } header: {
+                    Text("Bitcoin Details")
+                }
+                
+                Section {
                     HStack {
                         Text("BTC Price")
                         Spacer()
-                        if !btcPriceString.isEmpty {
-                            Text("$\(btcPriceString)")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("$\(formatPrice(bitcoinPriceService.btcToUsdRate))")
+                        if isAmountInSats, let price = calculatedPriceWhenSats, price > 0 {
+                            Text("$\(formatPrice(price))")
                                 .foregroundStyle(.secondary)
                         }
                     }
                 } header: {
-                    Text("Bitcoin Details")
+                    Text(" ")
                 } footer: {
-                    if !satsString.isEmpty {
-                        let account = entry.account
-                        let displayFormat = account?.btcDisplayFormat ?? "sats"
-                        let cleaned = satsString.replacingOccurrences(of: ",", with: "")
-                        
-                        let btcAmount: Decimal = {
-                            if displayFormat == "sats" {
-                                if let sats = Int(cleaned) {
-                                    return Decimal(sats) / 100_000_000
-                                } else {
-                                    return 0
-                                }
-                            } else {
-                                return Decimal(string: cleaned) ?? 0
-                            }
-                        }()
-                        
-                        let calculatedPrice = usdAmount > 0 && btcAmount > 0 ? usdAmount / btcAmount : Decimal(0)
-                        
-                        if calculatedPrice > 0 {
-                            Text("Calculated price: $\(formatPrice(calculatedPrice))")
-                                .font(.caption)
-                        } else {
-                            EmptyView()
-                        }
-                    }
+                    Text("Enter amount in sats or BTC (e.g. 50000 or 0.001). Price is shown when you enter sats.")
+                        .font(.caption)
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Reconcile Transaction")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1035,42 +1078,9 @@ private struct TransactionReconcileDrawer: View {
                 }
             }
             .onAppear {
-                focusedField = .sats
+                focusedField = true
             }
         }
-    }
-    
-    private func autoCalculatePrice() {
-        guard let account = entry.account else {
-            btcPriceString = ""
-            return
-        }
-        
-        let displayFormat = account.btcDisplayFormat ?? "sats"
-        let cleaned = satsString.replacingOccurrences(of: ",", with: "")
-        
-        let btcAmount: Decimal
-        if displayFormat == "sats" {
-            guard let sats = Int(cleaned), sats > 0, usdAmount > 0 else {
-                btcPriceString = ""
-                return
-            }
-            btcAmount = Decimal(sats) / 100_000_000
-        } else {
-            guard let btc = Decimal(string: cleaned), btc > 0, usdAmount > 0 else {
-                btcPriceString = ""
-                return
-            }
-            btcAmount = btc
-        }
-        
-        guard btcAmount > 0 else {
-            btcPriceString = ""
-            return
-        }
-        
-        let calculatedPrice = usdAmount / btcAmount
-        btcPriceString = formatPrice(calculatedPrice)
     }
     
     private func formatPrice(_ price: Decimal) -> String {
@@ -1108,33 +1118,38 @@ private struct TransactionRow: View {
     }
     
     private var runningBalance: Decimal {
-        // Calculate running balance up to and including this transaction
-        // Traditional checkbook: running balance = starting balance + all transactions up to this point
-        // This shows the balance after each transaction in chronological order
+        // Calculate running balance up to and including this transaction (in account currency)
         let entries = accountViewModel.ledgerEntries(for: account)
-        let sortedEntries = entries
-            .sorted { entry1, entry2 in
-                guard let date1 = entry1.date, let date2 = entry2.date else { return false }
-                if date1 != date2 {
-                    return date1 < date2
-                }
-                guard let created1 = entry1.createdAt, let created2 = entry2.createdAt else { return false }
-                return created1 < created2
-            }
-        
+        let sortedEntries = entries.sorted { entry1, entry2 in
+            guard let date1 = entry1.date, let date2 = entry2.date else { return false }
+            if date1 != date2 { return date1 < date2 }
+            guard let created1 = entry1.createdAt, let created2 = entry2.createdAt else { return false }
+            return created1 < created2
+        }
         var balance = account.startingBalanceDecimal
         for e in sortedEntries {
-            // Add this transaction's amount
             if account.currencyCode == "BTC" {
                 balance += e.signedAmountInCurrency(for: account)
             } else {
                 balance += e.signedAmount
             }
-            
-            // If we've reached the current transaction, return the balance
-            if e.objectID == entry.objectID {
-                break
-            }
+            if e.objectID == entry.objectID { break }
+        }
+        return balance
+    }
+    
+    private var runningBalanceInUSD: Decimal {
+        let entries = accountViewModel.ledgerEntries(for: account)
+        let sortedEntries = entries.sorted { entry1, entry2 in
+            guard let date1 = entry1.date, let date2 = entry2.date else { return false }
+            if date1 != date2 { return date1 < date2 }
+            guard let created1 = entry1.createdAt, let created2 = entry2.createdAt else { return false }
+            return created1 < created2
+        }
+        var balance = accountViewModel.startingBalanceInUSD(for: account, bitcoinPriceService: bitcoinPriceService)
+        for e in sortedEntries {
+            balance += e.signedUSDAmount(for: account, bitcoinPriceService: bitcoinPriceService)
+            if e.objectID == entry.objectID { break }
         }
         return balance
     }
@@ -1154,17 +1169,14 @@ private struct TransactionRow: View {
     }
     
     private var formattedRunningBalance: String {
-        let balance = runningBalance
         if account.currencyCode == "BTC" {
             if bitcoinPriceService.showInBitcoin {
-                return formatBTCAmount(balance)
+                return formatBTCAmount(runningBalance)
             } else {
-                // Convert running balance to USD using current BTC price
-                let usd = bitcoinPriceService.convertBTCToUSD(balance)
-                return formatUSDAmount(usd)
+                return formatUSDAmount(runningBalanceInUSD)
             }
         } else {
-            return formatUSDAmount(balance)
+            return formatUSDAmount(runningBalance)
         }
     }
     
@@ -1485,26 +1497,10 @@ private struct TransactionEditorSheet: View {
                     
                 if let account = entry.account, account.currencyCode == "BTC" {
                     Section {
-                        // Sats Amount
-                        HStack {
-                            TextField("Sats Amount", text: $btcSatsAmountString)
-                                .keyboardType(.numberPad)
-                            if !btcSatsAmountString.isEmpty {
-                                Button {
-                                    btcSatsAmountString = ""
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundColor(.secondary)
-                                        .font(.system(size: 16))
-                                }
-                            }
-                        }
-                        
-                        // USD Amount
                         HStack {
                             Text("$")
                                 .foregroundColor(.secondary)
-                            TextField("USD Amount", text: $usdAmountString)
+                            TextField("Amount", text: $usdAmountString)
                                 .keyboardType(.decimalPad)
                             if !usdAmountString.isEmpty {
                                 Button {
@@ -1516,8 +1512,6 @@ private struct TransactionEditorSheet: View {
                                 }
                             }
                         }
-                        
-                        // Fee Amount
                         HStack {
                             Text("$")
                                 .foregroundColor(.secondary)
@@ -1533,21 +1527,44 @@ private struct TransactionEditorSheet: View {
                                 }
                             }
                         }
-                        
-                        // BTC Price (read-only display of current or stored price)
+                        HStack {
+                            Text("Total")
+                            Spacer()
+                            Text(editTransactionTotalFormatted)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        Text("Amount")
+                    }
+                    Section {
+                        HStack {
+                            TextField("sats/BTC Amount", text: $btcSatsAmountString)
+                                .keyboardType(.decimalPad)
+                                .onChange(of: btcSatsAmountString) { _, _ in
+                                    btcPriceString = editTransactionComputedBTCPrice()
+                                }
+                            if !btcSatsAmountString.isEmpty {
+                                Button {
+                                    btcSatsAmountString = ""
+                                    btcPriceString = ""
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.secondary)
+                                        .font(.system(size: 16))
+                                }
+                            }
+                        }
                         HStack {
                             Text("BTC Price")
                             Spacer()
                             if !btcPriceString.isEmpty {
                                 Text("$\(btcPriceString)")
                                     .foregroundStyle(.secondary)
-                            } else {
-                                Text(formatPrice(bitcoinPriceService.btcToUsdRate))
-                                    .foregroundStyle(.secondary)
                             }
                         }
                     } header: {
-                        Text("Amount")
+                        Text("Bitcoin Details")
                     }
                 } else {
                     Section {
@@ -1573,6 +1590,7 @@ private struct TransactionEditorSheet: View {
                 }
                 
                 Section {
+                    Toggle("Cleared", isOn: $isCleared)
                     HStack(alignment: .top) {
                         TextField("Notes", text: $notes, axis: .vertical)
                             .lineLimit(3...6)
@@ -1587,18 +1605,14 @@ private struct TransactionEditorSheet: View {
                             .padding(.top, 4)
                         }
                     }
-                    
-                    Toggle("Cleared", isOn: $isCleared)
                 } header: {
                     Text("Additional Information")
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Edit Transaction")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) {
-                    LiveDateTimeView()
-                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         dismiss()
@@ -1613,6 +1627,41 @@ private struct TransactionEditorSheet: View {
             }
             .interactiveDismissDisabled()
         }
+    }
+    
+    private var editTransactionTotalFormatted: String {
+        let amount = Decimal(string: usdAmountString.replacingOccurrences(of: ",", with: "")) ?? 0
+        let fee = Decimal(string: feeAmountString.replacingOccurrences(of: ",", with: "")) ?? 0
+        let total = amount + fee
+        return formatPrice(total)
+    }
+    
+    private func editTransactionComputedBTCPrice() -> String {
+        guard entry.account?.currencyCode == "BTC" else { return "" }
+        let cleaned = btcSatsAmountString.replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces)
+        guard !cleaned.isEmpty else { return "" }
+        let usd: Decimal
+        if let amt = Decimal(string: usdAmountString.replacingOccurrences(of: ",", with: "")), let fee = Decimal(string: feeAmountString.replacingOccurrences(of: ",", with: "")) {
+            usd = amt + fee
+        } else if let amt = Decimal(string: usdAmountString.replacingOccurrences(of: ",", with: "")) {
+            usd = amt
+        } else {
+            return ""
+        }
+        guard usd > 0 else { return "" }
+        let btcAmount: Decimal
+        if cleaned.contains(".") {
+            guard let btc = Decimal(string: cleaned), btc > 0 else { return "" }
+            btcAmount = btc
+        } else {
+            guard let sats = Int(cleaned), sats > 0 else { return "" }
+            btcAmount = Decimal(sats) / 100_000_000
+        }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 2
+        return formatter.string(from: (usd / btcAmount) as NSDecimalNumber) ?? ""
     }
     
     private func formatPrice(_ price: Decimal) -> String {
@@ -1632,21 +1681,17 @@ private struct TransactionEditorSheet: View {
         }
         
         let btcAmount: Decimal? = {
-            if account.currencyCode == "BTC" {
-                let displayFormat = account.btcDisplayFormat ?? "sats"
-                if displayFormat == "sats" {
-                    if let sats = Int(btcSatsAmountString), sats != 0 {
-                        let btc = Decimal(sats) / 100_000_000 // Convert sats to BTC
-                        return isCredit ? btc : -btc
-                    }
-                } else {
-                    let cleaned = btcSatsAmountString.replacingOccurrences(of: ",", with: "")
-                    if let btc = Decimal(string: cleaned), btc != 0 {
-                        return isCredit ? btc : -btc
-                    }
-                }
+            guard account.currencyCode == "BTC" else { return nil }
+            let cleaned = btcSatsAmountString.replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces)
+            guard !cleaned.isEmpty else { return nil }
+            if cleaned.contains(".") {
+                guard let btc = Decimal(string: cleaned), btc != 0 else { return nil }
+                return isCredit ? btc : -btc
+            } else {
+                guard let sats = Int(cleaned), sats != 0 else { return nil }
+                let btc = Decimal(sats) / 100_000_000
+                return isCredit ? btc : -btc
             }
-            return nil
         }()
         
         let usdAmount: Decimal? = {
@@ -1658,11 +1703,13 @@ private struct TransactionEditorSheet: View {
         }()
         
         let btcPrice: Decimal? = {
-            if account.currencyCode == "BTC" {
+            guard account.currencyCode == "BTC" else { return nil }
+            if !btcPriceString.isEmpty {
                 let cleaned = btcPriceString.replacingOccurrences(of: ",", with: "").replacingOccurrences(of: "$", with: "")
-                if let price = Decimal(string: cleaned), price > 0 {
-                    return price
-                }
+                if let price = Decimal(string: cleaned), price > 0 { return price }
+            }
+            if let usd = usdAmount, let btc = btcAmount, btc != 0 {
+                return abs(usd) / abs(btc)
             }
             return nil
         }()
@@ -1692,16 +1739,7 @@ private struct TransactionEditorSheet: View {
             feeAmount: feeAmount
         )
         
-        // Refresh the account to update balances
         accountViewModel.fetchAccounts()
-        accountViewModel.saveContext()
-        
-        // Refresh transactions
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            // Trigger refresh via notification
-            NotificationCenter.default.post(name: NSManagedObjectContext.didSaveObjectsNotification, object: nil)
-        }
-        
         dismiss()
     }
 }

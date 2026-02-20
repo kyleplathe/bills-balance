@@ -45,6 +45,7 @@ struct BillListView: View {
     @State private var completionShimmerOffset: Double = -1.0
     @State private var completionGlowRadius: Double = 8.0
     @State private var showingManageBills = false
+    @State private var showFutureBillsExpanded = false
     
     struct CoinAnimation: Identifiable {
         let id = UUID()
@@ -692,6 +693,34 @@ struct BillListView: View {
         }
     }
     
+    /// Month keys for the main list (current month; next month only when within 7 days of it).
+    private var visibleMonthKeys: [Date] {
+        let calendar = Calendar.current
+        let now = Date()
+        let sorted = groupedBills.keys.sorted()
+        guard filterMonth == nil else { return sorted }
+        let currentStart = calendar.dateInterval(of: .month, for: now)?.start ?? now
+        guard let nextMonthStart = calendar.date(byAdding: .month, value: 1, to: currentStart) else { return sorted }
+        let sevenDaysBeforeNext = calendar.date(byAdding: .day, value: -7, to: nextMonthStart) ?? nextMonthStart
+        let showNextInMain = now >= sevenDaysBeforeNext
+        return sorted.filter { monthStart in
+            calendar.isDate(monthStart, equalTo: currentStart, toGranularity: .month)
+                || (calendar.isDate(monthStart, equalTo: nextMonthStart, toGranularity: .month) && showNextInMain)
+        }
+    }
+    
+    /// Month keys for the collapsed "Future bills" section (next month when not yet in 7-day window, then later months).
+    private var futureMonthKeys: [Date] {
+        let sorted = groupedBills.keys.sorted()
+        guard filterMonth == nil else { return [] }
+        return sorted.filter { !visibleMonthKeys.contains($0) }
+    }
+    
+    /// Number of bills in the Future bills section.
+    private var futureBillsCount: Int {
+        futureMonthKeys.reduce(0) { $0 + (groupedBills[$1]?.count ?? 0) }
+    }
+    
     private var normalizedSearchText: String {
         searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -762,14 +791,15 @@ struct BillListView: View {
                 shouldShowBill(bill) || showCurrentMonthPaidBills
             }
             
-            // Get next month's date
-            guard let nextMonth = calendar.date(byAdding: .month, value: 1, to: now) else {
+            // Get next month's date (next month section appears 7 days before that month — handled in visible vs future split)
+            let currentMonthStart = calendar.dateInterval(of: .month, for: now)?.start ?? now
+            guard let nextMonthStart = calendar.date(byAdding: .month, value: 1, to: currentMonthStart) else {
                 monthFilteredBills = currentMonthVisibleBills
                 return monthFilteredBills
             }
             
             // Get bills for next month
-            let nextMonthBills = billViewModel.fetchAllBillsForMonth(nextMonth)
+            let nextMonthBills = billViewModel.fetchAllBillsForMonth(nextMonthStart)
             
             // Filter other bills (not current month)
             let otherBills = bills.filter { bill in
@@ -784,9 +814,8 @@ struct BillListView: View {
                 shouldShowBill(bill) || showPaidBills
             }
             
-            // Include next month's bills - show all unpaid bills and bills with pending transactions
+            // Include next month's bills (unpaid or pending); visible vs Future is decided when rendering
             let nextMonthVisibleBills = nextMonthBills.filter { bill in
-                // Show if unpaid or has pending transaction
                 !bill.isPaid || hasPendingTransaction(bill)
             }
             
@@ -1124,11 +1153,40 @@ struct BillListView: View {
                     .listRowBackground(Color.clear)
                 }
             } else {
-                ForEach(groupedBills.keys.sorted(), id: \.self) { monthDate in
-                    let bills = billsForMonth(monthDate)
-                    let isCurrentMonth = filterMonth == nil && Calendar.current.isDate(monthDate, equalTo: Date(), toGranularity: .month)
-                    
-                    if isCurrentMonth && showCurrentMonthPaidBills {
+                ForEach(visibleMonthKeys, id: \.self) { monthDate in
+                    monthSectionContent(monthDate: monthDate)
+                }
+                if !futureMonthKeys.isEmpty {
+                    DisclosureGroup(isExpanded: $showFutureBillsExpanded) {
+                        ForEach(futureMonthKeys, id: \.self) { monthDate in
+                            monthSectionContent(monthDate: monthDate)
+                        }
+                    } label: {
+                        HStack {
+                            Text("Future bills")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text("\(futureBillsCount) \(futureBillsCount == 1 ? "bill" : "bills")")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+                    .listRowBackground(Color.clear)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+    
+    @ViewBuilder
+    private func monthSectionContent(monthDate: Date) -> some View {
+        let bills = billsForMonth(monthDate)
+        let isCurrentMonth = filterMonth == nil && Calendar.current.isDate(monthDate, equalTo: Date(), toGranularity: .month)
+        
+        if isCurrentMonth && showCurrentMonthPaidBills {
                         // Split current month bills into unpaid and paid sections
                         let unpaidBills = bills.filter { !$0.isPaid }
                         let paidBills = bills.filter { $0.isPaid }
@@ -1166,7 +1224,18 @@ struct BillListView: View {
                                             }
                                             .tint(.blue)
                                             
-                                            // Mark as Paid (cleared) - same as tapping circle
+                                            // Add Pending: project bill into account before auto-pay (account-linked, not card-only, no existing pending)
+                                            if bill.account != nil && !isCreditCardOnlyBill(bill) && !hasPendingTransaction(bill) {
+                                                Button {
+                                                    HapticManager.shared.buttonTapped()
+                                                    billViewModel.addPendingTransaction(for: bill)
+                                                } label: {
+                                                    Label("Add Pending", systemImage: "clock.arrow.circlepath")
+                                                }
+                                                .tint(.orange)
+                                            }
+                                            
+                                            // Mark as Paid - moves to account (with digital wallet fee if applicable)
                                             if !bill.isPaid {
                                                 Button {
                                                     billViewModel.togglePaidStatus(for: bill)
@@ -1272,7 +1341,18 @@ struct BillListView: View {
                                         }
                                         .tint(.blue)
                                         
-                                        // Mark as Paid (cleared) - same as tapping circle
+                                        // Add Pending: project bill into account before auto-pay
+                                        if bill.account != nil && !isCreditCardOnlyBill(bill) && !hasPendingTransaction(bill) {
+                                            Button {
+                                                HapticManager.shared.buttonTapped()
+                                                billViewModel.addPendingTransaction(for: bill)
+                                            } label: {
+                                                Label("Add Pending", systemImage: "clock.arrow.circlepath")
+                                            }
+                                            .tint(.orange)
+                                        }
+                                        
+                                        // Mark as Paid - moves to account (with digital wallet fee if applicable)
                                         if !bill.isPaid {
                                             Button {
                                                 billViewModel.togglePaidStatus(for: bill)
@@ -1286,10 +1366,6 @@ struct BillListView: View {
                             }
                         }
                     }
-                }
-            }
-        }
-        .listStyle(.insetGrouped)
     }
     
     private var monthFilterEmptyView: some View {
@@ -1548,12 +1624,13 @@ struct BillRowView: View {
             Spacer()
             
             // Amount with smooth animation
+            // Green = fully paid & reconciled. Orange = pending (awaiting clearance). Primary/orange = unpaid.
             Group {
                 if bitcoinPriceService.showInBitcoin, let amount = bill.amount?.decimalValue {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(bitcoinPriceService.formatAsSats(amount))
                             .font(.headline)
-                            .foregroundColor(bill.isPaid ? .green : .orange)
+                            .foregroundColor(amountColor)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
                         Text("$\(amount, format: .number.precision(.fractionLength(2)))")
@@ -1569,7 +1646,7 @@ struct BillRowView: View {
                 } else {
                     Text("$\(bill.amount?.stringValue ?? "0")")
                         .font(.headline)
-                        .foregroundColor(bill.isPaid ? .green : .primary)
+                        .foregroundColor(amountColor)
                         .transition(.asymmetric(
                             insertion: .scale(scale: 0.8).combined(with: .opacity),
                             removal: .scale(scale: 0.8).combined(with: .opacity)
@@ -1681,14 +1758,28 @@ struct BillRowView: View {
     }
     
     private var statusColor: Color {
-        if bill.isPaid {
+        if bill.isPaid && !hasPendingTransaction {
             return .green
+        } else if hasPendingTransaction {
+            return .orange
         } else if isOverdue {
             return .red
         } else if daysUntilDue <= 3 {
             return .orange
         } else {
             return .blue
+        }
+    }
+    
+    /// Amount color: green = fully paid & reconciled, orange = pending (awaiting clearance), primary/orange = unpaid
+    private var amountColor: Color {
+        let isFullyPaid = bill.isPaid && !hasPendingTransaction
+        if isFullyPaid {
+            return .green
+        } else if hasPendingTransaction {
+            return .orange
+        } else {
+            return bitcoinPriceService.showInBitcoin ? .orange : .primary
         }
     }
     
@@ -2037,6 +2128,7 @@ struct BillRowView: View {
                     accountViewModel.saveContext()
                     billViewModel.updateAppBadge()
                 }
+                billViewModel.ensureNextRecurringBillGenerated(for: bill)
                 
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                     showingReconcileDrawer = false
@@ -2063,6 +2155,7 @@ struct BillRowView: View {
                 accountViewModel.saveContext()
                 billViewModel.updateAppBadge()
             }
+            billViewModel.ensureNextRecurringBillGenerated(for: bill)
         } else {
             // No pending transaction - create new ledger entry with BTC/sats value
             // For zero amounts, just mark bill as paid without creating entry
@@ -2073,6 +2166,7 @@ struct BillRowView: View {
                     accountViewModel.saveContext()
                     billViewModel.updateAppBadge()
                 }
+                billViewModel.ensureNextRecurringBillGenerated(for: bill)
                 
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                     showingReconcileDrawer = false
@@ -2106,6 +2200,7 @@ struct BillRowView: View {
             }
             
             billViewModel.updateAppBadge()
+            billViewModel.ensureNextRecurringBillGenerated(for: bill)
         }
         
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {

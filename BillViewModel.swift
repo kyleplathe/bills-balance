@@ -330,6 +330,26 @@ class BillViewModel: ObservableObject {
         saveContext()
     }
     
+    /// Call after marking a recurring bill as paid outside of togglePaidStatus (e.g. reconcile flow).
+    /// Generates the next occurrence and refreshes the bills list so it appears immediately.
+    func ensureNextRecurringBillGenerated(for bill: Bill) {
+        guard bill.isPaid,
+              let recurrenceType = bill.recurrenceType, recurrenceType != "none" else { return }
+        generateNextRecurringBill(from: bill)
+        // Refresh bills so the new occurrence appears without a full fetchBills (avoids re-running auto-pay)
+        do {
+            let request = NSFetchRequest<Bill>(entityName: "Bill")
+            request.sortDescriptors = [NSSortDescriptor(keyPath: \Bill.dueDate, ascending: true)]
+            let fetched = try context.fetch(request)
+            let visible = filterVisibleBills(from: fetched)
+            bills = visible
+            accountViewModel?.refreshData()
+            updateAppBadge()
+        } catch {
+            print("Error refreshing bills after generating next recurring: \(error)")
+        }
+    }
+    
     // MARK: - Toggle Paid Status
     func togglePaidStatus(for bill: Bill, viaAutoPay: Bool = false, satsAmount: Decimal? = nil) {
         // Prevent multiple rapid calls that could create duplicates

@@ -172,17 +172,13 @@ struct ManualTransactionEntrySheet: View {
                     Text("Category")
                 }
                 
-                // Section 4: Bitcoin Details (Optional - for reconciliation)
+                // Section 4: Bitcoin Details (optional for pending; add sats/BTC when reconciling)
                 if isBTCAccount {
                     Section {
-                        // BTC Amount (Sats or BTC based on account display format) - Optional for pending transactions
                         HStack {
-                            let displayFormat = account.btcDisplayFormat ?? "sats"
-                            let placeholder = displayFormat == "sats" ? "Sats Amount (Optional)" : "BTC Amount (Optional)"
-                            TextField(placeholder, text: $satsAmountString)
-                                .keyboardType(displayFormat == "sats" ? .numberPad : .decimalPad)
+                            TextField("sats/BTC Amount", text: $satsAmountString)
+                                .keyboardType((account.btcDisplayFormat ?? "sats") == "sats" ? .numberPad : .decimalPad)
                                 .onChange(of: satsAmountString) { _, newValue in
-                                    // Auto-calculate BTC price when amount is entered
                                     autoCalculateBTCPrice()
                                 }
                             if !satsAmountString.isEmpty {
@@ -197,24 +193,16 @@ struct ManualTransactionEntrySheet: View {
                             }
                         }
                         
-                        // BTC Price (auto-calculated from USD and BTC amounts, or shown when reconciling)
                         HStack {
                             Text("BTC Price")
                             Spacer()
                             if !btcPriceString.isEmpty {
                                 Text("$\(btcPriceString)")
                                     .foregroundColor(.secondary)
-                            } else {
-                                Text("Enter BTC/Sats to calculate (optional for pending)")
-                                    .foregroundColor(.secondary)
-                                    .font(.caption)
                             }
                         }
                     } header: {
                         Text("Bitcoin Details")
-                    } footer: {
-                        Text("Optional: Add BTC/Sats amount when reconciling pending transactions")
-                            .font(.caption)
                     }
                 }
                 
@@ -240,12 +228,10 @@ struct ManualTransactionEntrySheet: View {
                     Text("Additional Information")
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("New Transaction")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) {
-                    LiveDateTimeView()
-                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         dismiss()
