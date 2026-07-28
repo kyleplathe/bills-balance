@@ -830,7 +830,7 @@ private struct CreditCardEditorSheet: View {
     let billVM = BillViewModel(context: controller.container.viewContext,
                                notificationManager: notif,
                                accountViewModel: accountVM)
-    return AddEditBillView()
+    AddEditBillView()
         .environmentObject(billVM)
         .environmentObject(accountVM)
         .environmentObject(notif)

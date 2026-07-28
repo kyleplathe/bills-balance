@@ -56,13 +56,15 @@ struct PersistenceController {
         return result
     }()
 
-    let container: NSPersistentCloudKitContainer
+    let container: NSPersistentContainer
 
     init(inMemory: Bool = false) {
-        container = NSPersistentCloudKitContainer(name: "BillsAndBalance")
+        // Local-only store. Use NSPersistentContainer (not CloudKit) until
+        // iCloud entitlements and a deliberate sync strategy are in place.
+        container = NSPersistentContainer(name: "BillsAndBalance")
         
         if inMemory {
-            container.persistentStoreDescriptions.first!.url = URL(fileURLWithPath: "/dev/null")
+            container.persistentStoreDescriptions.first?.url = URL(fileURLWithPath: "/dev/null")
         }
         
         if let description = container.persistentStoreDescriptions.first {

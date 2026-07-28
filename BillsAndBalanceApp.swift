@@ -1,10 +1,3 @@
-//
-//  BillsAndBalanceApp.swift
-//  BillsAndBalance
-//
-//  Created on 11/4/24.
-//
-
 import SwiftUI
 
 @main
@@ -20,20 +13,45 @@ struct BillsAndBalanceApp: App {
     @StateObject private var onboardingManager = OnboardingManager.shared
     @StateObject private var reportsViewModel: ReportsViewModel
     @State private var showSplash = true
-    
+
     init() {
         let context = PersistenceController.shared.container.viewContext
         let notifManager = NotificationManager()
         let accountVM = AccountViewModel(context: context)
-        let billVM = BillViewModel(context: context, notificationManager: notifManager, accountViewModel: accountVM)
         let paycheckVM = PaycheckViewModel(context: context, accountViewModel: accountVM)
         let creditCardMgr = CreditCardManager()
+
+        let billRepository: BillRepository?
+        do {
+            // Keep publishable Supabase values outside source code (scheme env vars).
+            let supabaseManager = try SupabaseManager()
+            billRepository = SupabaseBillRepository(supabaseManager: supabaseManager)
+        } catch {
+            billRepository = nil
+            #if DEBUG
+            print("Supabase disabled: \(error.localizedDescription)")
+            #endif
+        }
+
+        let billVM = BillViewModel(
+            context: context,
+            notificationManager: notifManager,
+            accountViewModel: accountVM,
+            billRepository: billRepository
+        )
+
         _notificationManager = StateObject(wrappedValue: notifManager)
         _accountViewModel = StateObject(wrappedValue: accountVM)
         _billViewModel = StateObject(wrappedValue: billVM)
         _paycheckViewModel = StateObject(wrappedValue: paycheckVM)
         _creditCardManager = StateObject(wrappedValue: creditCardMgr)
-        _reportsViewModel = StateObject(wrappedValue: ReportsViewModel(context: context, bitcoinPriceService: BitcoinPriceService.shared, creditCardManager: creditCardMgr))
+        _reportsViewModel = StateObject(
+            wrappedValue: ReportsViewModel(
+                context: context,
+                bitcoinPriceService: BitcoinPriceService.shared,
+                creditCardManager: creditCardMgr
+            )
+        )
     }
 
     var body: some Scene {
@@ -50,17 +68,15 @@ struct BillsAndBalanceApp: App {
                         .environmentObject(categoryManager)
                         .environmentObject(bitcoinPriceService)
                         .environmentObject(reportsViewModel)
-                        .preferredColorScheme(nil) // Allow dynamic sizing
+                        .preferredColorScheme(nil)
                         .onAppear {
-                            // Update badge count on app launch
                             billViewModel.updateAppBadge()
                         }
                 } else {
                     OnboardingView()
                         .environmentObject(notificationManager)
                 }
-                
-                // Only show splash screen if onboarding is already completed
+
                 if showSplash && onboardingManager.hasCompletedOnboarding {
                     SplashScreenView(isActive: $showSplash)
                         .transition(.opacity)
@@ -70,4 +86,3 @@ struct BillsAndBalanceApp: App {
         }
     }
 }
-

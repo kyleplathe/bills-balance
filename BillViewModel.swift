@@ -13,9 +13,11 @@ import UserNotifications
 
 class BillViewModel: ObservableObject {
     @Published var bills: [Bill] = []
+    @Published private(set) var cloudBills: [SupabaseBill] = []
     
     private let context: NSManagedObjectContext
     private let notificationManager: NotificationManager
+    private let billRepository: BillRepository?
     private var isProcessingAutoPay = false
     private weak var accountViewModel: AccountViewModel?
     private var businessDayCalculator = BusinessDayCalculator()
@@ -25,15 +27,57 @@ class BillViewModel: ObservableObject {
     
     init(context: NSManagedObjectContext,
          notificationManager: NotificationManager = NotificationManager(),
-         accountViewModel: AccountViewModel? = nil) {
+         accountViewModel: AccountViewModel? = nil,
+         billRepository: BillRepository? = nil) {
         self.context = context
         self.notificationManager = notificationManager
         self.accountViewModel = accountViewModel
+        self.billRepository = billRepository
         fetchBills()
         // Clean up any existing duplicates on initialization (delayed to ensure context is ready)
         // Only run once per app session to avoid interfering with user deletions
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             self.removeDuplicateBills()
+        }
+    }
+
+    @MainActor
+    func refreshCloudBills() async {
+        guard let billRepository else { return }
+        do {
+            let fetchedCloudBills = try await billRepository.fetchBills()
+            cloudBills = fetchedCloudBills
+            mergeCloudBillsIntoLocal(fetchedCloudBills)
+        } catch {
+            print("Error fetching cloud bills: \(error)")
+        }
+    }
+
+    @MainActor
+    private func mergeCloudBillsIntoLocal(_ remoteBills: [SupabaseBill]) {
+        for remoteBill in remoteBills {
+            let request = NSFetchRequest<Bill>(entityName: "Bill")
+            request.fetchLimit = 1
+            request.predicate = NSPredicate(format: "id == %@", remoteBill.id as CVarArg)
+
+            do {
+                if let existing = try context.fetch(request).first {
+                    remoteBill.apply(to: existing)
+                } else {
+                    _ = remoteBill.toUIModel(in: context)
+                }
+            } catch {
+                print("Error merging cloud bill \(remoteBill.id): \(error)")
+            }
+        }
+
+        do {
+            if context.hasChanges {
+                try context.save()
+            }
+            fetchBills(skipAutoPay: true)
+        } catch {
+            print("Error saving merged cloud bills: \(error)")
         }
     }
     
@@ -224,6 +268,7 @@ class BillViewModel: ObservableObject {
                 bills = visible
                 accountViewModel?.refreshData()
                 updateAppBadge()
+                syncBillUpsertToCloud(newBill)
             } catch {
                 print("Error saving new bill: \(error)")
             }
@@ -303,6 +348,7 @@ class BillViewModel: ObservableObject {
         }
         
         saveContext()
+        syncBillUpsertToCloud(bill)
     }
     
     // MARK: - Delete Bill
@@ -326,8 +372,12 @@ class BillViewModel: ObservableObject {
         
         notificationManager.cancelNotification(for: billToDelete)
         accountViewModel?.removeLedgerEntries(for: billToDelete)
+        let deletedBillID = billToDelete.id
         context.delete(billToDelete)
         saveContext()
+        if let deletedBillID {
+            syncBillDeletionToCloud(id: deletedBillID)
+        }
     }
     
     // MARK: - Toggle Paid Status
@@ -433,6 +483,7 @@ class BillViewModel: ObservableObject {
         } catch {
             print("Error saving bill toggle: \(error)")
         }
+        syncPaidStatusToCloud(bill)
         
         // Remove from tracking after a short delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
@@ -1071,6 +1122,39 @@ class BillViewModel: ObservableObject {
             updateAppBadge()
         } catch {
             print("Error saving context: \(error)")
+        }
+    }
+
+    private func syncBillUpsertToCloud(_ bill: Bill) {
+        guard let billRepository else { return }
+        Task {
+            do {
+                try await billRepository.upsertBill(bill)
+            } catch {
+                print("Error syncing bill to cloud: \(error)")
+            }
+        }
+    }
+
+    private func syncPaidStatusToCloud(_ bill: Bill) {
+        guard let billRepository, let billID = bill.id else { return }
+        Task {
+            do {
+                try await billRepository.setPaidStatus(for: billID, isPaid: bill.isPaid)
+            } catch {
+                print("Error syncing bill paid status: \(error)")
+            }
+        }
+    }
+
+    private func syncBillDeletionToCloud(id: UUID) {
+        guard let billRepository else { return }
+        Task {
+            do {
+                try await billRepository.deleteBill(id: id)
+            } catch {
+                print("Error deleting cloud bill: \(error)")
+            }
         }
     }
     

@@ -2153,7 +2153,7 @@ struct BillRowView: View {
     let billVM = BillViewModel(context: controller.container.viewContext,
                                notificationManager: notif,
                                accountViewModel: accountVM)
-    return BillListView()
+    BillListView()
         .environmentObject(billVM)
         .environmentObject(accountVM)
         .environmentObject(notif)

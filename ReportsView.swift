@@ -2539,4 +2539,5 @@ private struct AddCategorySheet: View {
         .environmentObject(vm)
         .environmentObject(BitcoinPriceService.shared)
         .environmentObject(accountVM)
+        .environmentObject(CategoryManager())
 }

@@ -77,6 +77,7 @@ struct BalanceView: View {
     @EnvironmentObject private var paycheckViewModel: PaycheckViewModel
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     @EnvironmentObject private var reportsViewModel: ReportsViewModel
+    @EnvironmentObject private var categoryManager: CategoryManager
     @State private var showingManageAccounts = false
     @State private var showingReports = false
     @State private var showingAddAccount = false
@@ -86,8 +87,10 @@ struct BalanceView: View {
     @State private var showInactiveAccounts = false
     @State private var showingImportPicker = false
     @State private var showingExportSheet = false
+    @State private var showingProjectionSettings = false
     @State private var currentAccountPage = 0
     @State private var activityChartAppeared = false
+    @State private var supabaseManager: SupabaseManager?
     
     var body: some View {
         NavigationStack {
@@ -140,11 +143,25 @@ struct BalanceView: View {
             }
             .environmentObject(bitcoinPriceService)
         }
+        .sheet(isPresented: $showingProjectionSettings) {
+            NavigationStack {
+                if let supabaseManager {
+                    ProjectionSettingsView(accountID: nil, supabaseManager: supabaseManager)
+                } else {
+                    ContentUnavailableView(
+                        "Supabase Not Configured",
+                        systemImage: "icloud.slash",
+                        description: Text("Set SUPABASE_URL and SUPABASE_ANON_KEY to edit projection settings.")
+                    )
+                }
+            }
+        }
         .fullScreenCover(isPresented: $showingReports) {
             ReportsView()
                 .environmentObject(accountViewModel)
                 .environmentObject(bitcoinPriceService)
                 .environmentObject(reportsViewModel)
+                .environmentObject(categoryManager)
         }
         .navigationDestination(isPresented: $showingAccountDetail) {
             if let account = selectedAccount {
@@ -173,6 +190,9 @@ struct BalanceView: View {
         }
         .onAppear {
             accountViewModel.fetchAccounts()
+            if supabaseManager == nil {
+                supabaseManager = try? SupabaseManager()
+            }
         }
         .onChange(of: showingAddAccount) { _, isPresented in
             // Refresh accounts when the add account sheet is dismissed
@@ -252,6 +272,12 @@ struct BalanceView: View {
                 showingReports = true
             } label: {
                 Label("Reports", systemImage: "chart.bar")
+            }
+
+            Button {
+                showingProjectionSettings = true
+            } label: {
+                Label("Projection Settings", systemImage: "slider.horizontal.3")
             }
             
             // Debug: Add sample data for testing bar chart
