@@ -1,4 +1,0 @@
-module SimpleBills {
-    header "/Volumes/Extreme Pro/Work/Dev Project/Bill Simplicity/Simple Bills/.build/arm64-apple-macosx/debug/SimpleBills.build/SimpleBills-Swift.h"
-    requires objc
-}
