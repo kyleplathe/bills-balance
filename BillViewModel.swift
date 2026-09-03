@@ -11,6 +11,7 @@ import SwiftUI
 import UIKit
 import UserNotifications
 
+@MainActor
 class BillViewModel: ObservableObject {
     @Published var bills: [Bill] = []
     @Published private(set) var cloudBills: [SupabaseBill] = []
@@ -24,6 +25,7 @@ class BillViewModel: ObservableObject {
     private var pendingRecurringBills: Set<String> = [] // Track bills being created to prevent duplicates (key format: "seriesId-dateKey")
     private var billsBeingToggled: Set<NSManagedObjectID> = [] // Track bills currently being toggled to prevent rapid duplicate calls
     private var skipAutoPayUntil: Date? = nil // Skip auto-pay processing until this date (used during import)
+    private var billsByMonthCache: [Date: [Bill]] = [:]
     
     init(context: NSManagedObjectContext,
          notificationManager: NotificationManager = NotificationManager(),
@@ -88,14 +90,15 @@ class BillViewModel: ObservableObject {
     // MARK: - Fetch All Bills for Month (including paid ones)
     func fetchAllBillsForMonth(_ month: Date) -> [Bill] {
         let calendar = Calendar.current
-        
-        // Get the proper month interval
         guard let monthInterval = calendar.dateInterval(of: .month, for: month) else {
             return []
         }
+        let cacheKey = calendar.startOfDay(for: monthInterval.start)
+        if let cached = billsByMonthCache[cacheKey] {
+            return cached
+        }
         
-        // Use start of first day and end of last day of the month
-        let monthStart = calendar.startOfDay(for: monthInterval.start)
+        let monthStart = cacheKey
         
         // Get the last day of the month by getting the first day of next month and subtracting 1 day
         guard let nextMonthStart = calendar.date(byAdding: .month, value: 1, to: monthInterval.start) else {
@@ -112,38 +115,41 @@ class BillViewModel: ObservableObject {
                                        monthStart as NSDate,
                                        monthEnd as NSDate)
         request.sortDescriptors = [NSSortDescriptor(keyPath: \Bill.dueDate, ascending: true)]
+        request.fetchBatchSize = 50
         
         do {
             let bills = try context.fetch(request)
-            // Debug logging removed - was causing excessive console output during SwiftUI view updates
-            // Uncomment below for debugging if needed:
-            // #if DEBUG
-            // let dateFormatter = DateFormatter()
-            // dateFormatter.dateFormat = "MMM d, yyyy"
-            // print("📊 Month: \(dateFormatter.string(from: month)), Found \(bills.count) bills")
-            // #endif
+            billsByMonthCache[cacheKey] = bills
             return bills
         } catch {
             print("Error fetching all bills for month: \(error)")
             return []
         }
     }
+
+    private func invalidateMonthBillsCache() {
+        billsByMonthCache.removeAll(keepingCapacity: true)
+    }
     
     // MARK: - Fetch Bills
     func fetchBills(skipAutoPay: Bool = false) {
+        invalidateMonthBillsCache()
         let request = NSFetchRequest<Bill>(entityName: "Bill")
         request.sortDescriptors = [NSSortDescriptor(keyPath: \Bill.dueDate, ascending: true)]
+        request.fetchBatchSize = 50
         
         do {
             let fetched = try context.fetch(request)
-            let visible = filterVisibleBills(from: fetched)
+            ensureUpcomingOccurrences(from: fetched)
+            let afterEnsure = try context.fetch(request)
+            let visible = filterVisibleBills(from: afterEnsure)
             bills = visible
             
             // Skip auto-pay if explicitly requested, or if we're in a skip window (e.g., during import)
             let shouldSkipAutoPay = skipAutoPay || (skipAutoPayUntil != nil && Date() < skipAutoPayUntil!)
             
             if !isProcessingAutoPay && !shouldSkipAutoPay {
-                processAutoPayBills(sourceBills: fetched)
+                processAutoPayBills(sourceBills: afterEnsure)
             }
             updateAppBadge()
         } catch {
@@ -151,6 +157,13 @@ class BillViewModel: ObservableObject {
         }
     }
     
+    func allBills() -> [Bill] {
+        let request = NSFetchRequest<Bill>(entityName: "Bill")
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \Bill.dueDate, ascending: true)]
+        request.fetchBatchSize = 50
+        return (try? context.fetch(request)) ?? []
+    }
+
     // MARK: - Skip Auto-Pay Processing (for import)
     func skipAutoPayProcessing(for duration: TimeInterval = 5.0) {
         skipAutoPayUntil = Date().addingTimeInterval(duration)
@@ -172,12 +185,9 @@ class BillViewModel: ObservableObject {
                   let pendingName = pendingBill.name,
                   let pendingDue = pendingBill.dueDate,
                   let pendingAmount = pendingBill.amount?.decimalValue else { return false }
-            // Use comparison with small tolerance for decimal amounts
-            let diff = pendingAmount - amount
-            let amountDiff = abs(NSDecimalNumber(decimal: diff).doubleValue)
             return pendingName == name &&
-                   calendar.isDate(pendingDue, inSameDayAs: dueDate) &&
-                   amountDiff < 0.01 // Allow small difference for floating point precision
+                   DuplicateBillGuard.isSameDay(pendingDue, dueDate) &&
+                   DuplicateBillGuard.amountsMatch(pendingAmount, amount)
         }
         if hasPendingDuplicate {
             print("⚠️ Found pending duplicate: \(name) on \(dueDate)")
@@ -195,9 +205,7 @@ class BillViewModel: ObservableObject {
             // Filter by amount with tolerance for precision
             let matchingBills = existingBills.filter { bill in
                 guard let billAmount = bill.amount?.decimalValue else { return false }
-                let diff = billAmount - amount
-                let amountDiff = abs(NSDecimalNumber(decimal: diff).doubleValue)
-                return amountDiff < 0.01 // Allow small difference for floating point precision
+                return DuplicateBillGuard.amountsMatch(billAmount, amount)
             }
             
             if !matchingBills.isEmpty {
@@ -221,6 +229,7 @@ class BillViewModel: ObservableObject {
                  paymentCard: String? = nil,
                  account: Account? = nil,
                  category: String? = nil,
+                 trackInBitcoin: Bool = false,
                  skipDuplicateCheck: Bool = false,
                  skipSave: Bool = false) -> Bill? {
         // Check for duplicates unless explicitly skipped
@@ -245,6 +254,7 @@ class BillViewModel: ObservableObject {
         newBill.paymentCard = paymentCard
         newBill.account = account
         newBill.category = category
+        newBill.trackInBitcoinFlag = trackInBitcoin
         
         notificationManager.scheduleNotification(for: newBill)
         
@@ -288,7 +298,8 @@ class BillViewModel: ObservableObject {
                     paymentCard: String?,
                     account: Account?,
                     applyToSeries: Bool = false,
-                    category: String? = nil) {
+                    category: String? = nil,
+                    trackInBitcoin: Bool? = nil) {
         let originalDueDate = bill.dueDate
         let previousRecurrenceType = bill.recurrenceType ?? "none"
         let previousAccount = bill.account
@@ -305,6 +316,9 @@ class BillViewModel: ObservableObject {
         bill.paymentCard = paymentCard
         bill.account = account
         bill.category = category
+        if let trackInBitcoin {
+            bill.trackInBitcoinFlag = trackInBitcoin
+        }
         
         // If bill is now credit card only (has paymentCard but no account), remove any ledger entries
         // Credit card payments don't affect account balances
@@ -342,7 +356,8 @@ class BillViewModel: ObservableObject {
                                      previousRecurrenceType: previousRecurrenceType,
                                      paymentCard: paymentCard,
                                      account: account,
-                                     category: category)
+                                     category: category,
+                                     trackInBitcoin: bill.trackInBitcoinFlag)
         } else if recurrenceType == "none" && previousRecurrenceType != "none" {
             removeFutureBills(for: bill)
         }
@@ -409,13 +424,10 @@ class BillViewModel: ObservableObject {
                 print("❌ Error saving bill before generating next: \(error)")
             }
             
-            // Generate next recurring bill AFTER saving
-            // Only generate if this bill was actually marked as paid (not if it was already paid)
+            // Generate next recurring bill now so the series never disappears after
+            // the paid row ages out of the 3-day visible window.
             if let recurrenceType = bill.recurrenceType, recurrenceType != "none" {
-                // Small delay to ensure the current bill's state is fully saved first
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                    self?.generateNextRecurringBill(from: bill)
-                }
+                generateNextRecurringBill(from: bill)
             }
             
             // Only create ledger entry for non-zero bills
@@ -472,14 +484,7 @@ class BillViewModel: ObservableObject {
         // Save without triggering fetchBills() to prevent recursive calls and duplicate creation
         do {
             try context.save()
-            // Manually update bills list without triggering auto-pay
-            let request = NSFetchRequest<Bill>(entityName: "Bill")
-            request.sortDescriptors = [NSSortDescriptor(keyPath: \Bill.dueDate, ascending: true)]
-            let fetched = try context.fetch(request)
-            let visible = filterVisibleBills(from: fetched)
-            bills = visible
-            accountViewModel?.refreshData()
-            updateAppBadge()
+            refreshVisibleBillsFromStore()
         } catch {
             print("Error saving bill toggle: \(error)")
         }
@@ -591,9 +596,11 @@ class BillViewModel: ObservableObject {
         // Save without triggering fetchBills() to prevent recursive calls
         do {
             try context.save()
+            invalidateMonthBillsCache()
             // Manually update bills list without triggering auto-pay
             let request = NSFetchRequest<Bill>(entityName: "Bill")
             request.sortDescriptors = [NSSortDescriptor(keyPath: \Bill.dueDate, ascending: true)]
+            request.fetchBatchSize = 50
             let fetched = try context.fetch(request)
             let visible = filterVisibleBills(from: fetched)
             bills = visible
@@ -634,33 +641,160 @@ class BillViewModel: ObservableObject {
         return visible
     }
     
-    private func generateNextRecurringBill(from bill: Bill) {
+    /// Marks a bill paid without creating a ledger entry (the ledger was already recorded or reconciled).
+    /// Still grows the next recurring occurrence so the series stays on the Bills list.
+    func markPaidPreservingLedger(for bill: Bill) {
+        if !bill.isPaid {
+            bill.isPaid = true
+            bill.paidDate = Date()
+            notificationManager.cancelNotification(for: bill)
+        }
+
+        if let recurrenceType = bill.recurrenceType, recurrenceType != "none" {
+            generateNextRecurringBill(from: bill)
+        }
+
+        do {
+            try context.save()
+        } catch {
+            print("❌ Error saving paid status: \(error)")
+        }
+        refreshVisibleBillsFromStore()
+        syncPaidStatusToCloud(bill)
+    }
+
+    /// Recurring series drop out of the Bills list once the paid row is older than 3 days.
+    /// If that series has no unpaid successor, create one from the latest bill.
+    @discardableResult
+    func ensureUpcomingOccurrences(from bills: [Bill]? = nil) -> Int {
+        let source: [Bill]
+        if let bills {
+            source = bills
+        } else {
+            let request = NSFetchRequest<Bill>(entityName: "Bill")
+            source = (try? context.fetch(request)) ?? []
+        }
+
+        var seriesLatest: [UUID: Bill] = [:]
+        var unpaidSeries: Set<UUID> = []
+        var orphanPaidRecurring: [Bill] = []
+
+        for bill in source {
+            guard let type = bill.recurrenceType, type != "none" else { continue }
+            guard let seriesId = bill.seriesId else {
+                if bill.isPaid {
+                    orphanPaidRecurring.append(bill)
+                }
+                continue
+            }
+            if !bill.isPaid {
+                unpaidSeries.insert(seriesId)
+            }
+            if let existing = seriesLatest[seriesId],
+               let existingDue = existing.dueDate,
+               let due = bill.dueDate,
+               existingDue >= due {
+                continue
+            }
+            seriesLatest[seriesId] = bill
+        }
+
+        var created = 0
+        for (seriesId, latest) in seriesLatest where !unpaidSeries.contains(seriesId) {
+            if generateNextRecurringBill(from: latest) {
+                created += 1
+            }
+        }
+        for bill in orphanPaidRecurring {
+            if generateNextRecurringBill(from: bill) {
+                created += 1
+            }
+        }
+        return created
+    }
+
+    private func refreshVisibleBillsFromStore() {
+        invalidateMonthBillsCache()
+        let request = NSFetchRequest<Bill>(entityName: "Bill")
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \Bill.dueDate, ascending: true)]
+        request.fetchBatchSize = 50
+        do {
+            let fetched = try context.fetch(request)
+            bills = filterVisibleBills(from: fetched)
+            accountViewModel?.refreshData()
+            updateAppBadge()
+        } catch {
+            print("Error refreshing bills: \(error)")
+        }
+    }
+
+    /// Marks a bill paid from an imported Strike (or similar) payment and records BTC/fee history.
+    func applyImportedPayment(
+        to bill: Bill,
+        paidDate: Date,
+        usdAmount: Decimal,
+        btcAmount: Decimal?,
+        feeUSD: Decimal?,
+        btcPrice: Decimal?,
+        notes: String
+    ) {
+        let wasPaid = bill.isPaid
+        bill.isPaid = true
+        bill.paidDate = paidDate
+        bill.updatedAt = Date()
+        notificationManager.cancelNotification(for: bill)
+
+        if !wasPaid, let recurrenceType = bill.recurrenceType, recurrenceType != "none" {
+            generateNextRecurringBill(from: bill)
+        }
+
+        let sats: Decimal? = {
+            guard let btc = btcAmount, btc != 0 else { return nil }
+            return btc.magnitude * 100_000_000
+        }()
+
+        let entry = accountViewModel?.recordLedgerEntry(
+            for: bill,
+            amount: usdAmount.magnitude,
+            date: paidDate,
+            isCredit: false,
+            title: bill.name,
+            notes: notes,
+            satsAmount: sats
+        )
+        if let fee = feeUSD, fee > 0 {
+            entry?.feeAmount = NSDecimalNumber(decimal: fee.magnitude)
+        }
+        if let price = btcPrice, price > 0 {
+            entry?.btcPriceAtTransaction = NSDecimalNumber(decimal: price)
+        }
+        entry?.isReconciledFlag = true
+
+        saveContextAndRefresh()
+    }
+
+    @discardableResult
+    private func generateNextRecurringBill(from bill: Bill) -> Bool {
         guard let recurrenceType = bill.recurrenceType, recurrenceType != "none",
-              let dueDate = bill.dueDate else { return }
+              let dueDate = bill.dueDate else { return false }
         
         if bill.seriesId == nil {
             bill.seriesId = UUID()
         }
-        guard let seriesId = bill.seriesId else { return }
+        guard let seriesId = bill.seriesId else { return false }
         
-        let nextDate = getNextRecurrenceDate(from: dueDate, type: recurrenceType, interval: Int(max(bill.recurrenceInterval, 1)))
+        let nextDate = RecurrenceCalculator.nextDate(from: dueDate, type: recurrenceType, interval: Int(max(bill.recurrenceInterval, 1)))
         let calendar = Calendar.current
-        
-        // Create a unique identifier for this recurring bill instance
-        let nextDateKey = calendar.startOfDay(for: nextDate).timeIntervalSince1970
-        let pendingKey = "\(seriesId.uuidString)-\(nextDateKey)"
+        let pendingKey = DuplicateBillGuard.pendingKey(seriesId: seriesId, date: nextDate, calendar: calendar)
         
         // Check if we're already creating this bill (prevent duplicate calls)
         if pendingRecurringBills.contains(pendingKey) {
             print("⚠️ Duplicate prevention: Already creating bill for series \(seriesId.uuidString) on \(nextDate)")
-            return
+            return false
         }
         
         // Check database for existing bills - use name, date, and amount for more comprehensive duplicate detection
         do {
-            // First, refresh the context to see any recently saved bills
-            context.refreshAllObjects()
-            
             // Check by seriesId first (for recurring bills)
             let seriesRequest = NSFetchRequest<Bill>(entityName: "Bill")
             seriesRequest.predicate = NSPredicate(format: "seriesId == %@", seriesId as CVarArg)
@@ -671,13 +805,13 @@ class BillViewModel: ObservableObject {
             }
             if alreadyExistsInSeries {
                 print("⚠️ Duplicate prevention: Bill already exists in series \(seriesId.uuidString) on \(nextDate)")
-                return
+                return true
             }
             
             // Also check by name, date, and amount (catches duplicates even without seriesId)
-            guard let billName = bill.name, let billAmount = bill.amount?.decimalValue else { return }
+            guard let billName = bill.name, let billAmount = bill.amount?.decimalValue else { return false }
             let startOfNextDate = calendar.startOfDay(for: nextDate)
-            guard let endOfNextDate = calendar.date(byAdding: .day, value: 1, to: startOfNextDate) else { return }
+            guard let endOfNextDate = calendar.date(byAdding: .day, value: 1, to: startOfNextDate) else { return false }
             
             let nameDateRequest = NSFetchRequest<Bill>(entityName: "Bill")
             nameDateRequest.predicate = NSPredicate(format: "name == %@ AND dueDate >= %@ AND dueDate < %@",
@@ -685,14 +819,12 @@ class BillViewModel: ObservableObject {
             let nameDateBills = try context.fetch(nameDateRequest)
             let matchingBills = nameDateBills.filter { candidate in
                 guard candidate != bill, let candidateAmount = candidate.amount?.decimalValue else { return false }
-                // Check amount with tolerance for precision
-                let diff = candidateAmount - billAmount
-                let amountDiff = abs(NSDecimalNumber(decimal: diff).doubleValue)
-                return amountDiff < 0.01
+                let amountMatches = DuplicateBillGuard.amountsMatch(candidateAmount, billAmount)
+                return amountMatches
             }
             if !matchingBills.isEmpty {
                 print("⚠️ Duplicate prevention: Bill with same name, date, and amount already exists: \(billName) on \(nextDate)")
-                return
+                return true
             }
             
             // Also check pending changes in context (inserted objects)
@@ -708,17 +840,17 @@ class BillViewModel: ObservableObject {
                 let matchesBySeries = pendingBill.seriesId == seriesId && calendar.isDate(pendingDue, inSameDayAs: nextDate)
                 let matchesByNameDateAmount = pendingName == billName &&
                                             calendar.isDate(pendingDue, inSameDayAs: nextDate) &&
-                                            abs(NSDecimalNumber(decimal: pendingAmount - billAmount).doubleValue) < 0.01
+                                            DuplicateBillGuard.amountsMatch(pendingAmount, billAmount)
                 
                 return matchesBySeries || matchesByNameDateAmount
             }
             if hasPendingDuplicate {
                 print("⚠️ Duplicate prevention: Pending bill already being created for \(billName) on \(nextDate)")
-                return
+                return true
             }
         } catch {
             print("❌ Error checking for duplicates: \(error)")
-            return
+            return false
         }
         
         // Mark this bill as being created BEFORE creating it
@@ -740,6 +872,7 @@ class BillViewModel: ObservableObject {
         nextBill.paymentCard = bill.paymentCard
         nextBill.account = bill.account
         nextBill.category = bill.category
+        nextBill.trackInBitcoinFlag = bill.trackInBitcoinFlag
         
         notificationManager.scheduleNotification(for: nextBill)
         
@@ -747,14 +880,12 @@ class BillViewModel: ObservableObject {
         do {
             try context.save()
             print("✅ Created next recurring bill: \(bill.name ?? "Unknown") for \(nextDate)")
-            // Remove from pending set after successful save
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.pendingRecurringBills.remove(pendingKey)
-            }
+            pendingRecurringBills.remove(pendingKey)
+            return true
         } catch {
             print("❌ Error saving next recurring bill: \(error)")
-            // Remove from pending set even on error to allow retry
             pendingRecurringBills.remove(pendingKey)
+            return false
         }
     }
     
@@ -763,7 +894,7 @@ class BillViewModel: ObservableObject {
               let seriesId = bill.seriesId,
               let dueDate = bill.dueDate else { return }
         
-        let nextDate = getNextRecurrenceDate(from: dueDate, type: recurrenceType, interval: Int(max(bill.recurrenceInterval, 1)))
+        let nextDate = RecurrenceCalculator.nextDate(from: dueDate, type: recurrenceType, interval: Int(max(bill.recurrenceInterval, 1)))
         let calendar = Calendar.current
         
         do {
@@ -793,7 +924,8 @@ class BillViewModel: ObservableObject {
                                           previousRecurrenceType: String,
                                           paymentCard: String?,
                                           account: Account?,
-                                          category: String?) {
+                                          category: String?,
+                                          trackInBitcoin: Bool) {
         guard let seriesId = bill.seriesId else { return }
         
         do {
@@ -822,6 +954,7 @@ class BillViewModel: ObservableObject {
                 futureBill.account = account
                 futureBill.paymentCard = paymentCard
                 futureBill.category = category
+                futureBill.trackInBitcoinFlag = trackInBitcoin
                 
                 if let originalDueDate,
                    let newBaseDate = bill.dueDate,
@@ -856,29 +989,7 @@ class BillViewModel: ObservableObject {
     }
     
     private func getNextRecurrenceDate(from date: Date, type: String, interval: Int) -> Date {
-        let calendar = Calendar.current
-        let actualInterval = max(interval, 1)
-        
-        switch type {
-        case "daily":
-            return calendar.date(byAdding: .day, value: actualInterval, to: date) ?? date
-        case "weekly":
-            return calendar.date(byAdding: .weekOfYear, value: actualInterval, to: date) ?? date
-        case "biweekly":
-            return calendar.date(byAdding: .weekOfYear, value: 2, to: date) ?? date
-        case "monthly":
-            return calendar.date(byAdding: .month, value: actualInterval, to: date) ?? date
-        case "bimonthly":
-            return calendar.date(byAdding: .month, value: 2, to: date) ?? date
-        case "quarterly":
-            return calendar.date(byAdding: .month, value: 3 * actualInterval, to: date) ?? date
-        case "semiannually":
-            return calendar.date(byAdding: .month, value: 6, to: date) ?? date
-        case "yearly":
-            return calendar.date(byAdding: .year, value: actualInterval, to: date) ?? date
-        default:
-            return date
-        }
+        RecurrenceCalculator.nextDate(from: date, type: type, interval: interval)
     }
     
     // MARK: - Delete Recurring Series
@@ -1084,6 +1195,9 @@ class BillViewModel: ObservableObject {
         defer { isProcessingAutoPay = false }
         
         for bill in autoPayBills {
+            if billsBeingToggled.contains(bill.objectID) {
+                continue
+            }
             notificationManager.cancelNotification(for: bill)
             notificationManager.deliverAutoPayNotification(for: bill)
             
@@ -1104,6 +1218,7 @@ class BillViewModel: ObservableObject {
     private func saveContext() {
         do {
             try context.save()
+            invalidateMonthBillsCache()
             // Don't call fetchBills() here - it can trigger processAutoPayBills() which might create duplicates
             // Instead, let the caller decide when to refresh
             accountViewModel?.refreshData()

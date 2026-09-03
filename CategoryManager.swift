@@ -20,7 +20,8 @@ class CategoryManager: ObservableObject {
     }
     
     private let storageKey = "customCategories"
-    private let defaultCategories = ["Housing", "Utilities", "Food & Dining", "Transportation", "Healthcare", "Insurance", "Entertainment", "Shopping", "Personal Care", "Education", "Subscriptions", "Debt Payment", "Savings", "Investments", "Gifts & Donations", "Travel", "Business", "Other"]
+    static let defaultCategories = ["Housing", "Utilities", "Food & Dining", "Transportation", "Healthcare", "Insurance", "Entertainment", "Shopping", "Personal Care", "Education", "Subscriptions", "Debt Payment", "Savings", "Investments", "Gifts & Donations", "Travel", "Business", "Other"]
+    private var defaultCategories: [String] { Self.defaultCategories }
     
     /// All categories (defaults + custom), unsorted.
     var allCategories: [String] {
@@ -58,12 +59,26 @@ class CategoryManager: ObservableObject {
         }
     }
     
-    func addCategory(_ name: String) {
+    /// Adds a custom category, or returns the canonical name if it already exists.
+    @discardableResult
+    func addCategory(_ name: String) -> String? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        guard !defaultCategories.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) else { return }
-        guard !customCategories.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) else { return }
+        guard !trimmed.isEmpty else { return nil }
+        if let existing = resolvedName(for: trimmed) {
+            return existing
+        }
         customCategories.append(trimmed)
+        return trimmed
+    }
+
+    /// Canonical default/custom name when `raw` matches case-insensitively.
+    func resolvedName(for raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let match = Self.defaultCategories.first(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+            return match
+        }
+        return customCategories.first { $0.caseInsensitiveCompare(trimmed) == .orderedSame }
     }
     
     func removeCategory(_ category: String) {

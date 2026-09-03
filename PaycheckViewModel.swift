@@ -2,6 +2,7 @@ import Foundation
 import CoreData
 import SwiftUI
 
+@MainActor
 class PaycheckViewModel: ObservableObject {
     @Published var paychecks: [Paycheck] = []
     
@@ -21,6 +22,7 @@ class PaycheckViewModel: ObservableObject {
     func fetchPaychecks() {
         let request = NSFetchRequest<Paycheck>(entityName: "Paycheck")
         request.sortDescriptors = [NSSortDescriptor(keyPath: \Paycheck.firstDepositDate, ascending: true)]
+        request.fetchBatchSize = 50
         do {
             paychecks = try context.fetch(request)
         } catch {

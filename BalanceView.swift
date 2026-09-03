@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import UniformTypeIdentifiers
 
 // Cash register style balance text with digit rotation
 private struct CashRegisterBalanceText: View {
@@ -70,11 +71,20 @@ extension Collection {
     }
 }
 
+private enum BalancePrivacy {
+    static let placeholder = "$••••••"
+    static let shortPlaceholder = "$••••"
+}
+
+private struct ExportFileItem: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
 // MARK: - Main Balance View
 struct BalanceView: View {
     @EnvironmentObject private var accountViewModel: AccountViewModel
     @EnvironmentObject private var billViewModel: BillViewModel
-    @EnvironmentObject private var paycheckViewModel: PaycheckViewModel
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     @EnvironmentObject private var reportsViewModel: ReportsViewModel
     @EnvironmentObject private var categoryManager: CategoryManager
@@ -83,14 +93,28 @@ struct BalanceView: View {
     @State private var showingAddAccount = false
     @State private var showingAccountDetail: Bool = false
     @State private var selectedAccount: Account?
-    @State private var isSearchPresented = false
     @State private var showInactiveAccounts = false
+    @AppStorage("hideBalances") private var hideBalances = false
     @State private var showingImportPicker = false
-    @State private var showingExportSheet = false
-    @State private var showingProjectionSettings = false
+    @State private var showClearImportedAlert = false
+    @State private var showClearImportedSuccessAlert = false
+    @State private var clearedImportCount = 0
+    @State private var exportShareItem: ExportFileItem?
+    @State private var showingTransfer = false
     @State private var currentAccountPage = 0
     @State private var activityChartAppeared = false
-    @State private var supabaseManager: SupabaseManager?
+    @State private var exportErrorMessage: String?
+    @State private var showExportErrorAlert = false
+    @State private var importErrorMessage: String?
+    @State private var showImportErrorAlert = false
+    @State private var showImportSuccessAlert = false
+    @State private var importedAccountCount = 0
+    @State private var showingStatementImportSheet = false
+    @State private var statementImportFileName = ""
+    @State private var statementImportTransactions: [ParsedStatementTransaction] = []
+    @State private var showStatementImportSuccessAlert = false
+    @State private var statementImportResult: StatementImportResult?
+    @State private var isImportParsing = false
     
     var body: some View {
         NavigationStack {
@@ -101,7 +125,7 @@ struct BalanceView: View {
     private var navigationContent: some View {
         ScrollView {
             VStack(spacing: 20) {
-                if visibleAccounts.isEmpty && !showInactiveAccounts {
+                if accountViewModel.accounts.isEmpty {
                     emptyStateView
                 } else {
                     summaryChipCards
@@ -118,7 +142,6 @@ struct BalanceView: View {
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 addButton
-                searchButton
                 menuButton
             }
         }
@@ -143,56 +166,96 @@ struct BalanceView: View {
             }
             .environmentObject(bitcoinPriceService)
         }
-        .sheet(isPresented: $showingProjectionSettings) {
-            NavigationStack {
-                if let supabaseManager {
-                    ProjectionSettingsView(accountID: nil, supabaseManager: supabaseManager)
-                } else {
-                    ContentUnavailableView(
-                        "Supabase Not Configured",
-                        systemImage: "icloud.slash",
-                        description: Text("Set SUPABASE_URL and SUPABASE_ANON_KEY to edit projection settings.")
-                    )
-                }
+        .sheet(isPresented: $showingTransfer) {
+            TransferPickerSheet()
+                .environmentObject(accountViewModel)
+                .environmentObject(bitcoinPriceService)
+        }
+        .sheet(item: $exportShareItem) { item in
+            ActivityShareSheet(activityItems: [item.url]) {
+                try? FileManager.default.removeItem(at: item.url)
+                exportShareItem = nil
             }
         }
-        .fullScreenCover(isPresented: $showingReports) {
+        .navigationDestination(isPresented: $showingReports) {
             ReportsView()
                 .environmentObject(accountViewModel)
                 .environmentObject(bitcoinPriceService)
                 .environmentObject(reportsViewModel)
                 .environmentObject(categoryManager)
+                .environmentObject(billViewModel)
         }
         .navigationDestination(isPresented: $showingAccountDetail) {
             if let account = selectedAccount {
                 AccountDetailView(account: account)
                     .environmentObject(accountViewModel)
-                    .environmentObject(billViewModel)
-                    .environmentObject(paycheckViewModel)
                     .environmentObject(bitcoinPriceService)
+                    .environmentObject(categoryManager)
             }
         }
         .fileImporter(
             isPresented: $showingImportPicker,
-            allowedContentTypes: [.json, .commaSeparatedText],
+            allowedContentTypes: [.commaSeparatedText, .plainText, .json],
             allowsMultipleSelection: false
         ) { result in
-            // TODO: Handle account import
-            switch result {
-            case .success(let urls):
-                if let url = urls.first {
-                    // Handle import
-                    print("Import from: \(url)")
-                }
-            case .failure(let error):
-                print("Import error: \(error)")
+            handleAccountImport(result)
+        }
+        .sheet(isPresented: $showingStatementImportSheet) {
+            StatementImportSheet(
+                fileName: statementImportFileName,
+                transactions: statementImportTransactions,
+                onImport: handleStatementImport
+            )
+            .environmentObject(accountViewModel)
+            .environmentObject(categoryManager)
+        }
+        .overlay {
+            if isImportParsing {
+                Color.black.opacity(0.3)
+                    .ignoresSafeArea()
+                ProgressView("Reading file…")
+                    .tint(.white)
+                    .scaleEffect(1.2)
             }
+        }
+        .alert("Export Error", isPresented: $showExportErrorAlert, presenting: exportErrorMessage) { _ in
+            Button("OK", role: .cancel) { }
+        } message: { message in
+            Text(message)
+        }
+        .alert("Import Error", isPresented: $showImportErrorAlert, presenting: importErrorMessage) { _ in
+            Button("OK", role: .cancel) { }
+        } message: { message in
+            Text(message)
+        }
+        .alert("Import Successful", isPresented: $showImportSuccessAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Imported \(importedAccountCount) account\(importedAccountCount == 1 ? "" : "s"). Matching accounts were updated in place.")
+        }
+        .alert("Import successful", isPresented: $showStatementImportSuccessAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            statementImportSuccessMessage
+        }
+        .alert("Clear Imported Data", isPresented: $showClearImportedAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Clear All Imported", role: .destructive) {
+                clearedImportCount = accountViewModel.clearImportedEntries()
+                showClearImportedSuccessAlert = true
+            }
+        } message: {
+            Text("Imported transactions will be deleted and starting balances will be restored to before those imports (the Keep current balance adjustment is undone). This cannot be undone.")
+        }
+        .alert("Imported Data Cleared", isPresented: $showClearImportedSuccessAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(clearedImportCount == 0
+                 ? "No imported transactions were found."
+                 : "Removed \(clearedImportCount) imported transaction\(clearedImportCount == 1 ? "" : "s") and restored starting balances.")
         }
         .onAppear {
             accountViewModel.fetchAccounts()
-            if supabaseManager == nil {
-                supabaseManager = try? SupabaseManager()
-            }
         }
         .onChange(of: showingAddAccount) { _, isPresented in
             // Refresh accounts when the add account sheet is dismissed
@@ -221,15 +284,7 @@ struct BalanceView: View {
             Image(systemName: "plus.circle.fill")
                 .font(.title2)
         }
-    }
-    
-    private var searchButton: some View {
-        Button {
-            isSearchPresented.toggle()
-        } label: {
-            Image(systemName: "magnifyingglass")
-                .font(.title2)
-        }
+        .accessibilityLabel("Add Account")
     }
     
     private var menuButton: some View {
@@ -247,48 +302,55 @@ struct BalanceView: View {
                     Label("Import", systemImage: "square.and.arrow.down")
                 }
                 Button {
-                    // TODO: Implement export accounts
+                    exportAccounts()
                 } label: {
                     Label("Export", systemImage: "square.and.arrow.up")
+                }
+                Divider()
+                Button(role: .destructive) {
+                    showClearImportedAlert = true
+                } label: {
+                    Label("Clear Imported Data", systemImage: "trash")
                 }
             } label: {
                 Label("Import/Export", systemImage: "arrow.up.arrow.down")
             }
             
             Button {
-                // TODO: Implement transfer between accounts
+                showingTransfer = true
             } label: {
                 Label("Transfer", systemImage: "arrow.left.arrow.right")
             }
-            .disabled(true)
+            .disabled(visibleAccounts.count < 2)
             
             Button {
-                showInactiveAccounts.toggle()
+                withAnimation {
+                    showInactiveAccounts.toggle()
+                    currentAccountPage = 0
+                }
             } label: {
-                Label("Show Inactive Accounts", systemImage: showInactiveAccounts ? "eye.fill" : "eye")
+                Label(
+                    showInactiveAccounts ? "Hide Inactive Accounts" : "Show Inactive Accounts",
+                    systemImage: showInactiveAccounts ? "eye.slash" : "eye"
+                )
             }
+            .disabled(!hasInactiveAccounts && !showInactiveAccounts)
             
-            Button {
-                showingReports = true
-            } label: {
-                Label("Reports", systemImage: "chart.bar")
-            }
-
-            Button {
-                showingProjectionSettings = true
-            } label: {
-                Label("Projection Settings", systemImage: "slider.horizontal.3")
-            }
-            
-            // Debug: Add sample data for testing bar chart
+            #if DEBUG
+            Divider()
             if let firstAccount = visibleAccounts.first {
-                Divider()
                 Button {
                     accountViewModel.addSampleDataForTesting(to: firstAccount)
                 } label: {
                     Label("Add Sample Data (Test)", systemImage: "chart.bar.doc.horizontal.fill")
                 }
             }
+            Button(role: .destructive) {
+                accountViewModel.removeSampleDataForTesting()
+            } label: {
+                Label("Remove Sample Data", systemImage: "trash")
+            }
+            #endif
         } label: {
             Image(systemName: "ellipsis.circle")
                 .font(.title2)
@@ -314,49 +376,78 @@ struct BalanceView: View {
     }
     
     private var balanceSnapshotCard: some View {
-        Button {
-            showingReports = true
-        } label: {
-            ChipCard {
-                HStack(spacing: 20) {
-                    // Left side: Total Balance
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Total Balance")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Text(totalBalance, format: .currency(code: "USD"))
-                            .font(.system(size: 36, weight: .bold, design: .rounded))
-                            .foregroundColor(.primary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.5)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    
-                    // Divider
-                    Rectangle()
-                        .fill(Color.secondary.opacity(0.2))
-                        .frame(width: 1)
-                    
-                    // Right side: Activity
+        ChipCard {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
+                        Text("Current Balance")
+                            .font(.headline.weight(.semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+
+                        Button {
+                            HapticManager.shared.buttonTapped()
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                hideBalances.toggle()
+                            }
+                        } label: {
+                            Group {
+                                if hideBalances {
+                                    Text(BalancePrivacy.placeholder)
+                                } else {
+                                    Text(totalBalance, format: .currency(code: "USD"))
+                                }
+                            }
+                            .font(.system(.title3, design: .rounded, weight: .bold))
+                            .monospacedDigit()
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                            .contentTransition(.opacity)
+                            .privacySensitive()
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(
+                            hideBalances
+                                ? "Current balance hidden"
+                                : "Current balance \(totalBalance.formatted(.currency(code: "USD")))"
+                        )
+                        .accessibilityHint("Shows or hides balances on this screen")
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Button {
+                        showingReports = true
+                    } label: {
+                        Image(systemName: "chart.bar")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Reports")
+                }
+
+                Divider()
+                    .overlay(Color.primary.opacity(0.08))
+
+                Button {
+                    showingReports = true
+                } label: {
+                    VStack(alignment: .leading, spacing: 10) {
                         Text("\(activityPeriodTitle) Activity")
-                            .font(.headline)
-                            .fontWeight(.bold)
-                            .foregroundColor(.primary)
-                        Text("-\(activitySpending, format: .currency(code: "USD")) Spending")
-                            .font(.subheadline)
-                            .fontWeight(.regular)
-                            .foregroundColor(.primary)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+
                         activityChart
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(activityAccessibilityLabel)
             }
-            .frame(height: 120)
         }
-        .buttonStyle(.plain)
         .onAppear {
-            // Trigger chart animation
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 activityChartAppeared = true
             }
@@ -368,7 +459,6 @@ struct BalanceView: View {
             period: activityPeriod,
             appeared: activityChartAppeared
         )
-        .frame(height: 40)
     }
     
     // MARK: - Accounts Section
@@ -376,7 +466,7 @@ struct BalanceView: View {
     private var accountsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Accounts")
-                .font(.headline)
+                .font(.title3.weight(.semibold))
                 .padding(.horizontal, 4)
             
             if visibleAccounts.isEmpty {
@@ -438,17 +528,14 @@ struct BalanceView: View {
     }
     
     private var visibleAccounts: [Account] {
-        let allAccounts = accountViewModel.accounts
-        
-        // Always filter and sort, regardless of showInactiveAccounts
-        // showInactiveAccounts just determines if we show hidden accounts too
-        let filtered = showInactiveAccounts ? allAccounts : allAccounts.filter { !$0.isHiddenFlag }
+        let filtered = showInactiveAccounts
+            ? accountViewModel.accounts
+            : accountViewModel.accounts.filter { !$0.isHiddenFlag }
         
         return filtered.sorted { account1, account2 in
             if account1.order != account2.order {
                 return account1.order < account2.order
             }
-            // If order is the same, sort by creation date
             if let date1 = account1.createdAt, let date2 = account2.createdAt {
                 return date1 < date2
             }
@@ -459,20 +546,33 @@ struct BalanceView: View {
     // MARK: - Recent Transactions Section
     
     private var recentTransactionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Recent Transactions")
-                .font(.headline)
-                .padding(.horizontal, 4)
-            
-            VStack(spacing: 8) {
-                ForEach(recentTransactions.prefix(5), id: \.objectID) { entry in
-                    TransactionChipCard(entry: entry)
+        let transactions = recentTransactions.prefix(5)
+        return Group {
+            if !transactions.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Recent")
+                        .font(.title3.weight(.semibold))
+                        .padding(.horizontal, 4)
+                    
+                    VStack(spacing: 8) {
+                        ForEach(Array(transactions), id: \.objectID) { entry in
+                            TransactionChipCard(entry: entry)
+                        }
+                    }
                 }
             }
         }
     }
     
     // MARK: - Computed Properties
+    
+    private var hasInactiveAccounts: Bool {
+        accountViewModel.accounts.contains { $0.isHiddenFlag }
+    }
+    
+    private var activityAccessibilityLabel: String {
+        "\(activityPeriodTitle) activity. Opens reports."
+    }
     
     private var totalBalance: Decimal {
         accountViewModel.totalClearedBalance(bitcoinPriceService: bitcoinPriceService)
@@ -486,50 +586,108 @@ struct BalanceView: View {
         activityPeriod.rawValue
     }
     
-    private var activitySpending: Decimal {
-        let calendar = Calendar.current
-        let now = Date()
-        let entries = accountViewModel.recentTransactions(limit: 1000, daysBack: nil)
-        
-        let (start, end): (Date?, Date?) = {
-            switch activityPeriod {
-            case .week:
-                let weekStart = startOfWeek(for: now, calendar: calendar)
-                let weekEnd = calendar.date(byAdding: .day, value: 7, to: weekStart)
-                return (weekStart, weekEnd)
-            case .month:
-                let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now))
-                let monthEnd = monthStart.map { calendar.date(byAdding: .month, value: 1, to: $0) }
-                return (monthStart, monthEnd ?? nil)
-            case .year:
-                let yearStart = calendar.date(from: DateComponents(year: calendar.component(.year, from: now), month: 1, day: 1))
-                let yearEnd = yearStart.map { calendar.date(byAdding: .year, value: 1, to: $0) }
-                return (yearStart, yearEnd ?? nil)
-            }
-        }()
-        
-        guard let start = start, let end = end else { return 0 }
-        
-        return entries
-            .filter { entry in
-                guard let date = entry.date else { return false }
-                return date >= start && date < end
-            }
-            .reduce(Decimal.zero) { partial, entry in
-                guard let account = entry.account, !account.isHiddenFlag else { return partial }
-                let amount = entry.signedAmount
-                // Only count expenses (negative amounts)
-                return amount < 0 ? partial + abs(amount) : partial
-            }
-    }
-    
-    private func startOfWeek(for date: Date, calendar: Calendar) -> Date {
-        guard let interval = calendar.dateInterval(of: .weekOfYear, for: date) else { return date }
-        return interval.start
-    }
-    
     private var recentTransactions: [LedgerEntry] {
-        accountViewModel.recentTransactions(limit: 5, daysBack: 30)
+        accountViewModel.recentTransactions(limit: 20, daysBack: 30)
+            .filter { entry in
+                guard let account = entry.account else { return false }
+                return showInactiveAccounts || !account.isHiddenFlag
+            }
+    }
+
+    private var statementImportSuccessMessage: Text {
+        guard let result = statementImportResult else {
+            return Text("Import complete.")
+        }
+        var parts: [String] = []
+        parts.append("Imported \(result.importedCount) transaction\(result.importedCount == 1 ? "" : "s")")
+        if result.skippedCount > 0 {
+            parts[0] += " and skipped \(result.skippedCount) duplicate\(result.skippedCount == 1 ? "" : "s")"
+        }
+        parts[0] += "."
+        if result.matchedCount > 0 {
+            parts.append("Marked \(result.matchedCount) matching bill\(result.matchedCount == 1 ? "" : "s") paid.")
+        }
+        if result.keptBalance && result.importedCount > 0 {
+            parts.append("Current balance is unchanged.")
+        }
+        return Text(parts.joined(separator: " "))
+    }
+
+    private func exportAccounts() {
+        do {
+            let url = try AccountExportService.writeExportFile(accounts: accountViewModel.accounts)
+            exportShareItem = ExportFileItem(url: url)
+        } catch {
+            exportErrorMessage = error.localizedDescription
+            showExportErrorAlert = true
+        }
+    }
+
+    private func isAccountBackup(_ data: Data) -> Bool {
+        guard let text = CSVSupport.string(from: data) else { return false }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("{") { return true }
+        let header = trimmed.split(whereSeparator: \.isNewline).first.map(String.init)?.lowercased() ?? ""
+        return header.contains("starting balance")
+    }
+
+    private func handleAccountImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            let fileName = url.lastPathComponent
+            isImportParsing = true
+            Task {
+                do {
+                    guard url.startAccessingSecurityScopedResource() else {
+                        throw AccountExportError.decodeFailed
+                    }
+                    defer { url.stopAccessingSecurityScopedResource() }
+                    let data = try Data(contentsOf: url)
+                    if isAccountBackup(data) {
+                        let count = try accountViewModel.importAccounts(from: data)
+                        await MainActor.run {
+                            isImportParsing = false
+                            importedAccountCount = count
+                            showImportSuccessAlert = true
+                        }
+                    } else {
+                        let txs = try TransactionCSVParser.parse(data: data)
+                        await MainActor.run {
+                            isImportParsing = false
+                            statementImportFileName = fileName
+                            statementImportTransactions = txs
+                        }
+                        try await Task.sleep(nanoseconds: 350_000_000)
+                        await MainActor.run {
+                            showingStatementImportSheet = true
+                        }
+                    }
+                } catch {
+                    await MainActor.run {
+                        isImportParsing = false
+                        importErrorMessage = error.localizedDescription
+                        showImportErrorAlert = true
+                    }
+                }
+            }
+        case .failure(let error):
+            importErrorMessage = error.localizedDescription
+            showImportErrorAlert = true
+        }
+    }
+
+    private func handleStatementImport(account: Account, transactions: [ParsedStatementTransaction], keepCurrentBalance: Bool) {
+        let result = StatementImportRunner.importTransactions(
+            account: account,
+            transactions: transactions,
+            keepCurrentBalance: keepCurrentBalance,
+            accountViewModel: accountViewModel,
+            billViewModel: billViewModel
+        )
+        reportsViewModel.refresh()
+        statementImportResult = result
+        showStatementImportSuccessAlert = true
     }
 }
 
@@ -537,6 +695,8 @@ struct BalanceView: View {
 
 private struct ChipCard<Content: View>: View {
     @Environment(\.colorScheme) private var colorScheme
+    var verticalPadding: CGFloat = 20
+    var horizontalPadding: CGFloat = 18
     @ViewBuilder let content: Content
     
     var body: some View {
@@ -549,8 +709,8 @@ private struct ChipCard<Content: View>: View {
             : Color.black.opacity(0.06)
         
         content
-            .padding(.vertical, 20)
-            .padding(.horizontal, 18)
+            .padding(.vertical, verticalPadding)
+            .padding(.horizontal, horizontalPadding)
             .background(
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .fill(backgroundColor)
@@ -567,22 +727,32 @@ private struct ChipCard<Content: View>: View {
 private struct AccountChipCard: View {
     @EnvironmentObject private var accountViewModel: AccountViewModel
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
+    @AppStorage("hideBalances") private var hideBalances = false
     let account: Account
     let onTap: () -> Void
     
     var body: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(formatAccountBalanceUSD(accountViewModel.totalBalance(for: account), account: account))
+                Text(displayedBalance)
                     .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .monospacedDigit()
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                Text(account.name ?? "Account")
-                    .font(.caption)
-                    .foregroundColor(.white.opacity(0.9))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .privacySensitive()
+                HStack(spacing: 4) {
+                    Text(account.name ?? "Account")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.9))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    if account.isHiddenFlag {
+                        Image(systemName: "eye.slash")
+                            .font(.caption2)
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .padding(16)
@@ -594,6 +764,23 @@ private struct AccountChipCard: View {
         }
         .buttonStyle(.plain)
         .frame(height: 100)
+        .opacity(account.isHiddenFlag ? 0.7 : 1)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityBalanceLabel)
+    }
+    
+    private var displayedBalance: String {
+        hideBalances
+            ? BalancePrivacy.placeholder
+            : formatAccountBalanceUSD(accountViewModel.clearedBalance(for: account), account: account)
+    }
+    
+    private var accessibilityBalanceLabel: String {
+        let name = account.name ?? "Account"
+        if hideBalances {
+            return "\(name), balance hidden"
+        }
+        return "\(name), \(formatAccountBalanceUSD(accountViewModel.clearedBalance(for: account), account: account))"
     }
     
     private var accountGradient: LinearGradient {
@@ -639,6 +826,7 @@ private struct AccountChipCard: View {
 // MARK: - Transaction Chip Card
 
 private struct TransactionChipCard: View {
+    @AppStorage("hideBalances") private var hideBalances = false
     let entry: LedgerEntry
     
     var body: some View {
@@ -698,28 +886,26 @@ private struct TransactionChipCard: View {
                     }
                 }()
                 
-                if usdAmount != .zero {
+                if hideBalances {
+                    Text(BalancePrivacy.shortPlaceholder)
+                        .font(.body)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.secondary)
+                        .privacySensitive()
+                } else if usdAmount != .zero {
                     let signedAmount = entry.isCredit ? usdAmount : -usdAmount
                     let formattedAmount = abs(signedAmount).formatted(.currency(code: "USD"))
                     Text((entry.isCredit ? "+" : "-") + formattedAmount)
                         .font(.body)
                         .fontWeight(.semibold)
                         .foregroundColor(entry.isCredit ? .green : .red)
+                        .privacySensitive()
                 }
             }
         }
     }
     
     private func formatDate(_ date: Date) -> String {
-        let calendar = Calendar.current
-        if calendar.isDateInToday(date) {
-            return "Today"
-        } else if calendar.isDateInYesterday(date) {
-            return "Yesterday"
-        } else {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "MMM d, yyyy"
-            return formatter.string(from: date)
-        }
+        RelativeDateFormatter.string(from: date)
     }
 }

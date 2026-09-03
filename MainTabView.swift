@@ -8,9 +8,6 @@
 import SwiftUI
 
 struct MainTabView: View {
-    @EnvironmentObject private var categoryManager: CategoryManager
-    @EnvironmentObject private var accountViewModel: AccountViewModel
-    
     @State private var selectedTab: Int = 0
     @State private var selectedMonth: Date? = Date()
     @State private var isLandscape: Bool = false
@@ -26,9 +23,6 @@ struct MainTabView: View {
             }
             .onAppear {
                 updateLandscape(geometry.size)
-                // Cleanup unused categories on app launch
-                let usage = accountViewModel.categoryUsage()
-                categoryManager.cleanupUnusedCategories(usage: usage)
             }
             .onChange(of: geometry.size) { _, newSize in
                 updateLandscape(newSize)

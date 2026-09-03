@@ -1,23 +1,33 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="22522" systemVersion="23F79" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="22522" systemVersion="23F79" minimumToolsVersion="Automatic" sourceLanguage="Swift" usedWithCloudKit="YES" userDefinedModelVersionIdentifier="">
     <entity name="Bill" representedClassName="Bill" syncable="YES" codeGenerationType="class">
         <attribute name="amount" optional="YES" attributeType="Decimal" defaultValueString="0.0" usesScalarValueType="NO"/>
         <attribute name="autoPay" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
         <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
-        <attribute name="dueDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="dueDate" optional="YES" indexed="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
-        <attribute name="isPaid" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="isPaid" optional="YES" indexed="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
         <attribute name="name" optional="YES" attributeType="String"/>
         <attribute name="notes" optional="YES" attributeType="String"/>
         <attribute name="paymentCard" optional="YES" attributeType="String"/>
         <attribute name="paidDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="recurrenceInterval" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
         <attribute name="recurrenceType" optional="YES" attributeType="String" defaultValueString="none"/>
-        <attribute name="seriesId" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="seriesId" optional="YES" indexed="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="updatedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="category" optional="YES" attributeType="String"/>
+        <attribute name="trackInBitcoin" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
         <relationship name="account" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Account" inverseName="bills" inverseEntity="Account"/>
         <relationship name="ledgerEntries" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="LedgerEntry" inverseName="bill" inverseEntity="LedgerEntry"/>
+        <fetchIndex name="byDueDate">
+            <fetchIndexElement property="dueDate" type="binary" order="ascending"/>
+        </fetchIndex>
+        <fetchIndex name="bySeriesId">
+            <fetchIndexElement property="seriesId" type="binary" order="ascending"/>
+        </fetchIndex>
+        <fetchIndex name="byIsPaid">
+            <fetchIndexElement property="isPaid" type="binary" order="ascending"/>
+        </fetchIndex>
     </entity>
     <entity name="Account" representedClassName="Account" syncable="YES" codeGenerationType="class">
         <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
@@ -37,12 +47,12 @@
         <attribute name="startingBalanceBTCPrice" optional="YES" attributeType="Decimal" defaultValueString="0.0" usesScalarValueType="NO"/>
         <relationship name="bills" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Bill" inverseName="account" inverseEntity="Bill"/>
         <relationship name="paychecks" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Paycheck" inverseName="account" inverseEntity="Paycheck"/>
-        <relationship name="ledgerEntries" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="LedgerEntry" inverseName="account" inverseEntity="LedgerEntry"/>
+        <relationship name="ledgerEntries" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="LedgerEntry" inverseName="account" inverseEntity="LedgerEntry"/>
     </entity>
     <entity name="LedgerEntry" representedClassName="LedgerEntry" syncable="YES" codeGenerationType="class">
         <attribute name="amount" optional="YES" attributeType="Decimal" defaultValueString="0.0" usesScalarValueType="NO"/>
         <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
-        <attribute name="date" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="date" optional="YES" indexed="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="entryType" optional="YES" attributeType="String" defaultValueString="debit"/>
         <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="isCredit" optional="YES" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
@@ -56,6 +66,9 @@
         <attribute name="feeAmount" optional="YES" attributeType="Decimal" defaultValueString="0.0" usesScalarValueType="NO"/>
         <relationship name="account" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Account" inverseName="ledgerEntries" inverseEntity="Account"/>
         <relationship name="bill" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Bill" inverseName="ledgerEntries" inverseEntity="Bill"/>
+        <fetchIndex name="byDate">
+            <fetchIndexElement property="date" type="binary" order="ascending"/>
+        </fetchIndex>
     </entity>
     <entity name="Paycheck" representedClassName="Paycheck" syncable="YES" codeGenerationType="class">
         <attribute name="amount" optional="YES" attributeType="Decimal" defaultValueString="0.0" usesScalarValueType="NO"/>

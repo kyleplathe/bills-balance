@@ -10,8 +10,6 @@ import CoreData
 
 struct AccountDetailView: View {
     @EnvironmentObject private var accountViewModel: AccountViewModel
-    @EnvironmentObject private var billViewModel: BillViewModel
-    @EnvironmentObject private var paycheckViewModel: PaycheckViewModel
     @EnvironmentObject private var categoryManager: CategoryManager
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     
@@ -34,6 +32,7 @@ struct AccountDetailView: View {
     var body: some View {
         accountList
             .listStyle(.insetGrouped)
+            .navigationTitle(account.name ?? "Account")
             .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
@@ -177,6 +176,13 @@ struct AccountDetailView: View {
                 }
             }
         }
+        .onChange(of: showingTransfer) { _, newValue in
+            if !newValue {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    loadTransactions()
+                }
+            }
+        }
         .onChange(of: account.objectID) { _, _ in
             // Refresh when account changes
             loadTransactions()
@@ -189,15 +195,16 @@ struct AccountDetailView: View {
             // Refresh view when currency display changes
         }
         .onShake {
-            // Debounce: prevent rapid shakes (at least 0.5 seconds apart)
             let now = Date()
             guard now.timeIntervalSince(lastShakeTime) > 0.5 else { return }
             lastShakeTime = now
-            
-            // Toggle bitcoin display mode (only for BTC accounts)
+
             if account.currencyCode == "BTC" {
                 withAnimation {
                     bitcoinPriceService.showInBitcoin.toggle()
+                }
+                if bitcoinPriceService.showInBitcoin {
+                    bitcoinPriceService.fetchBitcoinPrice()
                 }
             }
         }
@@ -207,15 +214,31 @@ struct AccountDetailView: View {
     
     private var accountList: some View {
         List {
-            // Balance badge dropdown section
             Section {
-                balanceBadgeDropdown
-                    .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16))
+                balanceHero
+                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 8, trailing: 16))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
             }
             
-            // Transactions section
+            Section {
+                LabeledContent("Pending") {
+                    Text(formattedPendingBalance)
+                        .fontWeight(.semibold)
+                        .monospacedDigit()
+                        .foregroundStyle(pendingForeground)
+                }
+                .accessibilityLabel("Pending \(formattedPendingBalance)")
+                
+                LabeledContent("Available") {
+                    Text(formattedAvailableBalance)
+                        .fontWeight(.semibold)
+                        .monospacedDigit()
+                        .foregroundStyle(.primary)
+                }
+                .accessibilityLabel("Available \(formattedAvailableBalance)")
+            }
+            
             transactionsSection
         }
     }
@@ -260,93 +283,70 @@ struct AccountDetailView: View {
         }
     }
     
-    // MARK: - Balance Badge Dropdown
+    // MARK: - Balance Hero
     
-    private var balanceBadgeDropdown: some View {
-        VStack(spacing: 16) {
-            // Large cleared balance at the top
-            VStack(spacing: 4) {
-                if account.currencyCode == "BTC" {
-                    Button {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            showingCurrencyToggle.toggle()
-                        }
-                    } label: {
-                        ZStack {
-                            if !showingCurrencyToggle {
-                                Text(formattedClearedBalance)
-                                    .font(.system(size: dynamicClearedBalanceFontSize, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.5)
-                                    .transition(.asymmetric(
-                                        insertion: .move(edge: .trailing).combined(with: .opacity),
-                                        removal: .move(edge: .leading).combined(with: .opacity)
-                                    ))
-                            }
-                            
-                            if showingCurrencyToggle {
-                                Text(formattedClearedBalance)
-                                    .font(.system(size: dynamicClearedBalanceFontSize, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.5)
-                                    .transition(.asymmetric(
-                                        insertion: .move(edge: .trailing).combined(with: .opacity),
-                                        removal: .move(edge: .leading).combined(with: .opacity)
-                                    ))
-                            }
-                        }
-                        .id(showingCurrencyToggle ? "btc" : "usd")
-                        .frame(height: dynamicClearedBalanceFontSize + 10)
+    private var balanceHero: some View {
+        VStack(spacing: 6) {
+            if account.currencyCode == "BTC" {
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        showingCurrencyToggle.toggle()
                     }
-                    .buttonStyle(.plain)
-                    
-                    Text(showingCurrencyToggle ? "≈ \(formattedClearedBalanceUSD)" : "≈ \(formattedClearedBalanceBTC)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text(formattedClearedBalance)
-                        .font(.system(size: dynamicClearedBalanceFontSize, weight: .bold, design: .rounded))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .frame(height: dynamicClearedBalanceFontSize + 10)
-                }
-            }
-            
-            // Button below: Account Name + "Balance" + Arrow
-            Menu {
-                Button {
-                    // Shows Available balance
                 } label: {
-                    Text("Available: \(formattedAvailableBalance)")
+                    ZStack {
+                        if !showingCurrencyToggle {
+                            Text(formattedClearedBalance)
+                                .font(.system(size: dynamicClearedBalanceFontSize, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.5)
+                                .transition(.asymmetric(
+                                    insertion: .move(edge: .trailing).combined(with: .opacity),
+                                    removal: .move(edge: .leading).combined(with: .opacity)
+                                ))
+                        }
+                        
+                        if showingCurrencyToggle {
+                            Text(formattedClearedBalance)
+                                .font(.system(size: dynamicClearedBalanceFontSize, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.5)
+                                .transition(.asymmetric(
+                                    insertion: .move(edge: .trailing).combined(with: .opacity),
+                                    removal: .move(edge: .leading).combined(with: .opacity)
+                                ))
+                        }
+                    }
+                    .id(showingCurrencyToggle ? "btc" : "usd")
+                    .frame(height: dynamicClearedBalanceFontSize + 8)
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Cleared balance \(formattedClearedBalance). Double tap to switch currency.")
                 
-                Button {
-                    // Shows Pending balance
-                } label: {
-                    Text("Pending: \(formattedPendingBalance)")
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Text("\(account.name ?? "Account") Balance")
-                        .font(.headline)
-                    
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption2)
-                }
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background {
-                    Capsule()
-                        .fill(.ultraThinMaterial)
-                        .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
-                }
+                Text(showingCurrencyToggle ? "≈ \(formattedClearedBalanceUSD)" : "≈ \(formattedClearedBalanceBTC)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            } else {
+                Text(formattedClearedBalance)
+                    .font(.system(size: dynamicClearedBalanceFontSize, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    .frame(height: dynamicClearedBalanceFontSize + 8)
+                    .accessibilityLabel("Cleared balance \(formattedClearedBalance)")
             }
-            .frame(maxWidth: .infinity)
+
+            Text("Cleared")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity)
+        .multilineTextAlignment(.center)
     }
     
     // MARK: - Cleared Balance Formatters
@@ -380,7 +380,7 @@ struct AccountDetailView: View {
     private var dynamicClearedBalanceFontSize: CGFloat {
         let balanceString = formattedClearedBalance
         let characterCount = balanceString.count
-        let baseSize: CGFloat = 72
+        let baseSize: CGFloat = 48
         if characterCount <= 8 {
             return baseSize
         } else if characterCount <= 12 {
@@ -583,31 +583,13 @@ struct AccountDetailView: View {
     }
     
     private var availableBalance: Decimal {
-        // Available balance = Cleared Balance (traditional checkbook balancing)
-        // Available = Starting Balance + only reconciled (checked) transactions
-        // This is mathematically equivalent to: Total Balance - Pending Balance
-        // But using clearedBalance is more direct and matches checkbook logic
-        let cleared = accountViewModel.clearedBalance(for: account)
-        
-        // Debug logging for BTC accounts
-        if account.currencyCode == "BTC" {
-            let total = totalBalance
-            let pending = pendingBalance
-            print("🔍 Available Balance Calculation (BTC Account: \(account.name ?? "Unknown")):")
-            print("   Starting Balance: \(account.startingBalanceDecimal) BTC")
-            print("   Total Balance: \(total) BTC")
-            print("   Pending Balance: \(pending) BTC")
-            print("   Cleared Balance (Available): \(cleared) BTC")
-            print("   Verification (Total - Pending): \(total - pending) BTC")
-            if showingCurrencyToggle {
-                print("   Display Format: \(account.btcDisplayFormat ?? "sats")")
-            } else {
-                let usd = bitcoinPriceService.convertBTCToUSD(cleared)
-                print("   Available in USD: \(usd)")
-            }
-        }
-        
-        return cleared
+        totalBalance
+    }
+    
+    private var pendingForeground: Color {
+        if pendingBalance > 0 { return .green }
+        if pendingBalance < 0 { return .orange }
+        return .secondary
     }
     
     private var pendingBalance: Decimal {
@@ -663,7 +645,7 @@ struct AccountDetailView: View {
             return formatUSDBalance(balance)
         }
     }
-    
+
     private var formattedPendingBalance: String {
         let pending = pendingBalance
         
@@ -828,19 +810,8 @@ struct AccountDetailView: View {
     }
     
     private func loadTransactions() {
-        // Try multiple approaches to fetch transactions
-        var entries: [LedgerEntry] = []
-        
-        // First, try using the account's relationship directly
-        if let accountEntries = account.ledgerEntries as? Set<LedgerEntry> {
-            entries = Array(accountEntries)
-        }
-        
-        // If relationship is empty or not loaded, use ViewModel method
-        if entries.isEmpty {
-            entries = accountViewModel.ledgerEntries(for: account)
-        }
-        
+        account.managedObjectContext?.refresh(account, mergeChanges: true)
+        let entries = accountViewModel.ledgerEntries(for: account)
         accountTransactions = entries
             .sorted { entry1, entry2 in
                 // Sort by date descending (most recent first)
@@ -1082,261 +1053,9 @@ private struct TransactionReconcileDrawer: View {
     }
 }
 
-// MARK: - Transaction Row
-
-private struct TransactionRow: View {
-    @EnvironmentObject private var accountViewModel: AccountViewModel
-    @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
-    let entry: LedgerEntry
-    let account: Account
-    let onReconcile: (LedgerEntry) -> Void
-    let onTap: () -> Void
-    
-    private var transactionAmount: Decimal {
-        if account.currencyCode == "BTC" {
-            // For BTC accounts, use BTC amount for BTC display, USD amount for USD display
-            if bitcoinPriceService.showInBitcoin {
-                return entry.amountInCurrency(for: account)
-            } else {
-                // Show USD amount directly (stored USD value with correct sign)
-                let usd = entry.usdAmountDecimal
-                return entry.isCredit ? usd : -usd
-            }
-        } else {
-            return entry.amountDecimal
-        }
-    }
-    
-    private var runningBalance: Decimal {
-        // Calculate running balance up to and including this transaction
-        // Traditional checkbook: running balance = starting balance + all transactions up to this point
-        // This shows the balance after each transaction in chronological order
-        let entries = accountViewModel.ledgerEntries(for: account)
-        let sortedEntries = entries
-            .sorted { entry1, entry2 in
-                guard let date1 = entry1.date, let date2 = entry2.date else { return false }
-                if date1 != date2 {
-                    return date1 < date2
-                }
-                guard let created1 = entry1.createdAt, let created2 = entry2.createdAt else { return false }
-                return created1 < created2
-            }
-        
-        var balance = account.startingBalanceDecimal
-        for e in sortedEntries {
-            // Add this transaction's amount
-            if account.currencyCode == "BTC" {
-                balance += e.signedAmountInCurrency(for: account)
-            } else {
-                balance += e.signedAmount
-            }
-            
-            // If we've reached the current transaction, return the balance
-            if e.objectID == entry.objectID {
-                break
-            }
-        }
-        return balance
-    }
-    
-    private var formattedAmount: String {
-        let amount = abs(transactionAmount)
-        if account.currencyCode == "BTC" {
-            if bitcoinPriceService.showInBitcoin {
-                return formatBTCAmount(amount)
-            } else {
-                // Show USD amount directly
-                return formatUSDAmount(amount)
-            }
-        } else {
-            return formatUSDAmount(amount)
-        }
-    }
-    
-    private var formattedRunningBalance: String {
-        let balance = runningBalance
-        if account.currencyCode == "BTC" {
-            if bitcoinPriceService.showInBitcoin {
-                return formatBTCAmount(balance)
-            } else {
-                // Convert running balance to USD using current BTC price
-                let usd = bitcoinPriceService.convertBTCToUSD(balance)
-                return formatUSDAmount(usd)
-            }
-        } else {
-            return formatUSDAmount(balance)
-        }
-    }
-    
-    private func formatUSDAmount(_ amount: Decimal) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = "USD"
-        formatter.currencySymbol = "$"
-        formatter.maximumFractionDigits = 2
-        formatter.minimumFractionDigits = 2
-        return formatter.string(from: amount as NSDecimalNumber) ?? "$\(amount)"
-    }
-    
-    private func formatBTCAmount(_ amount: Decimal) -> String {
-        let displayFormat = account.btcDisplayFormat ?? "sats"
-        if displayFormat == "sats" {
-            let sats = amount * 100_000_000
-            let satsDouble = (sats as NSDecimalNumber).doubleValue
-            let formatter = NumberFormatter()
-            formatter.numberStyle = .decimal
-            formatter.groupingSeparator = ","
-            formatter.usesGroupingSeparator = true
-            formatter.maximumFractionDigits = 0
-            let formattedSats = formatter.string(from: NSNumber(value: satsDouble)) ?? String(format: "%.0f", satsDouble)
-            return "₿ \(formattedSats) sats"
-        } else {
-            let btcDouble = (amount as NSDecimalNumber).doubleValue
-            let formatter = NumberFormatter()
-            formatter.numberStyle = .decimal
-            formatter.groupingSeparator = ","
-            formatter.usesGroupingSeparator = true
-            formatter.minimumFractionDigits = 2
-            formatter.maximumFractionDigits = 8
-            let formattedBTC = formatter.string(from: NSNumber(value: btcDouble)) ?? String(format: "%.8f", btcDouble)
-            return "₿ \(formattedBTC)"
-        }
-    }
-    
-    private func formatTransactionDate(_ date: Date) -> String {
-        let calendar = Calendar.current
-        let formatter = DateFormatter()
-        
-        if calendar.isDateInToday(date) {
-            return "Today"
-        } else if calendar.isDateInYesterday(date) {
-            return "Yesterday"
-        } else {
-            formatter.dateFormat = "MMM d"
-            return formatter.string(from: date)
-        }
-    }
-    
-    var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            // Transaction status icon - green circle with white checkmark for cleared
-            // Tappable to toggle reconciled status
-            Button {
-                // When checking off (reconciling) a transaction:
-                // If it's a BTC account and missing sats, open reconcile drawer
-                // Otherwise, toggle reconciled status directly
-                if account.currencyCode == "BTC" && !entry.isReconciledFlag && entry.btcAmountDecimal == 0 {
-                    // About to reconcile but missing sats - show reconciliation drawer
-                    onReconcile(entry)
-                } else {
-                    // Has sats, not BTC account, or unreconciling - toggle directly
-                    accountViewModel.toggleReconciled(for: entry)
-                }
-            } label: {
-                if entry.isReconciledFlag {
-                    ZStack {
-                        Circle()
-                            .fill(Color.green)
-                            .frame(width: 24, height: 24)
-                        
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                    }
-                } else {
-                    Circle()
-                        .stroke(Color.gray.opacity(0.3), lineWidth: 2)
-                        .frame(width: 24, height: 24)
-                }
-            }
-            .buttonStyle(.plain)
-            
-            VStack(alignment: .leading, spacing: 4) {
-                // Transaction title
-                Text(entry.title ?? "Transaction")
-                    .font(.body)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.primary)
-                
-                // Date
-                if let date = entry.date {
-                    Text(formatTransactionDate(date))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                // Account/Category line
-                HStack(spacing: 4) {
-                    if let accountName = account.name {
-                        Text(accountName)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    if let category = entry.category, !category.isEmpty {
-                        Text("•")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Text(category)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-            
-            Spacer()
-            
-            VStack(alignment: .trailing, spacing: 4) {
-                // Transaction amount with +/- prefix
-                Text((entry.isCredit ? "+ " : "- ") + formattedAmount)
-                    .font(.body)
-                    .fontWeight(.semibold)
-                    .foregroundColor(entry.isCredit ? .green : .red)
-                
-                // Running balance after this transaction
-                Text(formattedRunningBalance)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            .id("\(entry.objectID)-\(bitcoinPriceService.showInBitcoin)")
-        }
-        .padding(.vertical, 12)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            onTap()
-        }
-        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-            // Swipe right to toggle reconciled status
-            Button {
-                accountViewModel.toggleReconciled(for: entry)
-            } label: {
-                Label(entry.isReconciledFlag ? "Unreconcile" : "Reconcile", 
-                      systemImage: entry.isReconciledFlag ? "circle" : "checkmark.circle.fill")
-            }
-            .tint(entry.isReconciledFlag ? .orange : .green)
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            // Swipe left to delete
-            Button(role: .destructive) {
-                accountViewModel.deleteLedgerEntry(entry)
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
-            
-            // Swipe left to edit
-            Button {
-                onTap()
-            } label: {
-                Label("Edit", systemImage: "pencil")
-            }
-            .tint(.blue)
-        }
-    }
-}
-
 // MARK: - Transaction Editor Sheet
 
-private struct TransactionEditorSheet: View {
+struct TransactionEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var accountViewModel: AccountViewModel
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
@@ -1354,6 +1073,8 @@ private struct TransactionEditorSheet: View {
     @State private var isCleared: Bool
     @State private var notes: String
     @State private var category: String
+    @State private var showBulkCategoryAlert = false
+    @State private var bulkCategoryCount = 0
     
     init(entry: LedgerEntry) {
         self.entry = entry
@@ -1452,7 +1173,10 @@ private struct TransactionEditorSheet: View {
                             .onChange(of: title) { _, newValue in
                                 // Auto-categorize based on transaction name
                                 if category.isEmpty {
-                                    let suggested = CategorySuggester.suggest(for: newValue)
+                                    let suggested = CategorySuggester.suggest(
+                                        for: newValue,
+                                        priorCategory: accountViewModel.suggestedCategory(forTitle: newValue, account: entry.account)
+                                    )
                                     if !suggested.isEmpty {
                                         category = suggested
                                     }
@@ -1612,6 +1336,20 @@ private struct TransactionEditorSheet: View {
                 }
             }
             .interactiveDismissDisabled()
+            .alert(
+                "Apply to All?",
+                isPresented: $showBulkCategoryAlert
+            ) {
+                Button("Just This One") {
+                    finishSave()
+                }
+                Button("Apply to All (\(bulkCategoryCount))") {
+                    accountViewModel.bulkSetCategory(category, forTitle: title)
+                    finishSave()
+                }
+            } message: {
+                Text("Set \(bulkCategoryCount) other \"\(title)\" transaction\(bulkCategoryCount == 1 ? "" : "s") to \"\(category)\" too?")
+            }
         }
     }
     
@@ -1692,16 +1430,29 @@ private struct TransactionEditorSheet: View {
             feeAmount: feeAmount
         )
         
-        // Refresh the account to update balances
-        accountViewModel.fetchAccounts()
-        accountViewModel.saveContext()
+        // Check if we should offer to bulk-categorize matching transactions
+        let originalCategory = entry.category ?? ""
+        let newCategory = categoryValue ?? ""
+        let entryTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        // Refresh transactions
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            // Trigger refresh via notification
-            NotificationCenter.default.post(name: NSManagedObjectContext.didSaveObjectsNotification, object: nil)
+        if !newCategory.isEmpty, newCategory != originalCategory, !entryTitle.isEmpty {
+            let matchCount = accountViewModel.countMatchingUncategorizedEntries(title: entryTitle, category: newCategory)
+            if matchCount > 0 {
+                bulkCategoryCount = matchCount
+                showBulkCategoryAlert = true
+                return // Don't dismiss yet — wait for alert response
+            }
         }
         
+        finishSave()
+    }
+    
+    private func finishSave() {
+        accountViewModel.fetchAccounts()
+        accountViewModel.saveContext()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            NotificationCenter.default.post(name: NSManagedObjectContext.didSaveObjectsNotification, object: nil)
+        }
         dismiss()
     }
 }

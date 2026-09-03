@@ -7,21 +7,49 @@
 
 import SwiftUI
 import UIKit
+import ObjectiveC
 
-// MARK: - Shake Detection View Modifier
+enum ShakeDetection {
+    static let notification = Notification.Name("deviceDidShakeNotification")
+
+    private static var lastPostUptime: TimeInterval = 0
+
+    static let install: Void = {
+        let originalSelector = #selector(UIWindow.motionEnded(_:with:))
+        let swizzledSelector = #selector(UIWindow.bb_motionEnded(_:with:))
+        guard
+            let originalMethod = class_getInstanceMethod(UIWindow.self, originalSelector),
+            let swizzledMethod = class_getInstanceMethod(UIWindow.self, swizzledSelector)
+        else { return }
+        method_exchangeImplementations(originalMethod, swizzledMethod)
+    }()
+
+    static func postIfNeeded() {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastPostUptime > 0.25 else { return }
+        lastPostUptime = now
+        NotificationCenter.default.post(name: notification, object: nil)
+    }
+}
+
+extension UIWindow {
+    @objc func bb_motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
+        if motion == .motionShake {
+            ShakeDetection.postIfNeeded()
+        }
+        bb_motionEnded(motion, with: event)
+    }
+}
+
 struct ShakeDetector: ViewModifier {
     let onShake: () -> Void
-    
+
     func body(content: Content) -> some View {
         content
-            .onAppear {
-                NotificationCenter.default.addObserver(
-                    forName: UIDevice.deviceDidShakeNotification,
-                    object: nil,
-                    queue: .main
-                ) { _ in
-                    onShake()
-                }
+            .background(ShakeCatcherView())
+            .onAppear { _ = ShakeDetection.install }
+            .onReceive(NotificationCenter.default.publisher(for: ShakeDetection.notification)) { _ in
+                onShake()
             }
     }
 }
@@ -32,16 +60,33 @@ extension View {
     }
 }
 
-// MARK: - Device Shake Notification
-extension UIDevice {
-    static let deviceDidShakeNotification = Notification.Name("deviceDidShakeNotification")
+private struct ShakeCatcherView: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> ShakeCatcherController {
+        ShakeCatcherController()
+    }
+
+    func updateUIViewController(_ uiViewController: ShakeCatcherController, context: Context) {}
 }
 
-extension UIWindow {
-    open override func motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
+final class ShakeCatcherController: UIViewController {
+    override var canBecomeFirstResponder: Bool { true }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        becomeFirstResponder()
+    }
+
+    override func motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
         if motion == .motionShake {
-            NotificationCenter.default.post(name: UIDevice.deviceDidShakeNotification, object: nil)
+            ShakeDetection.postIfNeeded()
+        } else {
+            super.motionEnded(motion, with: event)
         }
     }
 }
-

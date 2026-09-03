@@ -12,7 +12,8 @@ struct TransferSheet: View {
     @EnvironmentObject private var accountViewModel: AccountViewModel
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     
-    let fromAccount: Account
+    @State private var fromAccount: Account
+    let allowsChangingSource: Bool
     
     @State private var toAccount: Account?
     @State private var amountString: String = ""
@@ -28,27 +29,47 @@ struct TransferSheet: View {
     @FocusState private var isFeeFocused: Bool
     @FocusState private var isSatsFocused: Bool
     
+    init(fromAccount: Account, allowsChangingSource: Bool = false) {
+        _fromAccount = State(initialValue: fromAccount)
+        self.allowsChangingSource = allowsChangingSource
+    }
+    
     private var isBTCTransfer: Bool {
         fromAccount.currencyCode == "BTC" || toAccount?.currencyCode == "BTC"
     }
     
+    private var sourceAccounts: [Account] {
+        accountViewModel.accounts.filter { !$0.isHiddenFlag }
+    }
+    
     private var availableAccounts: [Account] {
-        accountViewModel.accounts.filter { account in
-            account.objectID != fromAccount.objectID && !account.isHiddenFlag
-        }
+        sourceAccounts.filter { $0.objectID != fromAccount.objectID }
+    }
+    
+    private var canSave: Bool {
+        toAccount != nil && !amountString.trimmingCharacters(in: .whitespaces).isEmpty
     }
     
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    // From Account (read-only)
-                    HStack {
-                        Text("From")
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(fromAccount.name ?? "Account")
-                            .foregroundStyle(.primary)
+                    if allowsChangingSource {
+                        Picker("From", selection: $fromAccount) {
+                            ForEach(sourceAccounts, id: \.objectID) { account in
+                                Text(account.name ?? "Account")
+                                    .tag(account)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    } else {
+                        HStack {
+                            Text("From")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(fromAccount.name ?? "Account")
+                                .foregroundStyle(.primary)
+                        }
                     }
                     
                     // To Account Picker
@@ -63,6 +84,11 @@ struct TransferSheet: View {
                     .pickerStyle(.menu)
                     
                     DatePicker("Date", selection: $date, displayedComponents: .date)
+                }
+                .onChange(of: fromAccount.objectID) { _, _ in
+                    if toAccount?.objectID == fromAccount.objectID {
+                        toAccount = nil
+                    }
                 }
                 
                 Section {
@@ -163,6 +189,28 @@ struct TransferSheet: View {
                                 }
                             }
                         }
+                        
+                        HStack {
+                            Text("$")
+                                .foregroundColor(.secondary)
+                            TextField("Fee (Optional)", text: $feeAmountString)
+                                .keyboardType(.decimalPad)
+                                .focused($isFeeFocused)
+                                .onChange(of: isFeeFocused) { oldValue, newValue in
+                                    if !newValue {
+                                        formatFeeOnBlur()
+                                    }
+                                }
+                            if !feeAmountString.isEmpty {
+                                Button {
+                                    feeAmountString = ""
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.secondary)
+                                        .font(.system(size: 16))
+                                }
+                            }
+                        }
                     }
                 } header: {
                     Text("Amount")
@@ -187,9 +235,9 @@ struct TransferSheet: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title2)
-                            .symbolRenderingMode(.hierarchical)
+                        Image(systemName: "xmark")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.primary)
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
@@ -197,6 +245,7 @@ struct TransferSheet: View {
                         saveTransfer()
                     }
                     .fontWeight(.semibold)
+                    .disabled(!canSave)
                 }
             }
             .alert("Validation Error", isPresented: $showValidationAlert) {
@@ -327,73 +376,55 @@ struct TransferSheet: View {
             }
         }()
         
-        // Create transfer title
-        let transferTitle = "Transfer to \(toAccount.name ?? "Account")"
-        
-        // Create debit entry on from account (negative amount = debit)
-        let totalDebitAmount = amount + (feeAmount ?? 0)
-        if fromAccount.currencyCode == "BTC" {
-            accountViewModel.addManualEntry(
-                to: fromAccount,
-                title: transferTitle,
-                btcAmount: satsAmount.map { -$0 }, // Negative for debit
-                usdAmount: -totalDebitAmount, // Negative for debit, include fee
-                btcPriceAtTransaction: btcPrice,
-                date: date,
-                notes: notes.isEmpty ? nil : notes,
-                isReconciled: isCleared,
-                category: "Transfer",
-                feeAmount: feeAmount
-            )
-        } else {
-            accountViewModel.addManualEntry(
-                to: fromAccount,
-                title: transferTitle,
-                btcAmount: nil,
-                usdAmount: -totalDebitAmount, // Negative for debit, include fee
-                btcPriceAtTransaction: nil,
-                date: date,
-                notes: notes.isEmpty ? nil : notes,
-                isReconciled: isCleared,
-                category: "Transfer",
-                feeAmount: feeAmount
-            )
+        guard accountViewModel.transfer(
+            from: fromAccount,
+            to: toAccount,
+            usdAmount: amount,
+            feeAmount: feeAmount,
+            btcAmount: satsAmount,
+            btcPrice: btcPrice,
+            date: date,
+            notes: notes.isEmpty ? nil : notes,
+            isCleared: isCleared
+        ) != nil else {
+            validationMessage = "Couldn't complete this transfer. Check the accounts and amount."
+            showValidationAlert = true
+            return
         }
-        
-        // Create credit entry on to account (positive amount = credit)
-        let toTransferTitle = "Transfer from \(fromAccount.name ?? "Account")"
-        if toAccount.currencyCode == "BTC" {
-            accountViewModel.addManualEntry(
-                to: toAccount,
-                title: toTransferTitle,
-                btcAmount: satsAmount, // Positive for credit
-                usdAmount: amount, // Positive for credit (fee not included on receiving side)
-                btcPriceAtTransaction: btcPrice,
-                date: date,
-                notes: notes.isEmpty ? nil : notes,
-                isReconciled: isCleared,
-                category: "Transfer",
-                feeAmount: nil
-            )
-        } else {
-            accountViewModel.addManualEntry(
-                to: toAccount,
-                title: toTransferTitle,
-                btcAmount: nil,
-                usdAmount: amount, // Positive for credit
-                btcPriceAtTransaction: nil,
-                date: date,
-                notes: notes.isEmpty ? nil : notes,
-                isReconciled: isCleared,
-                category: "Transfer",
-                feeAmount: nil
-            )
-        }
-        
-        accountViewModel.saveContext()
-        accountViewModel.refreshLedgerEntries()
-        accountViewModel.fetchAccounts()
         
         dismiss()
+    }
+}
+
+/// Chooses a source account, then presents `TransferSheet`. Used from the Balance menu.
+struct TransferPickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var accountViewModel: AccountViewModel
+
+    private var sourceAccounts: [Account] {
+        accountViewModel.accounts.filter { !$0.isHiddenFlag }
+    }
+
+    var body: some View {
+        if let fromAccount = sourceAccounts.first {
+            TransferSheet(fromAccount: fromAccount, allowsChangingSource: true)
+        } else {
+            NavigationStack {
+                ContentUnavailableView("No Accounts", systemImage: "building.columns", description: Text("Add at least two accounts to transfer."))
+                    .navigationTitle("Transfer From")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button {
+                                dismiss()
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundStyle(.primary)
+                            }
+                        }
+                    }
+            }
+        }
     }
 }

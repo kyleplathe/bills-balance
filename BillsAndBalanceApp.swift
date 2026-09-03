@@ -1,29 +1,30 @@
 import SwiftUI
 
-@main
-struct BillsAndBalanceApp: App {
-    let persistenceController = PersistenceController.shared
-    @StateObject private var billViewModel: BillViewModel
-    @StateObject private var accountViewModel: AccountViewModel
-    @StateObject private var notificationManager: NotificationManager
-    @StateObject private var paycheckViewModel: PaycheckViewModel
-    @StateObject private var creditCardManager = CreditCardManager()
-    @StateObject private var categoryManager = CategoryManager()
-    @StateObject private var bitcoinPriceService = BitcoinPriceService.shared
-    @StateObject private var onboardingManager = OnboardingManager.shared
-    @StateObject private var reportsViewModel: ReportsViewModel
-    @State private var showSplash = true
+@MainActor
+final class AppBootstrap: ObservableObject {
+    @Published private(set) var isReady = false
 
-    init() {
+    let notificationManager = NotificationManager()
+    let creditCardManager = CreditCardManager()
+    let categoryManager = CategoryManager()
+    let bitcoinPriceService = BitcoinPriceService.shared
+
+    private(set) var billViewModel: BillViewModel!
+    private(set) var accountViewModel: AccountViewModel!
+    private(set) var paycheckViewModel: PaycheckViewModel!
+    private(set) var reportsViewModel: ReportsViewModel!
+
+    func prepareIfNeeded() async {
+        guard !isReady else { return }
+
+        await PersistenceController.waitForStores()
+
         let context = PersistenceController.shared.container.viewContext
-        let notifManager = NotificationManager()
         let accountVM = AccountViewModel(context: context)
         let paycheckVM = PaycheckViewModel(context: context, accountViewModel: accountVM)
-        let creditCardMgr = CreditCardManager()
 
         let billRepository: BillRepository?
         do {
-            // Keep publishable Supabase values outside source code (scheme env vars).
             let supabaseManager = try SupabaseManager()
             billRepository = SupabaseBillRepository(supabaseManager: supabaseManager)
         } catch {
@@ -35,53 +36,65 @@ struct BillsAndBalanceApp: App {
 
         let billVM = BillViewModel(
             context: context,
-            notificationManager: notifManager,
+            notificationManager: notificationManager,
             accountViewModel: accountVM,
             billRepository: billRepository
         )
 
-        _notificationManager = StateObject(wrappedValue: notifManager)
-        _accountViewModel = StateObject(wrappedValue: accountVM)
-        _billViewModel = StateObject(wrappedValue: billVM)
-        _paycheckViewModel = StateObject(wrappedValue: paycheckVM)
-        _creditCardManager = StateObject(wrappedValue: creditCardMgr)
-        _reportsViewModel = StateObject(
-            wrappedValue: ReportsViewModel(
-                context: context,
-                bitcoinPriceService: BitcoinPriceService.shared,
-                creditCardManager: creditCardMgr
-            )
+        accountViewModel = accountVM
+        paycheckViewModel = paycheckVM
+        billViewModel = billVM
+        reportsViewModel = ReportsViewModel(
+            context: context,
+            bitcoinPriceService: bitcoinPriceService,
+            creditCardManager: creditCardManager
         )
+        isReady = true
     }
+}
+
+@main
+struct BillsAndBalanceApp: App {
+    let persistenceController = PersistenceController.shared
+    @StateObject private var bootstrap = AppBootstrap()
+    @StateObject private var onboardingManager = OnboardingManager.shared
+    @State private var showSplash = true
 
     var body: some Scene {
         WindowGroup {
             ZStack {
-                if onboardingManager.hasCompletedOnboarding {
+                if !onboardingManager.hasCompletedOnboarding {
+                    OnboardingView()
+                        .environmentObject(bootstrap.notificationManager)
+                } else if bootstrap.isReady {
                     MainTabView()
                         .environment(\.managedObjectContext, persistenceController.container.viewContext)
-                        .environmentObject(billViewModel)
-                        .environmentObject(accountViewModel)
-                        .environmentObject(paycheckViewModel)
-                        .environmentObject(notificationManager)
-                        .environmentObject(creditCardManager)
-                        .environmentObject(categoryManager)
-                        .environmentObject(bitcoinPriceService)
-                        .environmentObject(reportsViewModel)
+                        .environmentObject(bootstrap.billViewModel)
+                        .environmentObject(bootstrap.accountViewModel)
+                        .environmentObject(bootstrap.paycheckViewModel)
+                        .environmentObject(bootstrap.notificationManager)
+                        .environmentObject(bootstrap.creditCardManager)
+                        .environmentObject(bootstrap.categoryManager)
+                        .environmentObject(bootstrap.bitcoinPriceService)
+                        .environmentObject(bootstrap.reportsViewModel)
+                        .environmentObject(ProjectionPreferences.shared)
                         .preferredColorScheme(nil)
                         .onAppear {
-                            billViewModel.updateAppBadge()
+                            bootstrap.billViewModel.updateAppBadge()
                         }
                 } else {
-                    OnboardingView()
-                        .environmentObject(notificationManager)
+                    ProgressView("Loading…")
                 }
 
-                if showSplash && onboardingManager.hasCompletedOnboarding {
+                if showSplash && onboardingManager.hasCompletedOnboarding && bootstrap.isReady {
                     SplashScreenView(isActive: $showSplash)
                         .transition(.opacity)
                         .zIndex(1)
                 }
+            }
+            .task {
+                _ = ShakeDetection.install
+                await bootstrap.prepareIfNeeded()
             }
         }
     }

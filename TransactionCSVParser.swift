@@ -10,12 +10,29 @@ import Foundation
 
 /// Shared type for both CSV and (legacy) PDF import.
 struct ParsedStatementTransaction: Identifiable, Equatable {
+    enum Kind: Equatable {
+        case generic
+        case billPay
+        case purchase
+        case sale
+        case send
+        case receive
+        case deposit
+        case withdrawal
+    }
+
     let id = UUID()
     var date: Date
     var title: String
     var amount: Decimal
     /// true = payment/credit, false = purchase/debit
     var isCredit: Bool
+    var btcAmount: Decimal? = nil
+    var feeUSD: Decimal? = nil
+    var btcPrice: Decimal? = nil
+    var sourceReference: String? = nil
+    var kind: Kind = .generic
+    var category: String? = nil
 }
 
 enum TransactionCSVParseError: LocalizedError {
@@ -36,24 +53,12 @@ enum TransactionCSVParseError: LocalizedError {
 
 enum TransactionCSVParser {
 
-    private static let dateFormats: [DateFormatter] = {
-        let formats = [
-            "yyyy-MM-dd",
-            "MM/dd/yyyy", "M/d/yyyy",
-            "MM/dd/yy", "M/d/yy",
-            "dd-MMM-yyyy", "d MMM yyyy",
-            "MMM d, yyyy", "MMMM d, yyyy",
-        ]
-        return formats.map { fmt in
-            let f = DateFormatter()
-            f.dateFormat = fmt
-            f.locale = Locale(identifier: "en_US_POSIX")
-            return f
-        }
-    }()
-
-    /// Parse CSV data into transactions. Supports common bank export column names.
+    /// Parse CSV data into transactions. Supports common bank export column names and Strike statements.
     static func parse(data: Data) throws -> [ParsedStatementTransaction] {
+        if StrikeCSVParser.isStrikeCSV(data) {
+            return try StrikeCSVParser.parse(data: data)
+        }
+
         guard let csvString = String(data: data, encoding: .utf8) else {
             throw TransactionCSVParseError.invalidEncoding
         }
@@ -70,7 +75,7 @@ enum TransactionCSVParser {
         let amountIdx = indexOf(headerLower, keys: ["amount"])
         let debitIdx = indexOf(headerLower, keys: ["debit", "debits"])
         let creditIdx = indexOf(headerLower, keys: ["credit", "credits"])
-        let categoryIdx = indexOf(headerLower, keys: ["category", "type"])
+        let categoryIdx = indexOf(headerLower, keys: ["category"])
 
         let hasAmount = amountIdx != nil
         let hasDebitCredit = debitIdx != nil && creditIdx != nil
@@ -137,11 +142,7 @@ enum TransactionCSVParser {
     }
 
     private static func parseDate(_ raw: String) -> Date? {
-        let trimmed = raw.trimmingCharacters(in: .whitespaces)
-        for f in dateFormats {
-            if let d = f.date(from: trimmed) { return d }
-        }
-        return nil
+        CSVSupport.parseCalendarDate(raw)
     }
 
     private static func parseAmount(_ raw: String) -> Decimal? {
@@ -191,6 +192,13 @@ enum TransactionCSVParser {
         }
 
         guard amount > 0 else { return nil }
-        return ParsedStatementTransaction(date: date, title: title, amount: amount, isCredit: isCredit)
+        var category: String?
+        if let ci = categoryIdx, fields.count > ci {
+            let raw = fields[ci].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !raw.isEmpty {
+                category = raw
+            }
+        }
+        return ParsedStatementTransaction(date: date, title: title, amount: amount, isCredit: isCredit, category: category)
     }
 }

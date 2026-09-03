@@ -13,24 +13,25 @@ Use standard iOS design. Prefer system defaults (including iOS 26 liquid glass) 
 - **Modal close (sheets / fullScreenCover):** Use `ToolbarItem(placement: .cancellationAction)` with `Image(systemName: "xmark").font(.system(size: 17, weight: .semibold)).foregroundStyle(.primary)`. Match ManageBillsView / ManageAccountsView.
 - **Pushed views (e.g. Account detail):** Use system back button. No custom leading button unless replacing back.
 
-## Activity Reports (fullScreenCover)
+## Activity Reports (pushed from Balance)
 
-- **Presentation:** `fullScreenCover`. Own NavigationStack. Main toolbar (Balance nav + tab bar) must **not** appear on Activity — the sheet replaces the screen.
-- **Toolbar:** Leading = X close (same as ManageBillsView). Principal = Week/Month/Year period picker (`Picker` with `.pickerStyle(.segmented).labelsHidden()`).
-- **Title:** Large title, period-based (`reportsPeriodTitle`). No redundant period title in list.
+- **Presentation:** Push onto Balance’s `NavigationStack` (slides in from the right). Hide the tab bar. Do **not** wrap Activity in its own `NavigationStack`, `fullScreenCover`, `List`, or paging `TabView`.
+- **Layout:** Same as Balance: `ScrollView` + 16pt horizontal inset + snapshot cards (22pt corners). Period title is left-aligned in the scroll content and scrolls away.
+- **Toolbar:** Leading = standard `xmark`. Principal = liquid-glass Week/Month/Year capsule. Trailing = `ellipsis.circle` menu.
+- **Chart:** Use `CompactWalletStackedCategoryBarChart` inside the Total Spending snapshot card (same skinny bars as Balance).
 
 ## Period Picker
 
-- **In Activity toolbar:** Use native `Picker(.segmented)` for Week | Month | Year. Keep it simple; no custom pill unless we need drag-to-select and then match main app style (light gray bar, dark gray selected).
+- **In Activity toolbar:** Custom capsule, not native `Picker(.segmented)`. Liquid-glass track (`.ultraThinMaterial`); selected segment is a light `systemBackground` pill. Double-tap jumps to the current period.
 
 ## Don’t
 
 - Add `toolbarBackground` unless a specific view (e.g. List in modal) needs a solid bar and we’ve agreed.
 - Use hierarchical/multi-tone toolbar icons (X buttons use standard `xmark` icon).
-- Put the main tab toolbar or tab bar on modal sheets (Activity, Manage Bills, etc.).
+- Put the main tab toolbar or tab bar on Activity (hide `.tabBar` while Activity is pushed).
 
 ## Reference
 
-- **Balance:** `BalanceView` → `navigationContent` toolbar (plus, search, menu).
+- **Balance:** `BalanceView` → `navigationContent` toolbar (plus, menu). Reports opens from the Current Balance card chart button.
 - **Modals:** `ManageBillsView`, `ManageAccountsView` → X with standard iOS style.
-- **Activity:** `ReportsView` → fullScreenCover, X + segmented period picker in toolbar.
+- **Activity:** `ReportsView` → pushed from Balance, X close + liquid-glass period pill in toolbar.

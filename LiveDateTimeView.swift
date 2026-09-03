@@ -6,12 +6,8 @@
 //
 
 import SwiftUI
-import Combine
 
 struct LiveDateTimeView: View {
-    @State private var currentDate = Date()
-    @State private var timer: Timer?
-    
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d, yyyy"
@@ -25,28 +21,16 @@ struct LiveDateTimeView: View {
     }()
     
     var body: some View {
-        VStack(spacing: 2) {
-            Text(timeFormatter.string(from: currentDate))
-                .font(.caption)
-                .fontWeight(.medium)
-                .foregroundStyle(.primary)
-            Text(dateFormatter.string(from: currentDate))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .onAppear {
-            // Update immediately
-            currentDate = Date()
-            
-            // Update every second
-            timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-                currentDate = Date()
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            VStack(spacing: 2) {
+                Text(timeFormatter.string(from: context.date))
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.primary)
+                Text(dateFormatter.string(from: context.date))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-        }
-        .onDisappear {
-            // Clean up timer when view disappears
-            timer?.invalidate()
-            timer = nil
         }
     }
 }

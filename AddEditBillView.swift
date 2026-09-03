@@ -55,6 +55,7 @@ struct AddEditBillView: View {
     @State private var showingAccountEditor = false
     @State private var accountToEdit: Account?
     @State private var showDeleteScopeAlert = false
+    @State private var trackInBitcoin = false
     
     let recurrenceOptions = ["none", "daily", "weekly", "monthly", "quarterly", "semiannually", "yearly"]
     
@@ -65,7 +66,7 @@ struct AddEditBillView: View {
     }
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             formContent
                 .navigationTitle(bill == nil ? "Add Bill" : "Edit Bill")
                 .navigationBarTitleDisplayMode(.inline)
@@ -162,7 +163,10 @@ struct AddEditBillView: View {
                 .onChange(of: name) { _, newValue in
                     // Auto-categorize only if category is empty (don't override user's choice)
                     if category.isEmpty && !newValue.isEmpty {
-                        let suggested = CategorySuggester.suggest(for: newValue)
+                        let suggested = CategorySuggester.suggest(
+                            for: newValue,
+                            priorCategory: accountViewModel.suggestedCategory(forTitle: newValue)
+                        )
                         if !suggested.isEmpty { category = suggested }
                     }
                 }
@@ -180,7 +184,10 @@ struct AddEditBillView: View {
                 .onChange(of: category) { _, newValue in
                     // Re-suggest when user clears category (None) and name is non-empty
                     if newValue.isEmpty && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        let suggested = CategorySuggester.suggest(for: name)
+                        let suggested = CategorySuggester.suggest(
+                            for: name,
+                            priorCategory: accountViewModel.suggestedCategory(forTitle: name)
+                        )
                         if !suggested.isEmpty { category = suggested }
                     }
                 }
@@ -233,6 +240,8 @@ struct AddEditBillView: View {
             }
             
             Toggle("Auto-Pay", isOn: $autoPay)
+            
+            Toggle("Track in Bitcoin", isOn: $trackInBitcoin)
             
             // Inline credit card management
             creditCardsManagementSection
@@ -550,6 +559,7 @@ struct AddEditBillView: View {
         }
         
         autoPay = bill.autoPay
+        trackInBitcoin = bill.trackInBitcoinFlag
         paymentMethod = PaymentMethod.from(bill: bill)
         selectedAccountID = bill.account?.id
         selectedCardName = bill.paymentCard
@@ -558,7 +568,10 @@ struct AddEditBillView: View {
         if let existingCategory = bill.category, !existingCategory.isEmpty {
             category = existingCategory
         } else {
-            let suggested = CategorySuggester.suggest(for: name)
+            let suggested = CategorySuggester.suggest(
+                for: name,
+                priorCategory: accountViewModel.suggestedCategory(forTitle: name)
+            )
             category = suggested.isEmpty ? "" : suggested
         }
     }
@@ -599,7 +612,8 @@ struct AddEditBillView: View {
                 autoPay: autoPay,
                 paymentCard: cardName,
                 account: account,
-                category: category.isEmpty ? nil : category
+                category: category.isEmpty ? nil : category,
+                trackInBitcoin: trackInBitcoin
             )
             
             HapticManager.shared.buttonTapped()
@@ -665,7 +679,8 @@ struct AddEditBillView: View {
             paymentCard: cardName,
             account: account,
             applyToSeries: applyToSeries,
-            category: category.isEmpty ? nil : category
+            category: category.isEmpty ? nil : category,
+            trackInBitcoin: trackInBitcoin
         )
         
         pendingAmount = nil

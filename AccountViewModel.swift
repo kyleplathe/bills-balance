@@ -8,6 +8,7 @@
 import Foundation
 import CoreData
 
+@MainActor
 class AccountViewModel: ObservableObject {
     
     @Published var accounts: [Account] = []
@@ -19,6 +20,7 @@ class AccountViewModel: ObservableObject {
     }
     
     private let context: NSManagedObjectContext
+    private var cachedCategoryUsage: [String: (count: Int, lastUsed: Date)]?
     
     init(context: NSManagedObjectContext) {
         self.context = context
@@ -44,11 +46,10 @@ class AccountViewModel: ObservableObject {
             NSSortDescriptor(keyPath: \Account.order, ascending: true),
             NSSortDescriptor(keyPath: \Account.createdAt, ascending: true)
         ]
+        request.fetchBatchSize = 50
         
         do {
             let fetched = try context.fetch(request)
-            // Refresh context to ensure we have latest data
-            context.refreshAllObjects()
             accounts = fetched
             if let selected = selectedAccount, fetched.contains(selected) {
                 // keep current selection
@@ -74,6 +75,7 @@ class AccountViewModel: ObservableObject {
             NSSortDescriptor(keyPath: \LedgerEntry.date, ascending: true),
             NSSortDescriptor(keyPath: \LedgerEntry.createdAt, ascending: true)
         ]
+        request.fetchBatchSize = 50
         
         do {
             ledgerEntries = try context.fetch(request)
@@ -231,20 +233,19 @@ class AccountViewModel: ObservableObject {
     }
     
     func totalClearedBalance(bitcoinPriceService: BitcoinPriceService? = nil) -> Decimal {
-        accounts.reduce(Decimal.zero) { partial, account in
+        let priceService = bitcoinPriceService ?? BitcoinPriceService.shared
+        let amounts = accounts.map { account -> (amount: Decimal, isHidden: Bool) in
             let balance = clearedBalance(for: account)
-            if account.currencyCode == "BTC" {
-                // Convert BTC balance to USD for total
-                let priceService = bitcoinPriceService ?? BitcoinPriceService.shared
-                return partial + priceService.convertBTCToUSD(balance)
-            } else {
-                return partial + balance
-            }
+            let usd = account.currencyCode == "BTC"
+                ? priceService.convertBTCToUSD(balance)
+                : balance
+            return (amount: usd, isHidden: account.isHiddenFlag)
         }
+        return BalanceMath.totalVisible(amounts: amounts)
     }
     
     // MARK: - Available Balance (Current Balance minus Pending Bills plus Pending Income)
-    func availableBalance(for account: Account, billViewModel: BillViewModel? = nil, paycheckViewModel: PaycheckViewModel? = nil, bitcoinPriceService: BitcoinPriceService? = nil) -> Decimal {
+    func availableBalance(for account: Account, billViewModel: BillViewModel? = nil, paycheckViewModel: PaycheckViewModel? = nil, bitcoinPriceService: BitcoinPriceService? = nil, windowDays: Int = 30) -> Decimal {
         // Refresh the account from context to ensure we have latest data
         context.refresh(account, mergeChanges: true)
         
@@ -252,11 +253,11 @@ class AccountViewModel: ObservableObject {
         let calendar = Calendar.current
         let now = Date()
         let startOfToday = calendar.startOfDay(for: now)
+        let windowEnd = BalanceMath.windowEnd(from: now, days: windowDays, calendar: calendar)
         
-        // Get future unpaid bills for this account (bills with dueDate >= today)
-        // Only count bills that are unpaid AND have this account assigned
+        // Unpaid bills due within the projection window
         let request = NSFetchRequest<Bill>(entityName: "Bill")
-        request.predicate = NSPredicate(format: "account == %@ AND isPaid == NO AND dueDate >= %@", account, startOfToday as NSDate)
+        request.predicate = NSPredicate(format: "account == %@ AND isPaid == NO AND dueDate >= %@ AND dueDate < %@", account, startOfToday as NSDate, windowEnd as NSDate)
         
         do {
             let futureUnpaidBills = try context.fetch(request)
@@ -309,7 +310,7 @@ class AccountViewModel: ObservableObject {
             // Get pending income (future paychecks for this account that haven't been processed)
             var pendingIncomeAmount: Decimal = .zero
             if let paycheckVM = paycheckViewModel {
-                let futureInterval = DateInterval(start: now, end: calendar.date(byAdding: .month, value: 3, to: now) ?? now)
+                let futureInterval = DateInterval(start: now, end: windowEnd)
                 
                 let futureOccurrences = paycheckVM.occurrences(in: futureInterval)
                 let accountFutureIncome = futureOccurrences.filter { occurrence in
@@ -339,14 +340,13 @@ class AccountViewModel: ObservableObject {
                 }
             }
             
-            // Calculate net pending (bills subtract, income adds)
             let netPending = pendingBillsAmount - pendingIncomeAmount
             
             if account.currencyCode == "BTC" {
                 // For BTC accounts, convert USD amounts to BTC
                 let priceService = bitcoinPriceService ?? BitcoinPriceService.shared
                 let btcPending = priceService.convertUSDtoBTC(netPending)
-                let result = currentBalance - btcPending
+                let btcResult = currentBalance - btcPending
                 
                 // Debug logging for BTC accounts
                 #if DEBUG
@@ -355,12 +355,12 @@ class AccountViewModel: ObservableObject {
                 print("   Pending Bills: \(pendingBillsAmount) USD = \(btcPending) BTC")
                 print("   Pending Income: \(pendingIncomeAmount) USD")
                 print("   Net Pending: \(netPending) USD = \(btcPending) BTC")
-                print("   Available Balance: \(result) BTC")
+                print("   Available Balance: \(btcResult) BTC")
                 #endif
                 
-                return result
+                return btcResult
             } else {
-                let result = currentBalance - netPending
+                let result = BalanceMath.available(currentBalance: currentBalance, pendingBills: pendingBillsAmount, pendingIncome: pendingIncomeAmount)
                 
                 // Debug logging for USD accounts
                 #if DEBUG
@@ -392,6 +392,7 @@ class AccountViewModel: ObservableObject {
             NSSortDescriptor(keyPath: \LedgerEntry.date, ascending: true),
             NSSortDescriptor(keyPath: \LedgerEntry.createdAt, ascending: true)
         ]
+        request.fetchBatchSize = 50
         
         do {
             let entries = try context.fetch(request)
@@ -401,6 +402,101 @@ class AccountViewModel: ObservableObject {
             print("Error fetching ledger entries for account: \(error)")
             return []
         }
+    }
+
+    func existingStrikeReferences() -> Set<String> {
+        let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
+        request.fetchBatchSize = 50
+        let entries = (try? context.fetch(request)) ?? []
+        return Set(entries.compactMap { StrikeCSVParser.reference(from: $0.notes) })
+    }
+
+    func existingImportEntries(for account: Account) -> [StatementImportMatching.ExistingEntry] {
+        let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
+        request.predicate = NSPredicate(format: "account == %@", account)
+        request.fetchBatchSize = 50
+        let entries = (try? context.fetch(request)) ?? []
+        return entries.compactMap { entry in
+            guard let date = entry.date else { return nil }
+            let amount: Decimal = {
+                if entry.usdAmountDecimal != 0 { return entry.usdAmountDecimal.magnitude }
+                return entry.amountDecimal.magnitude
+            }()
+            return StatementImportMatching.ExistingEntry(
+                date: date,
+                amount: amount,
+                title: entry.title ?? "",
+                isCredit: entry.isCredit,
+                sourceReference: StrikeCSVParser.reference(from: entry.notes)
+            )
+        }
+    }
+
+    func applyStartingBalanceOffset(to account: Account, delta: Decimal) {
+        guard delta != 0 else { return }
+        account.startingBalance = NSDecimalNumber(decimal: account.startingBalanceDecimal + delta)
+        account.updatedAt = Date()
+    }
+
+    @discardableResult
+    func deleteLedgerEntries(_ entries: [LedgerEntry]) -> Int {
+        guard !entries.isEmpty else { return 0 }
+        for entry in entries {
+            if let bill = entry.bill {
+                // Leave bill paid state alone; only remove the imported ledger row.
+                entry.bill = nil
+                _ = bill
+            }
+            context.delete(entry)
+        }
+        saveContext()
+        refreshLedgerEntries()
+        return entries.count
+    }
+
+    /// Finds ledger rows that match CSV transactions (Strike reference first, then day/title/amount).
+    func matchingImportEntries(
+        for transactions: [ParsedStatementTransaction],
+        account: Account
+    ) -> [(transaction: ParsedStatementTransaction, entry: LedgerEntry)] {
+        let entries = ledgerEntries(for: account)
+        var usedEntryIDs = Set<NSManagedObjectID>()
+        var matches: [(ParsedStatementTransaction, LedgerEntry)] = []
+
+        for tx in transactions {
+            if let ref = tx.sourceReference, !ref.isEmpty,
+               let entry = entries.first(where: {
+                   !usedEntryIDs.contains($0.objectID) && StrikeCSVParser.reference(from: $0.notes) == ref
+               }) {
+                usedEntryIDs.insert(entry.objectID)
+                matches.append((tx, entry))
+                continue
+            }
+
+            let fingerprints: [StatementImportMatching.ExistingEntry] = entries.compactMap { entry in
+                guard !usedEntryIDs.contains(entry.objectID), let date = entry.date else { return nil }
+                let amount: Decimal = {
+                    if entry.usdAmountDecimal != 0 { return entry.usdAmountDecimal.magnitude }
+                    return entry.amountDecimal.magnitude
+                }()
+                return StatementImportMatching.ExistingEntry(
+                    date: date,
+                    amount: amount,
+                    title: entry.title ?? "",
+                    isCredit: entry.isCredit,
+                    sourceReference: StrikeCSVParser.reference(from: entry.notes)
+                )
+            }
+            let candidateEntries = entries.filter { !usedEntryIDs.contains($0.objectID) }
+            guard let idx = StatementImportMatching.matchingIndex(for: tx, in: fingerprints, used: []),
+                  fingerprints.indices.contains(idx),
+                  candidateEntries.indices.contains(idx)
+            else { continue }
+            let entry = candidateEntries[idx]
+            usedEntryIDs.insert(entry.objectID)
+            matches.append((tx, entry))
+        }
+        return matches
     }
     
     // MARK: - Ledger Helpers
@@ -553,6 +649,7 @@ class AccountViewModel: ObservableObject {
         return entry
     }
     
+    @discardableResult
     func addManualEntry(to account: Account,
                         title: String,
                         btcAmount: Decimal?,
@@ -563,7 +660,9 @@ class AccountViewModel: ObservableObject {
                         isReconciled: Bool,
                         category: String? = nil,
                         paycheck: Paycheck? = nil,
-                        feeAmount: Decimal? = nil) {
+                        feeAmount: Decimal? = nil,
+                        isCreditOverride: Bool? = nil,
+                        save: Bool = true) -> LedgerEntry {
         let entry = LedgerEntry(context: context)
         entry.id = UUID()
         entry.title = title
@@ -576,29 +675,34 @@ class AccountViewModel: ObservableObject {
         
         // Explicitly mark income transactions as credits - this MUST be set before any amount logic
         let isIncome = (category == "Income")
+        func applyCredit(_ isCredit: Bool) {
+            entry.isCredit = isCredit
+            entry.entryType = isCredit ? "credit" : "debit"
+        }
+        func defaultCredit() -> Bool {
+            if let isCreditOverride { return isCreditOverride }
+            if isIncome { return true }
+            if let usd = usdAmount { return usd >= 0 }
+            if let btc = btcAmount { return btc >= 0 }
+            return false
+        }
         
         if account.currencyCode == "BTC" {
             // For BTC accounts, store BTC and USD amounts
             if let btc = btcAmount {
                 entry.btcAmount = NSDecimalNumber(decimal: btc.magnitude)
                 entry.amount = NSDecimalNumber(decimal: btc.magnitude) // Set amount to BTC amount for display purposes
-                // Income is always credit, regardless of amount sign
-                entry.isCredit = isIncome
-                entry.entryType = entry.isCredit ? "credit" : "debit"
+                applyCredit(defaultCredit())
             } else if let usd = usdAmount, let price = btcPriceAtTransaction, price > 0 {
                 // USD only entry - calculate BTC amount from USD and current price
                 let calculatedBTC = abs(usd.magnitude) / price
                 entry.btcAmount = NSDecimalNumber(decimal: calculatedBTC)
                 entry.amount = NSDecimalNumber(decimal: calculatedBTC) // Set amount to calculated BTC for display
-                // Determine credit/debit from USD amount sign
-                entry.isCredit = (usd >= 0) || isIncome
-                entry.entryType = entry.isCredit ? "credit" : "debit"
-            } else if let usd = usdAmount {
+                applyCredit(defaultCredit())
+            } else if usdAmount != nil {
                 // USD only entry without price - amount will be set to 0 temporarily (will be updated when reconciled)
                 entry.amount = NSDecimalNumber(decimal: 0)
-                // Determine credit/debit from USD amount sign
-                entry.isCredit = (usd >= 0) || isIncome
-                entry.entryType = entry.isCredit ? "credit" : "debit"
+                applyCredit(defaultCredit())
             }
             if let usd = usdAmount {
                 entry.usdAmount = NSDecimalNumber(decimal: usd.magnitude)
@@ -658,13 +762,81 @@ class AccountViewModel: ObservableObject {
             }
         }
         
-        saveContext()
-        if selectedAccount == account {
-            refreshLedgerEntries()
+        if save {
+            saveContext()
+            if selectedAccount == account {
+                refreshLedgerEntries()
+            }
+            context.refresh(account, mergeChanges: true)
         }
-        
-        // Refresh the account to ensure balance updates are reflected
-        context.refresh(account, mergeChanges: true)
+        return entry
+    }
+
+    /// Moves money from one account to another as a paired debit and credit. Fees stay on the source.
+    @discardableResult
+    func transfer(from fromAccount: Account,
+                  to toAccount: Account,
+                  usdAmount: Decimal,
+                  feeAmount: Decimal? = nil,
+                  btcAmount: Decimal? = nil,
+                  btcPrice: Decimal? = nil,
+                  date: Date = Date(),
+                  notes: String? = nil,
+                  isCleared: Bool = false) -> (from: LedgerEntry, to: LedgerEntry)? {
+        guard fromAccount.objectID != toAccount.objectID, usdAmount > 0 else { return nil }
+
+        let pairId = UUID()
+        let pairedNotes = LedgerTransfer.appendingPairId(to: notes, pairId: pairId)
+        let fromName = fromAccount.name ?? "Account"
+        let toName = toAccount.name ?? "Account"
+        let toIsCreditAccount = LedgerTransfer.isCreditAccount(toAccount.type)
+        let fromIsCreditAccount = LedgerTransfer.isCreditAccount(fromAccount.type)
+        let fee = feeAmount.flatMap { $0 > 0 ? $0 : nil }
+        let totalDebit = usdAmount + (fee ?? 0)
+
+        let fromBTC: Decimal? = {
+            guard fromAccount.currencyCode == "BTC" else { return nil }
+            return btcAmount.map { -$0.magnitude }
+        }()
+        let toBTC: Decimal? = {
+            guard toAccount.currencyCode == "BTC" else { return nil }
+            return btcAmount.map { $0.magnitude }
+        }()
+        let price = (fromAccount.currencyCode == "BTC" || toAccount.currencyCode == "BTC") ? btcPrice : nil
+
+        let fromEntry = addManualEntry(
+            to: fromAccount,
+            title: LedgerTransfer.debitTitle(toAccountName: toName, toIsCreditAccount: toIsCreditAccount),
+            btcAmount: fromBTC,
+            usdAmount: -totalDebit,
+            btcPriceAtTransaction: price,
+            date: date,
+            notes: pairedNotes,
+            isReconciled: isCleared,
+            category: LedgerTransfer.category,
+            feeAmount: fee,
+            save: false
+        )
+        let toEntry = addManualEntry(
+            to: toAccount,
+            title: LedgerTransfer.creditTitle(fromAccountName: fromName, fromIsCreditAccount: fromIsCreditAccount),
+            btcAmount: toBTC,
+            usdAmount: usdAmount,
+            btcPriceAtTransaction: price,
+            date: date,
+            notes: pairedNotes,
+            isReconciled: isCleared,
+            category: LedgerTransfer.category,
+            feeAmount: nil,
+            save: false
+        )
+
+        saveContext()
+        context.refresh(fromAccount, mergeChanges: true)
+        context.refresh(toAccount, mergeChanges: true)
+        fetchAccounts()
+        refreshLedgerEntries()
+        return (fromEntry, toEntry)
     }
     
     func toggleReconciled(for entry: LedgerEntry) {
@@ -733,13 +905,101 @@ class AccountViewModel: ObservableObject {
         refreshLedgerEntries()
     }
     
+    /// Returns how many uncategorized (or differently-categorized) entries share the same title (case-insensitive).
+    func countMatchingUncategorizedEntries(title: String, category: String) -> Int {
+        let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
+        request.predicate = NSPredicate(format: "title ==[cd] %@ AND (category == nil OR category == '' OR category != %@)", title, category)
+        return (try? context.count(for: request)) ?? 0
+    }
+
+    /// Bulk-sets category on every entry whose title matches (case-insensitive).
+    @discardableResult
+    func bulkSetCategory(_ category: String, forTitle title: String) -> Int {
+        let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
+        request.predicate = NSPredicate(format: "title ==[cd] %@ AND (category == nil OR category == '' OR category != %@)", title, category)
+        let entries = (try? context.fetch(request)) ?? []
+        for entry in entries {
+            entry.category = category
+        }
+        if !entries.isEmpty {
+            saveContext()
+            refreshLedgerEntries()
+        }
+        return entries.count
+    }
+
+    /// Count of transactions with no category.
+    func uncategorizedEntryCount() -> Int {
+        let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
+        request.predicate = NSPredicate(format: "category == nil OR category == ''")
+        return (try? context.count(for: request)) ?? 0
+    }
+
+    /// Returns uncategorized transactions grouped by normalised title, sorted by group size descending.
+    func uncategorizedGroupedByTitle() -> [(title: String, entries: [LedgerEntry])] {
+        let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
+        request.predicate = NSPredicate(format: "category == nil OR category == ''")
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \LedgerEntry.date, ascending: false)]
+        let entries = (try? context.fetch(request)) ?? []
+        var groups: [String: [LedgerEntry]] = [:]
+        for e in entries {
+            let key = (e.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else { continue }
+            groups[key, default: []].append(e)
+        }
+        return groups.sorted { $0.value.count > $1.value.count }.map { (title: $0.key, entries: $0.value) }
+    }
+
+    /// Deletes imported ledger rows and undoes the Keep current balance starting-balance offset.
+    /// Returns the number of deleted entries.
+    @discardableResult
+    func clearImportedEntries() -> Int {
+        let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
+        request.predicate = NSCompoundPredicate(orPredicateWithSubpredicates: [
+            NSPredicate(format: "notes CONTAINS[c] %@", "Imported from CSV"),
+            NSPredicate(format: "notes CONTAINS[c] %@", StrikeCSVParser.referenceNotePrefix)
+        ])
+        let entries = (try? context.fetch(request)) ?? []
+        guard !entries.isEmpty else { return 0 }
+
+        var netsByAccount: [NSManagedObjectID: (Account, Decimal)] = [:]
+        for entry in entries {
+            guard let account = entry.account else { continue }
+            let id = account.objectID
+            let signed = entry.signedAmountInCurrency(for: account)
+            if let existing = netsByAccount[id] {
+                netsByAccount[id] = (existing.0, existing.1 + signed)
+            } else {
+                netsByAccount[id] = (account, signed)
+            }
+        }
+
+        for (_, pair) in netsByAccount {
+            // Keep current balance shifted starting by -net. Removing those rows needs +net.
+            applyStartingBalanceOffset(to: pair.0, delta: pair.1)
+        }
+
+        let count = deleteLedgerEntries(entries)
+        fetchAccounts()
+        return count
+    }
+
     func deleteLedgerEntry(_ entry: LedgerEntry) {
+        if let pairId = LedgerTransfer.pairId(from: entry.notes) {
+            let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
+            request.predicate = NSPredicate(format: "notes CONTAINS %@ AND SELF != %@", LedgerTransfer.searchToken(for: pairId), entry)
+            if let counterparts = try? context.fetch(request) {
+                counterparts.forEach { context.delete($0) }
+            }
+        }
         context.delete(entry)
         saveContext()
         refreshLedgerEntries()
     }
     
     // MARK: - Sample Data for Testing
+    static let sampleDataNotes = "Sample data for testing"
+
     /// Adds sample transactions across multiple categories and dates for testing bar charts
     func addSampleDataForTesting(to account: Account) {
         let calendar = Calendar.current
@@ -791,7 +1051,7 @@ class AccountViewModel: ObservableObject {
                     usdAmount: -amount, // Negative for expenses
                     btcPriceAtTransaction: nil,
                     date: transactionDate,
-                    notes: "Sample data for testing",
+                    notes: Self.sampleDataNotes,
                     isReconciled: true,
                     category: categoryName,
                     paycheck: nil,
@@ -805,6 +1065,27 @@ class AccountViewModel: ObservableObject {
         saveContext()
         refreshLedgerEntries()
         print("✅ Added sample data for testing bar chart")
+    }
+
+    /// Deletes only ledger entries tagged as sample/test data. Real transactions are left alone.
+    @discardableResult
+    func removeSampleDataForTesting() -> Int {
+        let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
+        request.predicate = NSPredicate(format: "notes == %@", Self.sampleDataNotes)
+
+        do {
+            let entries = try context.fetch(request)
+            for entry in entries {
+                context.delete(entry)
+            }
+            saveContext()
+            refreshLedgerEntries()
+            print("✅ Removed \(entries.count) sample data entries")
+            return entries.count
+        } catch {
+            print("Error removing sample data: \(error)")
+            return 0
+        }
     }
     
     func updatePaycheckOccurrenceTransaction(paycheck: Paycheck,
@@ -925,6 +1206,7 @@ class AccountViewModel: ObservableObject {
     func refreshData() {
         fetchAccounts()
         refreshLedgerEntries()
+        invalidateCategoryUsageCache()
     }
     
     // MARK: - Recent Transactions (Optimized)
@@ -956,6 +1238,7 @@ class AccountViewModel: ObservableObject {
         
         // Limit results for performance
         request.fetchLimit = limit
+        request.fetchBatchSize = min(50, limit)
         
         do {
             return try context.fetch(request)
@@ -968,9 +1251,23 @@ class AccountViewModel: ObservableObject {
     // MARK: - Category Usage (for sorted/filtered category picker)
     /// Aggregates category usage from all ledger entries: count and last-used date.
     func categoryUsage() -> [String: (count: Int, lastUsed: Date)] {
+        if let cachedCategoryUsage {
+            return cachedCategoryUsage
+        }
+        let computed = computeCategoryUsage()
+        cachedCategoryUsage = computed
+        return computed
+    }
+
+    private func invalidateCategoryUsageCache() {
+        cachedCategoryUsage = nil
+    }
+
+    private func computeCategoryUsage() -> [String: (count: Int, lastUsed: Date)] {
         let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
         request.predicate = NSPredicate(format: "category != nil AND category != %@", "")
         request.sortDescriptors = [NSSortDescriptor(keyPath: \LedgerEntry.date, ascending: false)]
+        request.fetchBatchSize = 50
         do {
             let entries = try context.fetch(request)
             var usage: [String: (count: Int, lastUsed: Date)] = [:]
@@ -987,7 +1284,7 @@ class AccountViewModel: ObservableObject {
             return [:]
         }
     }
-    
+
     /// Transaction titles matching prefix, for predictive fill. Most recent first.
     func suggestedTitles(prefix: String, account: Account? = nil, limit: Int = 8) -> [String] {
         let trimmed = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1001,6 +1298,7 @@ class AccountViewModel: ObservableObject {
             NSSortDescriptor(keyPath: \LedgerEntry.createdAt, ascending: false)
         ]
         request.fetchLimit = limit * 4
+        request.fetchBatchSize = min(50, limit * 4)
         do {
             let entries = try context.fetch(request)
             var seen = Set<String>()
@@ -1014,6 +1312,35 @@ class AccountViewModel: ObservableObject {
         } catch {
             return []
         }
+    }
+
+    /// Most recent category used for this title. Exact match first, then prefix (3+ characters).
+    func suggestedCategory(forTitle title: String, account: Account? = nil) -> String? {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let entry = findHistoricalTransaction(title: trimmed, account: account),
+           let cat = entry.category, !cat.isEmpty {
+            return cat
+        }
+
+        guard trimmed.count >= 3 else { return nil }
+
+        let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
+        var predicates: [NSPredicate] = [
+            NSPredicate(format: "title BEGINSWITH[cd] %@", trimmed),
+            NSPredicate(format: "category != nil AND category != %@", "")
+        ]
+        if let account {
+            predicates.append(NSPredicate(format: "account == %@", account))
+        }
+        request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
+        request.sortDescriptors = [
+            NSSortDescriptor(keyPath: \LedgerEntry.date, ascending: false),
+            NSSortDescriptor(keyPath: \LedgerEntry.createdAt, ascending: false)
+        ]
+        request.fetchLimit = 1
+        return try? context.fetch(request).first?.category
     }
     
     // MARK: - Historical Transaction Lookup
@@ -1064,6 +1391,7 @@ class AccountViewModel: ObservableObject {
             }
             
             try context.save()
+            invalidateCategoryUsageCache()
             refreshLedgerEntries()
             return (true, "All transactions cleared successfully")
         } catch {
@@ -1163,9 +1491,18 @@ class AccountViewModel: ObservableObject {
         guard context.hasChanges else { return }
         do {
             try context.save()
+            invalidateCategoryUsageCache()
         } catch {
             print("Error saving account context: \(error)")
         }
+    }
+
+    func importAccounts(from data: Data) throws -> Int {
+        let count = try AccountExportService.importFileData(data, context: context)
+        invalidateCategoryUsageCache()
+        fetchAccounts()
+        refreshLedgerEntries()
+        return count
     }
     
     /// Finds a matching transaction for a payment import (checks both reconciled and unreconciled)

@@ -90,3 +90,14 @@ extension Account {
         (value(forKey: "startingBalanceBTCPrice") as? NSDecimalNumber)?.decimalValue ?? .zero
     }
 }
+
+extension Bill {
+    var trackInBitcoinFlag: Bool {
+        get { value(forKey: "trackInBitcoin") as? Bool ?? false }
+        set { setValue(newValue, forKey: "trackInBitcoin") }
+    }
+
+    var amountDecimal: Decimal {
+        amount?.decimalValue ?? .zero
+    }
+}

@@ -46,7 +46,10 @@ struct ManualTransactionEntrySheet: View {
                             .onChange(of: title) { _, newValue in
                                 // Auto-categorize based on transaction name
                                 if category.isEmpty {
-                                    let suggested = CategorySuggester.suggest(for: newValue)
+                                    let suggested = CategorySuggester.suggest(
+                                        for: newValue,
+                                        priorCategory: accountViewModel.suggestedCategory(forTitle: newValue, account: account)
+                                    )
                                     if !suggested.isEmpty {
                                         category = suggested
                                     }

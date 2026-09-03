@@ -1,5 +1,4 @@
 import CoreData
-import SwiftUI
 
 protocol BillRepository {
     func fetchBills() async throws -> [SupabaseBill]
@@ -79,19 +78,5 @@ final class SupabaseBillRepository: BillRepository {
 
     func deleteBill(id: UUID) async throws {
         throw SupabaseConfigurationError.implementationUnavailable
-    }
-}
-
-struct ProjectionSettingsView: View {
-    let accountID: UUID?
-    let supabaseManager: SupabaseManager
-
-    var body: some View {
-        ContentUnavailableView(
-            "Supabase On Hold",
-            systemImage: "icloud.slash",
-            description: Text("Projection settings are unavailable until Supabase support is resumed.")
-        )
-        .navigationTitle("Projection Settings")
     }
 }

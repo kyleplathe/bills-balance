@@ -44,9 +44,9 @@ struct ManageBillsView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title2)
-                            .symbolRenderingMode(.hierarchical)
+                        Image(systemName: "xmark")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.primary)
                     }
                 }
                 
@@ -62,21 +62,13 @@ struct ManageBillsView: View {
                         Button {
                             exportBills(format: .csv)
                         } label: {
-                            Label("Export as CSV", systemImage: "doc.text")
+                            Label("Export CSV", systemImage: "square.and.arrow.up")
                         }
-                        
-                        Button {
-                            exportBills(format: .json)
-                        } label: {
-                            Label("Export as JSON", systemImage: "doc.badge.gearshape")
-                        }
-                        
-                        Divider()
                         
                         Button {
                             showingImportPicker = true
                         } label: {
-                            Label("Import Bills", systemImage: "square.and.arrow.down")
+                            Label("Import CSV", systemImage: "square.and.arrow.down")
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -100,14 +92,14 @@ struct ManageBillsView: View {
             }
             .sheet(isPresented: $showingExportSheet, onDismiss: cleanupExportFile) {
                 if let url = exportURL {
-                    BillsShareSheet(activityItems: [url]) {
+                    ActivityShareSheet(activityItems: [url]) {
                         cleanupExportFile()
                     }
                 }
             }
             .fileImporter(
                 isPresented: $showingImportPicker,
-                allowedContentTypes: [.json, .commaSeparatedText],
+                allowedContentTypes: [.commaSeparatedText, .plainText],
                 allowsMultipleSelection: false
             ) { result in
                 handleImportResult(result)
@@ -230,22 +222,21 @@ struct ManageBillsView: View {
     
     private func writeBillsCSV(for bills: [Bill]) throws -> URL {
         var lines: [String] = ["Due Date,Bill,Amount,Recurrence,Recurrence Interval,Status,Paid Date,Account,Auto-Pay,Category,Notes"]
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        let calendar = Calendar.current
         let numberFormatter = NumberFormatter()
         numberFormatter.numberStyle = .decimal
         numberFormatter.maximumFractionDigits = 2
         numberFormatter.minimumFractionDigits = 0
+        numberFormatter.usesGroupingSeparator = false
         numberFormatter.locale = Locale(identifier: "en_US_POSIX")
         for bill in bills {
-            let dateString = bill.dueDate.map { dateFormatter.string(from: $0) } ?? ""
+            let dateString = bill.dueDate.map { calendarDateString($0, calendar: calendar) } ?? ""
             let amountDecimal = bill.amount?.decimalValue ?? 0
             let amountString = numberFormatter.string(from: amountDecimal as NSDecimalNumber) ?? ""
             let recurrenceType = bill.recurrenceType ?? "none"
             let recurrenceInterval = recurrenceType == "none" ? "" : String(bill.recurrenceInterval)
             let status = bill.isPaid ? "Paid" : "Open"
-            let paidDateString = bill.paidDate.map { dateFormatter.string(from: $0) } ?? ""
+            let paidDateString = bill.paidDate.map { calendarDateString($0, calendar: calendar) } ?? ""
             let accountName = bill.account?.name ?? ""
             let autoPay = bill.autoPay ? "Yes" : "No"
             let category = bill.category ?? ""
@@ -274,15 +265,14 @@ struct ManageBillsView: View {
         return url
     }
     
+    private func calendarDateString(_ date: Date, calendar: Calendar) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        guard let year = parts.year, let month = parts.month, let day = parts.day else { return "" }
+        return String(format: "%04d-%02d-%02d", year, month, day)
+    }
+
     private func escapeCSVField(_ value: String) -> String {
-        var field = value
-        if field.contains("\"") {
-            field = field.replacingOccurrences(of: "\"", with: "\"\"")
-        }
-        if field.contains(",") || field.contains("\n") || field.contains("\"") {
-            field = "\"\(field)\""
-        }
-        return field
+        CSVSupport.escapeField(value)
     }
     
     private func writeBillsJSON(for bills: [Bill]) throws -> URL {
@@ -373,16 +363,16 @@ struct ManageBillsView: View {
             let data = try Data(contentsOf: url)
             let fileExtension = url.pathExtension.lowercased()
             
-            if fileExtension == "json" {
+            let trimmed = CSVSupport.string(from: data)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if fileExtension == "json" || trimmed.hasPrefix("{") {
                 try importBillsFromJSON(data: data)
-            } else if fileExtension == "csv" {
-                try importBillsFromCSV(data: data)
             } else {
-                showImportError("Unsupported file format. Please use JSON or CSV.")
-                return
+                try importBillsFromCSV(data: data)
             }
+        } catch let error as CSVParseError {
+            showImportError(error.localizedDescription)
         } catch {
-            showImportError("Failed to read file: \(error.localizedDescription)")
+            showImportError(error.localizedDescription)
         }
     }
     
@@ -391,9 +381,6 @@ struct ManageBillsView: View {
               let billsArray = json["bills"] as? [[String: Any]] else {
             throw NSError(domain: "ImportError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid JSON format"])
         }
-        
-        let dateFormatter = ISO8601DateFormatter()
-        dateFormatter.formatOptions = [.withFullDate, .withDashSeparatorInDate]
         
         var imported = 0
         var skipped = 0
@@ -414,7 +401,7 @@ struct ManageBillsView: View {
             }
             
             guard let dueDateString = billDict["dueDate"] as? String,
-                  let dueDate = dateFormatter.date(from: dueDateString) else {
+                  let dueDate = CSVSupport.parseCalendarDate(dueDateString) else {
                 errors.append("'\(name)': Invalid or missing due date")
                 continue
             }
@@ -438,7 +425,7 @@ struct ManageBillsView: View {
             let category = billDict["category"] as? String
             let isPaid = billDict["isPaid"] as? Bool ?? false
             let paidDateString = billDict["paidDate"] as? String
-            let paidDate = paidDateString != nil ? dateFormatter.date(from: paidDateString!) : nil
+            let paidDate = paidDateString.flatMap { CSVSupport.parseCalendarDate($0) }
             
             var account: Account? = nil
             if let accountName = accountName, !accountName.isEmpty {
@@ -520,129 +507,62 @@ struct ManageBillsView: View {
     }
     
     private func importBillsFromCSV(data: Data) throws {
-        guard let csvString = String(data: data, encoding: .utf8) else {
-            throw NSError(domain: "ImportError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Unable to read CSV file"])
-        }
-        
-        let lines = csvString.components(separatedBy: .newlines).filter { !$0.isEmpty }
-        guard lines.count > 1 else {
-            throw NSError(domain: "ImportError", code: 1, userInfo: [NSLocalizedDescriptionKey: "CSV file is empty or has no data rows"])
-        }
-        
-        let header = parseCSVLine(lines[0])
-        guard let dateIndex = header.firstIndex(of: "Due Date") ?? header.firstIndex(of: "dueDate"),
-              let nameIndex = header.firstIndex(of: "Bill") ?? header.firstIndex(of: "bill") ?? header.firstIndex(of: "Name") ?? header.firstIndex(of: "name"),
-              let amountIndex = header.firstIndex(of: "Amount") ?? header.firstIndex(of: "amount") else {
-            throw NSError(domain: "ImportError", code: 1, userInfo: [NSLocalizedDescriptionKey: "CSV file missing required columns (Due Date, Bill/Name, Amount)"])
-        }
-        
-        let recurrenceIndex = header.firstIndex(of: "Recurrence") ?? header.firstIndex(of: "recurrence")
-        let recurrenceIntervalIndex = header.firstIndex(of: "Recurrence Interval") ?? header.firstIndex(of: "recurrenceInterval")
-        let categoryIndex = header.firstIndex(of: "Category") ?? header.firstIndex(of: "category")
-        
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
-        
+        let parsedRows = try BillCSVParser.parse(data: data)
+        let calendar = Calendar.current
+        let accountNames = accountViewModel.accounts.compactMap(\.name)
+
         var imported = 0
         var skipped = 0
         var errors: [String] = []
-        var createdBills: [Bill] = []
         var importKeys: Set<String> = []
-        
-        for (index, line) in lines.dropFirst().enumerated() {
-            let fields = parseCSVLine(line)
-            guard fields.count > max(dateIndex, nameIndex, amountIndex) else {
-                errors.append("Row \(index + 2): Not enough columns")
-                continue
-            }
-            
-            let name = fields[nameIndex].trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty else {
-                errors.append("Row \(index + 2): Missing bill name")
-                continue
-            }
-            
-            guard let dueDate = dateFormatter.date(from: fields[dateIndex].trimmingCharacters(in: .whitespacesAndNewlines)) else {
-                errors.append("Row \(index + 2) ('\(name)'): Invalid date format")
-                continue
-            }
-            
-            let amountString = fields[amountIndex].trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let amount = Decimal(string: amountString.replacingOccurrences(of: ",", with: "")) else {
-                errors.append("Row \(index + 2) ('\(name)'): Invalid amount")
-                continue
-            }
-            
-            let calendar = Calendar.current
-            let dateKey = calendar.startOfDay(for: dueDate).timeIntervalSince1970
-            let amountKey = NSDecimalNumber(decimal: amount).stringValue
-            let importKey = "\(name)-\(dateKey)-\(amountKey)"
-            
+
+        for row in parsedRows {
+            let dateKey = calendar.startOfDay(for: row.dueDate).timeIntervalSince1970
+            let amountKey = NSDecimalNumber(decimal: row.amount).stringValue
+            let importKey = "\(row.name)-\(dateKey)-\(amountKey)"
+
             if importKeys.contains(importKey) {
                 skipped += 1
                 continue
             }
-            
-            let statusIndex = header.firstIndex(of: "Status") ?? header.firstIndex(of: "status")
-            let isPaid = statusIndex != nil && fields.indices.contains(statusIndex!) && fields[statusIndex!].lowercased() == "paid"
-            
-            let paidDateIndex = header.firstIndex(of: "Paid Date") ?? header.firstIndex(of: "paidDate")
-            let paidDateString = paidDateIndex != nil && fields.indices.contains(paidDateIndex!) ? fields[paidDateIndex!].trimmingCharacters(in: .whitespacesAndNewlines) : nil
-            let paidDate = paidDateString != nil && !paidDateString!.isEmpty ? dateFormatter.date(from: paidDateString!) : nil
-            
-            let notesIndex = header.firstIndex(of: "Notes") ?? header.firstIndex(of: "notes")
-            let notes = notesIndex != nil && fields.indices.contains(notesIndex!) ? fields[notesIndex!] : ""
-            
-            let accountIndex = header.firstIndex(of: "Account") ?? header.firstIndex(of: "account")
-            var account: Account? = nil
-            if let accountIndex = accountIndex, fields.indices.contains(accountIndex) {
-                let accountName = fields[accountIndex].trimmingCharacters(in: .whitespacesAndNewlines)
-                if !accountName.isEmpty {
-                    account = accountViewModel.accounts.first { $0.name == accountName }
-                }
+
+            var account: Account?
+            if let csvAccount = row.accountName,
+               let matchedName = CSVSupport.bestAccountName(for: csvAccount, among: accountNames) {
+                account = accountViewModel.accounts.first { $0.name == matchedName }
             }
-            
-            let autoPayIndex = header.firstIndex(of: "Auto-Pay") ?? header.firstIndex(of: "autoPay") ?? header.firstIndex(of: "Auto Pay")
-            let autoPay = autoPayIndex != nil && fields.indices.contains(autoPayIndex!) && fields[autoPayIndex!].lowercased() == "yes"
-            
-            let recurrenceType = recurrenceIndex != nil && fields.indices.contains(recurrenceIndex!) ? fields[recurrenceIndex!].trimmingCharacters(in: .whitespacesAndNewlines) : "none"
-            let recurrenceIntervalString = recurrenceIntervalIndex != nil && fields.indices.contains(recurrenceIntervalIndex!) ? fields[recurrenceIntervalIndex!].trimmingCharacters(in: .whitespacesAndNewlines) : "0"
-            let recurrenceInterval = Int(recurrenceIntervalString) ?? 0
-            
-            let category = categoryIndex != nil && fields.indices.contains(categoryIndex!) ? fields[categoryIndex!].trimmingCharacters(in: .whitespacesAndNewlines) : nil
-            
-            if billViewModel.billExists(name: name, dueDate: dueDate, amount: amount) {
+
+            if billViewModel.billExists(name: row.name, dueDate: row.dueDate, amount: row.amount) {
                 skipped += 1
                 continue
             }
-            
+
             guard let newBill = billViewModel.addBill(
-                name: name,
-                amount: amount,
-                dueDate: dueDate,
-                notes: notes,
-                recurrenceType: recurrenceType,
-                recurrenceInterval: recurrenceInterval,
-                autoPay: autoPay,
+                name: row.name,
+                amount: row.amount,
+                dueDate: row.dueDate,
+                notes: row.notes,
+                recurrenceType: row.recurrenceType,
+                recurrenceInterval: row.recurrenceInterval,
+                autoPay: row.autoPay,
                 paymentCard: nil,
                 account: account,
-                category: category,
+                category: row.category,
                 skipDuplicateCheck: true,
                 skipSave: true
             ) else {
                 skipped += 1
                 continue
             }
-            
+
             importKeys.insert(importKey)
-            
-            if isPaid {
+
+            if row.isPaid {
                 newBill.isPaid = true
-                newBill.paidDate = paidDate ?? dueDate
-                
+                newBill.paidDate = row.paidDate ?? row.dueDate
+
                 if account != nil, let amountDecimal = newBill.amount?.decimalValue {
-                    let transactionDate = paidDate ?? dueDate
+                    let transactionDate = row.paidDate ?? row.dueDate
                     accountViewModel.recordLedgerEntry(
                         for: newBill,
                         amount: amountDecimal,
@@ -653,11 +573,10 @@ struct ManageBillsView: View {
                     )
                 }
             }
-            
-            createdBills.append(newBill)
+
             imported += 1
         }
-        
+
         if imported > 0 {
             do {
                 let context = PersistenceController.shared.container.viewContext
@@ -665,12 +584,12 @@ struct ManageBillsView: View {
             } catch {
                 errors.append("Error saving imported bills: \(error.localizedDescription)")
             }
-            
+
             importedCount = imported
             showImportSuccessAlert = true
             billViewModel.skipAutoPayProcessing(for: 5.0)
             billViewModel.fetchBills(skipAutoPay: true)
-            
+
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 let result = billViewModel.performComprehensiveCleanup()
                 if result.duplicatesRemoved > 0 {
@@ -686,51 +605,9 @@ struct ManageBillsView: View {
         }
     }
     
-    private func parseCSVLine(_ line: String) -> [String] {
-        var fields: [String] = []
-        var currentField = ""
-        var insideQuotes = false
-        
-        for char in line {
-            if char == "\"" {
-                insideQuotes.toggle()
-            } else if char == "," && !insideQuotes {
-                fields.append(currentField)
-                currentField = ""
-            } else {
-                currentField.append(char)
-            }
-        }
-        fields.append(currentField)
-        
-        return fields.map { field in
-            var cleaned = field.trimmingCharacters(in: .whitespaces)
-            if cleaned.hasPrefix("\"") && cleaned.hasSuffix("\"") {
-                cleaned = String(cleaned.dropFirst().dropLast())
-            }
-            return cleaned.replacingOccurrences(of: "\"\"", with: "\"")
-        }
-    }
-    
     private func showImportError(_ message: String) {
         importErrorMessage = message
         showImportErrorAlert = true
     }
 }
 
-// MARK: - Bills Share Sheet
-
-private struct BillsShareSheet: UIViewControllerRepresentable {
-    let activityItems: [Any]
-    let completion: (() -> Void)?
-    
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        let controller = UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
-        controller.completionWithItemsHandler = { _, _, _, _ in
-            completion?()
-        }
-        return controller
-    }
-    
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
-}

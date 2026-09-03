@@ -1,191 +1,46 @@
-# Bills & Balance - Personal Finance Management iOS App
+# Bills & Balance
 
-A clean, modern iOS app that combines bill tracking with disciplined financial practices through manual verification of all transactions.
+A local-first iOS checkbook and bills app: recurring bills, multi-account ledger, calendar, and activity reports. Persistence is **Core Data**, with **CloudKit** as the single sync backend when the user is signed into iCloud.
 
-## Features
+## What’s in the app
 
-### Phase 1: Core Bill Tracking (Implemented)
+- **Bills** — recurrence, auto-pay, notifications, badge, categories, manage/import/export
+- **Balance** — multi-account ledger, cleared vs available, transfers, JSON account export/import, statement CSV import (from Activity)
+- **Calendar** — month grid and day drawer for bills and income
+- **Activity** — week / month / year spending, income, fees, and categories
+- **Extras** — onboarding, CoinGecko BTC price, credit cards, custom categories
 
-#### ✅ Bill Management
-- **Add/Edit Bills**: Create and modify bills with essential details
-- **Mark as Paid**: Quick toggle to mark bills as paid/unpaid
-- **Delete Bills**: Remove individual bills or recurring bill series
-- **Bill Details**: Name, amount, due date, notes, recurrence
+## Available balance
 
-#### ✅ Recurring Bills
-- Support for weekly, monthly, quarterly, yearly, and custom intervals
-- Smart handling of recurring bill series
-- Option to delete single occurrence or entire series
-- Automatic creation of next bill when current one is paid
+**Cleared** is starting balance plus reconciled ledger entries (checkbook).
 
-#### ✅ Bill Organization
-- **Monthly View**: Group bills by month with clear headers
-- **Status Indicators**: Visual indicators for paid, unpaid, overdue, and auto-pay bills
-- **Smart Grouping**: Show current month + next 2 months by default
-- **Future Bills**: Expandable section for upcoming months
+**Available** is current balance minus unpaid bills plus expected income inside a look-ahead window (14 / 30 / 60 / 90 days). The window lives in Settings on the Balance menu (**Available Balance Window**) and is stored locally in UserDefaults.
 
-#### ✅ Visual Design
-- **Clean List Interface**: Modern, card-based bill rows
-- **Status Colors**: Green (paid), Blue (upcoming), Red (overdue), Gray (inactive)
-- **Haptic Feedback**: Subtle haptic responses for interactions
-- **Swipe Actions**: Swipe to edit, mark paid, or delete
-- **Context Menus**: Long-press for additional options
+## Sync
 
-#### ✅ Notifications
-- Local notifications for bill reminders (3 days before due date)
-- Smart notification management (cancel when paid, reschedule when edited)
+One backend: **CloudKit** (`iCloud.com.kyle.billsandbalance`).
 
-### Phase 2: Ledger Integration (Planned)
-- Checkbook-style ledger with running balance
-- Manual verification of all transactions
-- Bank integration and transaction sync
-- Smart matching between bills and bank transactions
-- Monthly reconciliation tools
+- Signed into iCloud on device → `NSPersistentCloudKitContainer`
+- Simulator / no iCloud / CloudKit store failure → local Core Data fallback
+- **Supabase is parked** (stubs in `SupabaseSupport.swift`; WIP under `Parked/SupabaseWIP/`). Do not enable both.
 
-## Technical Architecture
+Create the CloudKit container in the Apple Developer portal for the App ID `com.kyle.billsandbalance` if you want multi-device sync.
 
-### Core Technologies
-- **SwiftUI** for modern, declarative UI
-- **Core Data** for persistent storage
-- **MVVM Pattern** with ViewModels for clean separation of concerns
-- **iOS 17+** target for latest features
-- **Clean, modular code structure**
+## Architecture
 
-### Core Data Model
-```swift
-Bill Entity:
-- id: UUID (unique identifier)
-- name: String (bill name)
-- amount: Decimal (bill amount)
-- dueDate: Date (due date)
-- isPaid: Bool (payment status)
-- paidDate: Date? (when paid)
-- notes: String? (optional notes)
-- recurrenceType: String (weekly, monthly, etc.)
-- recurrenceInterval: Int16 (interval for recurring)
-- seriesId: UUID? (links recurring bills)
-- autoPay: Bool (auto-pay indicator)
-- createdAt: Date
-- updatedAt: Date
-```
+- SwiftUI, iOS 17+, MVVM
+- Core Data model: `Bill`, `Account`, `LedgerEntry`, `Paycheck`
+- ViewModels: `BillViewModel`, `AccountViewModel`, `PaycheckViewModel`, `ReportsViewModel` (`@MainActor`)
+- Money math that must stay correct lives in testable types: `RecurrenceCalculator`, `DuplicateBillGuard`, `BalanceMath`, `TransactionCSVParser`, `FeeParsing`
 
-### Key Components
+## Getting started
 
-#### Views
-- `BillListView`: Main list with monthly grouping
-- `AddEditBillView`: Form for creating/editing bills
-- `BillRowView`: Individual bill row component
-- `BillSummaryHeader`: Monthly summary with totals
+1. Open `BillsAndBalance.xcodeproj` in Xcode 15+
+2. Select the **BillsAndBalance** shared scheme
+3. Build and run on a simulator or device
 
-#### ViewModels
-- `BillViewModel`: Core bill management logic
-- `PersistenceController`: Core Data stack management
-- `NotificationManager`: Local notifications for reminders
-- `HapticManager`: Haptic feedback management
-
-#### Models
-- `BillRecurrenceType`: Enum for recurrence patterns
-- `BillStatus`: Bill status with colors and display names
-
-## Getting Started
-
-### Prerequisites
-- Xcode 15.0 or later
-- iOS 17.0 or later
-- Swift 5.9 or later
-
-### Installation
-1. Clone the repository
-2. Open `BillsAndBalance.xcodeproj` in Xcode
-3. Build and run on iOS Simulator or device
-
-### First Launch
-1. Grant notification permissions when prompted
-2. Add your first bill using the "+" button
-3. Explore recurring bills and monthly organization
-
-## Usage Guide
-
-### Adding Bills
-1. Tap the "+" button in the top right
-2. Fill in bill details:
-   - Name (required)
-   - Amount (required)
-   - Due date (required)
-   - Recurrence (optional)
-   - Auto-pay toggle (optional)
-   - Notes (optional)
-3. Tap "Save"
-
-### Managing Bills
-- **Mark as Paid**: Tap the circle icon or swipe right
-- **Edit**: Tap on the bill or long-press for context menu
-- **Delete**: Swipe left or use context menu
-- **Recurring Bills**: Choose to delete single occurrence or entire series
-
-### Recurring Bills
-- Set recurrence type (weekly, monthly, quarterly, yearly)
-- Set interval (e.g., every 2 months)
-- When you mark a recurring bill as paid, the next occurrence is automatically created
-- Use series ID to link all occurrences of the same bill
-
-### Notifications
-- Bills send reminders 3 days before due date
-- Notifications are automatically managed (canceled when paid, rescheduled when edited)
-- Grant notification permissions in Settings if needed
-
-## Design Philosophy
-
-### Disciplined Financial Practices
-- Manual verification of all transactions (Phase 2)
-- Encourages regular balance checking
-- No automatic payments without explicit confirmation
-- Clear visual hierarchy for financial status
-
-### Modern iOS Design
-- Follows Apple's Human Interface Guidelines
-- Supports both Light and Dark modes
-- Optimized for iPhone and iPad
-- Accessibility support with VoiceOver and Dynamic Type
-
-### User Experience
-- Smooth animations and transitions
-- Haptic feedback for interactions
-- Intuitive swipe gestures
-- Clear visual status indicators
-
-## Future Roadmap
-
-### Phase 2: Ledger Integration
-- [ ] Checkbook-style transaction register
-- [ ] Running balance calculation
-- [ ] Bank account integration
-- [ ] Transaction import and matching
-- [ ] Monthly reconciliation tools
-
-### Additional Features
-- [ ] Export/Import functionality
-- [ ] Advanced filtering and search
-- [ ] Bill categories and tags
-- [ ] Spending analytics and reports
-- [ ] Multiple account support
-
-## Contributing
-
-This is a personal finance app focused on disciplined money management. The codebase is designed to be:
-- Clean and maintainable
-- Well-documented
-- Following iOS best practices
-- Accessible to all users
+Unit tests live in the **BillsAndBalanceTests** target (parser, recurrence, duplicate guards, balance math, in-memory Core Data).
 
 ## License
 
-This project is for personal use and educational purposes.
-
-## Support
-
-For questions or issues, please refer to the code documentation or create an issue in the repository.
-
----
-
-**Bills & Balance** - Take control of your finances with disciplined tracking and verification.
+Personal use and educational purposes.

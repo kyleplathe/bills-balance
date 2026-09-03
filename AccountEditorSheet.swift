@@ -208,7 +208,7 @@ struct AccountEditorSheet: View {
                     Text("Account Details")
                 } footer: {
                     if account != nil {
-                        Text("Hidden accounts won't appear in the main balance view but can still be used for bills and transactions.")
+                        Text("Hidden accounts are left out of Current Balance and the accounts list. Use Show Inactive Accounts to view them without adding them back to the total.")
                     }
                 }
                 
