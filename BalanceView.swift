@@ -124,13 +124,15 @@ struct BalanceView: View {
     
     private var navigationContent: some View {
         ScrollView {
-            VStack(spacing: 20) {
+            VStack(spacing: 16) {
                 if accountViewModel.accounts.isEmpty {
                     emptyStateView
                 } else {
-                    summaryChipCards
-                    if !visibleAccounts.isEmpty {
-                        accountsSection
+                    VStack(spacing: 8) {
+                        summaryChipCards
+                        if !visibleAccounts.isEmpty {
+                            accountsSection
+                        }
                     }
                     recentTransactionsSection
                 }
@@ -372,79 +374,16 @@ struct BalanceView: View {
     // MARK: - Summary Chip Cards
     
     private var summaryChipCards: some View {
-        balanceSnapshotCard
-    }
-    
-    private var balanceSnapshotCard: some View {
-        ChipCard {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(alignment: .top, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Current Balance")
-                            .font(.headline.weight(.semibold))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-
-                        Button {
-                            HapticManager.shared.buttonTapped()
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                hideBalances.toggle()
-                            }
-                        } label: {
-                            Group {
-                                if hideBalances {
-                                    Text(BalancePrivacy.placeholder)
-                                } else {
-                                    Text(totalBalance, format: .currency(code: "USD"))
-                                }
-                            }
-                            .font(.system(.title3, design: .rounded, weight: .bold))
-                            .monospacedDigit()
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                            .contentTransition(.opacity)
-                            .privacySensitive()
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(
-                            hideBalances
-                                ? "Current balance hidden"
-                                : "Current balance \(totalBalance.formatted(.currency(code: "USD")))"
-                        )
-                        .accessibilityHint("Shows or hides balances on this screen")
+        Grid(horizontalSpacing: 12, verticalSpacing: 8) {
+            GridRow(alignment: .top) {
+                VStack(alignment: .leading, spacing: 16) {
+                    currentBalanceChip
+                    if !visibleAccounts.isEmpty {
+                        Text("Accounts")
+                            .font(.title3.weight(.semibold))
                     }
-
-                    Spacer(minLength: 8)
-
-                    Button {
-                        showingReports = true
-                    } label: {
-                        Image(systemName: "chart.bar")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Reports")
                 }
-
-                Divider()
-                    .overlay(Color.primary.opacity(0.08))
-
-                Button {
-                    showingReports = true
-                } label: {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("\(activityPeriodTitle) Activity")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-
-                        activityChart
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(activityAccessibilityLabel)
+                periodActivityChip
             }
         }
         .onAppear {
@@ -453,22 +392,91 @@ struct BalanceView: View {
             }
         }
     }
-    
-    private var activityChart: some View {
-        CompactWalletStackedCategoryBarChart(
-            period: activityPeriod,
-            appeared: activityChartAppeared
-        )
+
+    private var currentBalanceChip: some View {
+        ChipCard(verticalPadding: 10, horizontalPadding: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                FittedChipLine(
+                    text: "Total Balance",
+                    maxSize: 13,
+                    minSize: 10,
+                    weight: .medium,
+                    color: .secondary
+                )
+
+                Button {
+                    HapticManager.shared.buttonTapped()
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        hideBalances.toggle()
+                    }
+                } label: {
+                    FittedChipLine(
+                        text: displayedTotalBalance,
+                        maxSize: 26,
+                        minSize: 13,
+                        weight: .bold,
+                        design: .rounded
+                    )
+                    .contentTransition(.opacity)
+                    .privacySensitive()
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(
+                    hideBalances
+                        ? "Total balance hidden"
+                        : "Total balance \(totalBalance.formatted(.currency(code: "USD")))"
+                )
+                .accessibilityHint("Shows or hides balances on this screen")
+
+                FittedChipLine(
+                    text: balanceChipSubtitle,
+                    maxSize: 13,
+                    minSize: 10,
+                    weight: .regular,
+                    color: .secondary
+                )
+            }
+        }
+    }
+
+    private var periodActivityChip: some View {
+        Button {
+            showingReports = true
+        } label: {
+            ChipCard(verticalPadding: 10, horizontalPadding: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    FittedChipLine(
+                        text: activityChipTitle,
+                        maxSize: 13,
+                        minSize: 10,
+                        weight: .medium,
+                        color: .secondary
+                    )
+
+                    FittedChipLine(
+                        text: activityChipSpendingText,
+                        maxSize: 20,
+                        minSize: 12,
+                        weight: .bold,
+                        design: .rounded
+                    )
+                    .privacySensitive()
+
+                    CompactWalletStackedCategoryBarChart(
+                        period: activityPeriod,
+                        appeared: activityChartAppeared
+                    )
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(activityAccessibilityLabel)
     }
     
     // MARK: - Accounts Section
     
     private var accountsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Accounts")
-                .font(.title3.weight(.semibold))
-                .padding(.horizontal, 4)
-            
+        VStack(alignment: .leading, spacing: 8) {
             if visibleAccounts.isEmpty {
                 Text("No accounts to display")
                     .font(.subheadline)
@@ -500,16 +508,15 @@ struct BalanceView: View {
                                 // Fill remaining slots with invisible spacers to maintain grid order
                                 ForEach(pageAccounts.count..<accountsPerPage, id: \.self) { _ in
                                     Color.clear
-                                        .frame(height: 100)
+                                        .frame(height: AccountChipLayout.height)
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 4)
                             .tag(pageIndex)
                         }
                     }
                     .tabViewStyle(.page(indexDisplayMode: .never))
-                    .frame(height: 220) // Height for 2 rows of cards (100px each + 12px spacing)
+                    .frame(height: AccountChipLayout.pageHeight)
                     
                     // Custom page indicator below the chips
                     if totalPages > 1 {
@@ -520,7 +527,6 @@ struct BalanceView: View {
                                     .frame(width: 8, height: 8)
                             }
                         }
-                        .padding(.top, 4)
                     }
                 }
             }
@@ -549,10 +555,9 @@ struct BalanceView: View {
         let transactions = recentTransactions.prefix(5)
         return Group {
             if !transactions.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text("Recent")
                         .font(.title3.weight(.semibold))
-                        .padding(.horizontal, 4)
                     
                     VStack(spacing: 8) {
                         ForEach(Array(transactions), id: \.objectID) { entry in
@@ -571,7 +576,39 @@ struct BalanceView: View {
     }
     
     private var activityAccessibilityLabel: String {
-        "\(activityPeriodTitle) activity. Opens reports."
+        "\(activityChipTitle). Opens reports."
+    }
+
+    private var activityChipTitle: String {
+        switch activityPeriod {
+        case .week: return "Weekly Activity"
+        case .month: return "Monthly Activity"
+        case .year: return "Yearly Activity"
+        }
+    }
+
+    private var displayedTotalBalance: String {
+        hideBalances
+            ? BalancePrivacy.placeholder
+            : totalBalance.formatted(.currency(code: "USD"))
+    }
+
+    private var activityChipSpendingText: String {
+        if hideBalances { return BalancePrivacy.shortPlaceholder }
+        return periodSpendingTotal.formatted(.currency(code: "USD"))
+    }
+
+    private var periodSpendingTotal: Decimal {
+        reportsViewModel.categoryBreakdownByPeriod(period: activityPeriod)
+            .reduce(into: Decimal(0)) { sum, bucket in
+                sum += bucket.categories.reduce(Decimal(0)) { $0 + $1.amount }
+            }
+    }
+
+    private var balanceChipSubtitle: String {
+        let count = visibleAccounts.count
+        if count == 0 { return "No accounts" }
+        return "\(count) Account\(count == 1 ? "" : "s")"
     }
     
     private var totalBalance: Decimal {
@@ -580,10 +617,6 @@ struct BalanceView: View {
     
     private var activityPeriod: ReportsViewModel.WalletPeriod {
         reportsViewModel.lastUsedWalletPeriod
-    }
-    
-    private var activityPeriodTitle: String {
-        activityPeriod.rawValue
     }
     
     private var recentTransactions: [LedgerEntry] {
@@ -693,10 +726,47 @@ struct BalanceView: View {
 
 // MARK: - Chip Card Component
 
+/// One line of chip text that uses the largest font that still fits the available width.
+/// Display amounts use proportional lining figures (SF default) so pairs like "11" don’t
+/// pick up the extra side-bearing that tabular/`monospacedDigit` figures add.
+private struct FittedChipLine: View {
+    let text: String
+    var maxSize: CGFloat
+    var minSize: CGFloat
+    var weight: Font.Weight
+    var color: Color = .primary
+    var design: Font.Design = .default
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            ForEach(candidateSizes, id: \.self) { size in
+                line(size: size)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            line(size: minSize)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var candidateSizes: [CGFloat] {
+        stride(from: maxSize, through: minSize, by: -1).map { $0 }
+    }
+
+    private func line(size: CGFloat) -> some View {
+        Text(text)
+            .font(.system(size: size, weight: weight, design: design))
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .allowsTightening(true)
+    }
+}
+
 private struct ChipCard<Content: View>: View {
     @Environment(\.colorScheme) private var colorScheme
-    var verticalPadding: CGFloat = 20
-    var horizontalPadding: CGFloat = 18
+    var verticalPadding: CGFloat = 16
+    var horizontalPadding: CGFloat = 16
+    var fillHeight: Bool = false
     @ViewBuilder let content: Content
     
     var body: some View {
@@ -711,6 +781,7 @@ private struct ChipCard<Content: View>: View {
         content
             .padding(.vertical, verticalPadding)
             .padding(.horizontal, horizontalPadding)
+            .frame(maxWidth: .infinity, maxHeight: fillHeight ? .infinity : nil, alignment: .topLeading)
             .background(
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .fill(backgroundColor)
@@ -724,6 +795,12 @@ private struct ChipCard<Content: View>: View {
 
 // MARK: - Account Chip Card
 
+private enum AccountChipLayout {
+    static let height: CGFloat = 72
+    static let spacing: CGFloat = 12
+    static var pageHeight: CGFloat { height * 2 + spacing }
+}
+
 private struct AccountChipCard: View {
     @EnvironmentObject private var accountViewModel: AccountViewModel
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
@@ -733,20 +810,24 @@ private struct AccountChipCard: View {
     
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(displayedBalance)
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .privacySensitive()
+            VStack(alignment: .leading, spacing: 2) {
+                FittedChipLine(
+                    text: displayedBalance,
+                    maxSize: 24,
+                    minSize: 13,
+                    weight: .bold,
+                    color: .white,
+                    design: .rounded
+                )
+                .privacySensitive()
                 HStack(spacing: 4) {
-                    Text(account.name ?? "Account")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.9))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                    FittedChipLine(
+                        text: account.name ?? "Account",
+                        maxSize: 13,
+                        minSize: 10,
+                        weight: .regular,
+                        color: .white.opacity(0.9)
+                    )
                     if account.isHiddenFlag {
                         Image(systemName: "eye.slash")
                             .font(.caption2)
@@ -754,16 +835,16 @@ private struct AccountChipCard: View {
                     }
                 }
             }
+            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            .padding(16)
             .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .fill(accountGradient)
-                    .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 2)
             )
         }
         .buttonStyle(.plain)
-        .frame(height: 100)
+        .frame(height: AccountChipLayout.height)
         .opacity(account.isHiddenFlag ? 0.7 : 1)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityBalanceLabel)

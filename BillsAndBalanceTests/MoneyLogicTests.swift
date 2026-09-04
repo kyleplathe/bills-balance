@@ -736,6 +736,65 @@ final class BillBtcBacktestTests: XCTestCase {
         XCTAssertEqual(result?.price, 75_000)
     }
 
+    func testDetectsDollarBillPaidInSats() {
+        XCTAssertTrue(BillBtcBacktest.isUsdBillPaidInBitcoin(isCredit: false, usdAmount: 1500, btcAmount: Decimal(string: "0.02")!))
+        XCTAssertFalse(BillBtcBacktest.isUsdBillPaidInBitcoin(isCredit: false, usdAmount: 1500, btcAmount: 0))
+        XCTAssertFalse(BillBtcBacktest.isUsdBillPaidInBitcoin(isCredit: true, usdAmount: 1500, btcAmount: Decimal(string: "0.02")!))
+    }
+
+    func testTemplatesAutoIncludeSeriesPaidInBitcoin() {
+        let series = UUID()
+        let paid = BillBtcBacktest.BillSource(
+            groupingKey: series.uuidString,
+            name: "Rent",
+            amount: 1400,
+            dueDate: calendar.date(from: DateComponents(year: 2025, month: 6, day: 1)),
+            seriesId: series,
+            category: "Housing",
+            trackInBitcoin: false,
+            paidInBitcoin: true
+        )
+        let current = BillBtcBacktest.BillSource(
+            groupingKey: series.uuidString,
+            name: "Rent",
+            amount: 1550,
+            dueDate: calendar.date(from: DateComponents(year: 2026, month: 9, day: 1)),
+            seriesId: series,
+            category: "Housing",
+            trackInBitcoin: false,
+            paidInBitcoin: false
+        )
+        let ignored = BillBtcBacktest.BillSource(
+            groupingKey: UUID().uuidString,
+            name: "Netflix",
+            amount: 15,
+            dueDate: calendar.date(from: DateComponents(year: 2026, month: 9, day: 5)),
+            seriesId: nil,
+            category: "Subscriptions",
+            trackInBitcoin: false,
+            paidInBitcoin: false
+        )
+        let templates = BillBtcBacktest.templates(from: [paid, current, ignored], calendar: calendar)
+        XCTAssertEqual(templates.map(\.name), ["Rent"])
+        XCTAssertEqual(templates.first?.amount, 1550)
+        XCTAssertEqual(templates.first?.dueDay, 1)
+    }
+
+    func testShareTitleUsesBillName() {
+        XCTAssertEqual(BillBtcBacktest.shareTitle(billNames: ["Mortgage"]), "Mortgage USD vs BTC")
+        XCTAssertEqual(BillBtcBacktest.shareTitle(billNames: ["Rent", "Xcel"]), "Rent & Xcel USD vs BTC")
+        XCTAssertEqual(BillBtcBacktest.shareTitle(billNames: ["Rent", "Xcel", "Internet"]), "Bills USD vs BTC")
+        XCTAssertEqual(BillBtcBacktest.shareHeadlineName(from: "Mortgage USD vs BTC"), "Mortgage")
+    }
+
+    func testBitcoinSpendChangeShowsLessOverTime() {
+        let early = Array(repeating: Decimal(string: "0.04")!, count: 12)
+        let late = Array(repeating: Decimal(string: "0.01")!, count: 12)
+        let change = BillBtcBacktest.bitcoinSpendChange(btcAmounts: early + late, monthCount: 48)
+        XCTAssertEqual(change?.percentLess, Decimal(string: "0.75"))
+        XCTAssertEqual(change?.years, 4)
+    }
+
     func testMatchesByNameInMonth() {
         let template = BillBtcBacktest.Template(name: "Xcel Energy", amount: 120, dueDay: 15, seriesId: nil, category: "Utilities")
         let monthStart = calendar.date(from: DateComponents(year: 2025, month: 6, day: 1))!
@@ -899,6 +958,10 @@ final class CategoryStyleTests: XCTestCase {
             ("Shopping", 20)
         ])
         XCTAssertNotNil(gradient)
+    }
+
+    func testAppleCardSpectrumIsChartMapped() {
+        XCTAssertNotNil(CategoryStyle.appleCardSpectrum)
     }
 }
 

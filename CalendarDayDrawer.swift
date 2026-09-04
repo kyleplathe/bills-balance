@@ -66,6 +66,7 @@ struct DayDetailDrawer: View {
     let bills: [BillOccurrence]
     let paychecks: [PaycheckOccurrence]
     let currencyCode: String
+    var compact: Bool = false
     let onAddBill: (() -> Void)?
     let onAddIncome: (() -> Void)?
     let onAddIncomeTransaction: (() -> Void)?
@@ -127,161 +128,196 @@ struct DayDetailDrawer: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Drag handle area - larger and more responsive
-            VStack(spacing: 8) {
-                Capsule()
-                    .fill(Color.secondary.opacity(0.3))
-                    .frame(width: 36, height: 5)
-                    .padding(.top, 12)
-                
-                Text(headerFormatter.string(from: date))
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-            }
-            .frame(height: 60)
+            drawerHeader
+                .contentShape(Rectangle())
+                .gesture(dragGesture)
             
-            VStack(spacing: 16) {
-                if onAddBill != nil || onAddIncome != nil {
-                    HStack(spacing: 12) {
-                        if let onAddBill {
-                            Button(action: onAddBill) {
-                                Label("Add Bill", systemImage: "plus.circle")
-                            }
-                        }
-                        if let onAddIncome {
-                            Button(action: onAddIncome) {
-                                Label("Add Income", systemImage: "arrow.down.circle")
-                            }
-                        }
-                        Spacer()
-                    }
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(.accentColor)
+            VStack(spacing: compact ? 8 : 16) {
+                if !compact {
+                    addActionsRow
                 }
 
                 if bills.isEmpty && paychecks.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle")
-                            .font(.system(size: 32))
-                            .foregroundColor(.secondary)
-                        Text("No activity on this day")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
+                    emptyDayState
                 } else {
-                            VStack(alignment: .leading, spacing: 12) {
-                        if !bills.isEmpty {
-                                ForEach(bills) { occurrence in
-                                    BillDueRow(occurrence: occurrence, 
-                                             currencyCode: currencyCode,
-                                             onEdit: { onEditBill?(occurrence.bill) },
-                                             onDelete: { onDeleteBill?(occurrence.bill) })
-                                        .padding(.vertical, 12)
-                                        .padding(.horizontal, 14)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                                .fill(Color(.secondarySystemBackground))
-                                        )
-                                        .contentShape(Rectangle())
-                                        .onTapGesture {
-                                            onEditBill?(occurrence.bill)
-                                        }
-                                        .onLongPressGesture {
-                                            onEditBill?(occurrence.bill)
-                                }
-                            }
+                    VStack(alignment: .leading, spacing: compact ? 6 : 12) {
+                        ForEach(bills) { occurrence in
+                            drawerBillRow(occurrence)
                         }
-                        if !paychecks.isEmpty {
-                                ForEach(paychecks) { occurrence in
-                                    PaycheckRow(occurrence: occurrence, 
-                                              currencyCode: currencyCode,
-                                              onAddToAccount: {
-                                                  // Create pending transaction in account
-                                                  guard let account = occurrence.paycheck.account,
-                                                        let amountValue = occurrence.paycheck.amount?.decimalValue,
-                                                        amountValue > 0 else { return }
-                                                  
-                                              // Check if already has pending transaction for this date
-                                              let calendar = Calendar.current
-                                              let startOfDay = calendar.startOfDay(for: occurrence.date)
-                                              guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else { return }
-                                              
-                                              let entries = account.ledgerEntries as? Set<LedgerEntry> ?? []
-                                              let existingPending = entries.contains { entry in
-                                                  guard let entryDate = entry.date,
-                                                        entryDate >= startOfDay,
-                                                        entryDate < endOfDay,
-                                                        entry.category == "Income",
-                                                        !entry.isReconciledFlag else { return false }
-                                                  let titleMatches = entry.title == occurrence.paycheck.name
-                                                  let amountMatches = abs((entry.usdAmountDecimal - amountValue)) < 0.01
-                                                  return titleMatches || amountMatches
-                                              }
-                                              
-                                              // Don't create duplicate pending transactions
-                                              if existingPending {
-                                                  HapticManager.shared.billDeleted()
-                                                  return
-                                              }
-                                              
-                                                  // Ensure amount is positive for income (credit)
-                                                  let positiveAmount = max(abs(amountValue), amountValue)
-                                                  
-                                                  // Save current selected account to restore it
-                                                  let previousSelectedAccount = accountViewModel.selectedAccount
-                                                  
-                                                  // Temporarily select the account to ensure refresh happens
-                                                  accountViewModel.selectedAccount = account
-                                                  
-                                              // Create the pending transaction
-                                                  _ = accountViewModel.recordLedgerEntry(
-                                                      for: occurrence.paycheck,
-                                                      amount: positiveAmount, // Positive amount = credit (addition)
-                                                      date: occurrence.date,
-                                                      title: occurrence.paycheck.name ?? "Income",
-                                                      notes: occurrence.paycheck.notes
-                                                  )
-                                                  
-                                                  // Restore previous selection
-                                                  accountViewModel.selectedAccount = previousSelectedAccount
-                                                  
-                                                  // Refresh all data to ensure UI updates
-                                                  accountViewModel.refreshData()
-                                                  
-                                                  // Enhanced feedback: haptic, sound, and visual confirmation
-                                                  HapticManager.shared.success()
-                                              },
-                                              onEdit: { onEditIncome?(occurrence.paycheck) },
-                                              onDelete: { onDeleteIncome?(occurrence.paycheck) })
-                                    .environmentObject(accountViewModel)
-                                        .padding(.vertical, 12)
-                                        .padding(.horizontal, 14)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                                .fill(Color(.secondarySystemBackground))
-                                        )
-                                        .contentShape(Rectangle())
-                            }
+                        ForEach(paychecks) { occurrence in
+                            drawerPaycheckRow(occurrence)
                         }
                     }
                 }
             }
-            .padding(.top, 8)
+            .padding(.top, compact ? 4 : 8)
         }
         .offset(y: max(0, dragOffset))
         .animation(.spring(response: 0.25, dampingFraction: 0.85), value: dragOffset)
-        .contentShape(Rectangle())
-        .simultaneousGesture(
-            dragGesture
-        )
-        .padding(.bottom, 18)
-        .padding(.horizontal, 18)
+        .padding(.bottom, compact ? 10 : 18)
+        .padding(.horizontal, compact ? 12 : 18)
         .background(.regularMaterial)
-        .cornerRadius(26)
+        .clipShape(RoundedRectangle(cornerRadius: compact ? 20 : 26, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: compact ? 20 : 26, style: .continuous))
         .shadow(color: Color.black.opacity(0.12), radius: 16, x: 0, y: 10)
+    }
+    
+    private var drawerHeader: some View {
+        VStack(spacing: compact ? 4 : 8) {
+            Capsule()
+                .fill(Color.secondary.opacity(0.3))
+                .frame(width: 36, height: 5)
+                .padding(.top, compact ? 8 : 12)
+            
+            HStack(spacing: 8) {
+                Text(headerFormatter.string(from: date))
+                    .font(compact ? .subheadline.weight(.semibold) : .headline)
+                    .frame(maxWidth: .infinity, alignment: compact ? .leading : .center)
+                
+                if compact {
+                    addActionsRow
+                }
+            }
+        }
+        .frame(minHeight: compact ? 44 : 60)
+        .padding(.bottom, compact ? 2 : 0)
+    }
+    
+    @ViewBuilder
+    private var addActionsRow: some View {
+        if onAddBill != nil || onAddIncome != nil {
+            HStack(spacing: compact ? 8 : 12) {
+                if let onAddBill {
+                    Button(action: onAddBill) {
+                        if compact {
+                            Image(systemName: "plus.circle")
+                        } else {
+                            Label("Add Bill", systemImage: "plus.circle")
+                        }
+                    }
+                    .accessibilityLabel("Add Bill")
+                }
+                if let onAddIncome {
+                    Button(action: onAddIncome) {
+                        if compact {
+                            Image(systemName: "arrow.down.circle")
+                        } else {
+                            Label("Add Income", systemImage: "arrow.down.circle")
+                        }
+                    }
+                    .accessibilityLabel("Add Income")
+                }
+                if !compact {
+                    Spacer()
+                }
+            }
+            .font(compact ? .body.weight(.semibold) : .caption.weight(.semibold))
+            .foregroundColor(.accentColor)
+        }
+    }
+    
+    private var emptyDayState: some View {
+        VStack(spacing: compact ? 4 : 8) {
+            if !compact {
+                Image(systemName: "checkmark.circle")
+                    .font(.system(size: 32))
+                    .foregroundColor(.secondary)
+            }
+            Text("No activity on this day")
+                .font(compact ? .caption : .subheadline)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, compact ? 4 : 0)
+    }
+    
+    private var rowPadding: EdgeInsets {
+        compact
+            ? EdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)
+            : EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14)
+    }
+    
+    private var rowCorner: CGFloat { compact ? 12 : 16 }
+    
+    private func drawerBillRow(_ occurrence: BillOccurrence) -> some View {
+        BillDueRow(occurrence: occurrence,
+                   currencyCode: currencyCode,
+                   compact: compact,
+                   onEdit: { onEditBill?(occurrence.bill) },
+                   onDelete: { onDeleteBill?(occurrence.bill) })
+            .padding(rowPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: rowCorner, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onEditBill?(occurrence.bill)
+            }
+            .onLongPressGesture {
+                onEditBill?(occurrence.bill)
+            }
+    }
+    
+    private func drawerPaycheckRow(_ occurrence: PaycheckOccurrence) -> some View {
+        PaycheckRow(occurrence: occurrence,
+                    currencyCode: currencyCode,
+                    compact: compact,
+                    onAddToAccount: addPaycheckToAccount(occurrence),
+                    onEdit: { onEditIncome?(occurrence.paycheck) },
+                    onDelete: { onDeleteIncome?(occurrence.paycheck) })
+            .environmentObject(accountViewModel)
+            .padding(rowPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: rowCorner, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .contentShape(Rectangle())
+    }
+    
+    private func addPaycheckToAccount(_ occurrence: PaycheckOccurrence) -> () -> Void {
+        {
+            guard let account = occurrence.paycheck.account,
+                  let amountValue = occurrence.paycheck.amount?.decimalValue,
+                  amountValue > 0 else { return }
+            
+            let calendar = Calendar.current
+            let startOfDay = calendar.startOfDay(for: occurrence.date)
+            guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else { return }
+            
+            let entries = account.ledgerEntries as? Set<LedgerEntry> ?? []
+            let existingPending = entries.contains { entry in
+                guard let entryDate = entry.date,
+                      entryDate >= startOfDay,
+                      entryDate < endOfDay,
+                      entry.category == "Income",
+                      !entry.isReconciledFlag else { return false }
+                let titleMatches = entry.title == occurrence.paycheck.name
+                let amountMatches = abs((entry.usdAmountDecimal - amountValue)) < 0.01
+                return titleMatches || amountMatches
+            }
+            
+            if existingPending {
+                HapticManager.shared.billDeleted()
+                return
+            }
+            
+            let positiveAmount = max(abs(amountValue), amountValue)
+            let previousSelectedAccount = accountViewModel.selectedAccount
+            accountViewModel.selectedAccount = account
+            _ = accountViewModel.recordLedgerEntry(
+                for: occurrence.paycheck,
+                amount: positiveAmount,
+                date: occurrence.date,
+                title: occurrence.paycheck.name ?? "Income",
+                notes: occurrence.paycheck.notes
+            )
+            accountViewModel.selectedAccount = previousSelectedAccount
+            accountViewModel.refreshData()
+            HapticManager.shared.success()
+        }
     }
 }
 
@@ -601,16 +637,17 @@ struct BillDueRow: View {
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     let occurrence: BillOccurrence
     let currencyCode: String
+    var compact: Bool = false
     var onEdit: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
     
     var body: some View {
         let bill = occurrence.bill
         HStack {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: compact ? 2 : 6) {
                 HStack(spacing: 8) {
                     Text(bill.name ?? "Bill")
-                        .font(.headline)
+                        .font(compact ? .subheadline.weight(.semibold) : .headline)
                     statusBadge
                 }
                 
@@ -619,7 +656,7 @@ struct BillDueRow: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
-                if let paymentCard = bill.paymentCard, !paymentCard.isEmpty {
+                if !compact, let paymentCard = bill.paymentCard, !paymentCard.isEmpty {
                     Label(paymentCard, systemImage: "creditcard.fill")
                         .font(.caption2)
                         .foregroundColor(.secondary)
@@ -698,6 +735,7 @@ struct PaycheckRow: View {
     @EnvironmentObject private var accountViewModel: AccountViewModel
     let occurrence: PaycheckOccurrence
     let currencyCode: String
+    var compact: Bool = false
     let onAddToAccount: () -> Void
     var onEdit: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
@@ -732,11 +770,11 @@ struct PaycheckRow: View {
         let isProjected = occurrence.isProjected
         let isPending = hasPendingTransaction
         
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
+        HStack(spacing: compact ? 8 : 12) {
+            VStack(alignment: .leading, spacing: compact ? 2 : 6) {
                 HStack(spacing: 8) {
                     Text(paycheck.name ?? "Income")
-                        .font(.headline)
+                        .font(compact ? .subheadline.weight(.semibold) : .headline)
                     statusBadge(isPending: isPending)
                 }
                 if let accountName = paycheck.account?.name, !accountName.isEmpty {
@@ -744,7 +782,7 @@ struct PaycheckRow: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
-                if let notes = paycheck.notes, !notes.isEmpty {
+                if !compact, let notes = paycheck.notes, !notes.isEmpty {
                     Text(notes)
                         .font(.caption2)
                         .foregroundColor(.secondary)

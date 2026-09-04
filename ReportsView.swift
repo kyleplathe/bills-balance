@@ -50,7 +50,8 @@ struct ReportsView: View {
         }
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .scrollContentBackground(.hidden)
-        .activityScrollEdgeChrome()
+        .toolbar(.hidden, for: .tabBar)
+        .activityFloatingTabBarHidden()
         .refreshable {
             reportsViewModel.loadMonthlyReport()
             reportsViewModel.loadYearWrapReport()
@@ -59,7 +60,6 @@ struct ReportsView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
-        .activityFloatingBars()
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button {
@@ -297,38 +297,26 @@ struct ReportsView: View {
         return f.string(from: date)
     }
 
+    @ViewBuilder
     private var periodPicker: some View {
-        HStack(spacing: 0) {
+        if #available(iOS 26.0, *) {
+            segmentedPeriodPicker
+                .glassEffect(.regular.interactive())
+        } else {
+            segmentedPeriodPicker
+        }
+    }
+
+    private var segmentedPeriodPicker: some View {
+        Picker("Period", selection: walletPeriodBinding) {
             ForEach(ReportsViewModel.WalletPeriod.allCases, id: \.self) { period in
-                let isSelected = walletPeriod == period
-                Button {
-                    walletPeriodBinding.wrappedValue = period
-                } label: {
-                    Text(period.rawValue)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .frame(minWidth: 58)
-                        .background {
-                            if isSelected {
-                                Capsule()
-                                    .fill(Color(.systemBackground).opacity(0.92))
-                                    .shadow(color: .black.opacity(0.12), radius: 8, y: 1)
-                            }
-                        }
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(period.rawValue)
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                Text(period.rawValue).tag(period)
             }
         }
-        .padding(3)
-        .background {
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .shadow(color: .black.opacity(0.08), radius: 10, y: 2)
-        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.small)
+        .frame(maxWidth: 240)
         .accessibilityElement(children: .contain)
         .simultaneousGesture(
             TapGesture(count: 2)
@@ -347,7 +335,9 @@ struct ReportsView: View {
         Task {
             await reportsViewModel.loadUsdBtcReport()
         }
-        appeared = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            appeared = true
+        }
     }
 
     private func handlePeriodChange(_ p: ReportsViewModel.WalletPeriod) {
@@ -376,26 +366,11 @@ struct ReportsView: View {
 
 private extension View {
     @ViewBuilder
-    func activityScrollEdgeChrome() -> some View {
-        if #available(iOS 26.0, *) {
-            self.scrollEdgeEffectHidden(true)
-        } else {
-            self
-        }
-    }
-
-    @ViewBuilder
-    func activityFloatingBars() -> some View {
+    func activityFloatingTabBarHidden() -> some View {
         if #available(iOS 18.0, *) {
-            self
-                .toolbarBackground(.hidden, for: .navigationBar)
-                .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-                .toolbar(.hidden, for: .tabBar)
-                .toolbarVisibility(.hidden, for: .tabBar)
+            self.toolbarVisibility(.hidden, for: .tabBar)
         } else {
             self
-                .toolbarBackground(.hidden, for: .navigationBar)
-                .toolbar(.hidden, for: .tabBar)
         }
     }
 }

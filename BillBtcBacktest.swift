@@ -9,6 +9,18 @@ enum BillBtcBacktest {
         var category: String?
     }
 
+    /// A bill instance used to decide which recurring series appear in USD vs Bitcoin.
+    struct BillSource: Equatable {
+        var groupingKey: String
+        var name: String
+        var amount: Decimal
+        var dueDate: Date?
+        var seriesId: UUID?
+        var category: String?
+        var trackInBitcoin: Bool
+        var paidInBitcoin: Bool
+    }
+
     struct LedgerCandidate {
         var date: Date
         var title: String
@@ -25,6 +37,49 @@ enum BillBtcBacktest {
         var btc: Decimal
         var price: Decimal
         var isEstimate: Bool
+    }
+
+    /// Dollar bill paid with an actual BTC/sats amount (not merely assigned to a BTC account).
+    static func isUsdBillPaidInBitcoin(isCredit: Bool, usdAmount: Decimal, btcAmount: Decimal) -> Bool {
+        !isCredit && usdAmount > 0 && btcAmount > 0
+    }
+
+    static func groupingKey(seriesId: UUID?, billId: UUID?, objectURI: String) -> String {
+        seriesId?.uuidString ?? billId?.uuidString ?? objectURI
+    }
+
+    /// Latest bill in each series that was paid in BTC/sats, or explicitly flagged Track in Bitcoin.
+    static func templates(from bills: [BillSource], calendar: Calendar = .current) -> [Template] {
+        var trackedKeys = Set<String>()
+        for bill in bills where bill.trackInBitcoin || bill.paidInBitcoin {
+            trackedKeys.insert(bill.groupingKey)
+        }
+
+        var latest: [String: BillSource] = [:]
+        for bill in bills {
+            guard trackedKeys.contains(bill.groupingKey) else { continue }
+            if let existing = latest[bill.groupingKey], let existingDue = existing.dueDate, let due = bill.dueDate {
+                if due > existingDue { latest[bill.groupingKey] = bill }
+            } else if latest[bill.groupingKey] == nil {
+                latest[bill.groupingKey] = bill
+            } else if latest[bill.groupingKey]?.dueDate == nil, bill.dueDate != nil {
+                latest[bill.groupingKey] = bill
+            }
+        }
+
+        return latest.values.compactMap { bill in
+            let name = bill.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return nil }
+            let dueDay = calendar.component(.day, from: bill.dueDate ?? Date())
+            return Template(
+                name: name,
+                amount: bill.amount,
+                dueDay: dueDay,
+                seriesId: bill.seriesId,
+                category: bill.category
+            )
+        }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     static func dueDate(inMonth monthStart: Date, day: Int, calendar: Calendar = .current) -> Date {
@@ -114,5 +169,48 @@ enum BillBtcBacktest {
         guard price > 0 else { return nil }
         let usd = template.amount.magnitude
         return MonthAmount(usd: usd, btc: usd / price, price: price, isEstimate: true)
+    }
+
+    static func shareTitle(billNames: [String]) -> String {
+        let names = billNames
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if names.count == 1 { return "\(names[0]) USD vs BTC" }
+        if names.count == 2 { return "\(names[0]) & \(names[1]) USD vs BTC" }
+        if names.count > 2 { return "Bills USD vs BTC" }
+        return "USD vs BTC"
+    }
+
+    static func shareHeadlineName(from title: String) -> String {
+        let suffix = " USD vs BTC"
+        if title.hasSuffix(suffix) {
+            let name = String(title.dropLast(suffix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty { return name }
+        }
+        return title
+    }
+
+    /// Positive `percentLess` means later payments used less Bitcoin than earlier ones.
+    struct BitcoinSpendChange: Equatable {
+        var percentLess: Decimal
+        var years: Int
+        var monthCount: Int
+    }
+
+    static func bitcoinSpendChange(btcAmounts: [Decimal], monthCount: Int) -> BitcoinSpendChange? {
+        let values = btcAmounts.filter { $0 > 0 }
+        guard values.count >= 6 else { return nil }
+        let window = min(12, max(3, values.count / 4))
+        let first = Array(values.prefix(window))
+        let last = Array(values.suffix(window))
+        let firstAvg = first.reduce(0, +) / Decimal(first.count)
+        let lastAvg = last.reduce(0, +) / Decimal(last.count)
+        guard firstAvg > 0 else { return nil }
+        let years = max(1, Int((Double(max(monthCount, 1)) / 12.0).rounded()))
+        return BitcoinSpendChange(
+            percentLess: (firstAvg - lastAvg) / firstAvg,
+            years: years,
+            monthCount: monthCount
+        )
     }
 }

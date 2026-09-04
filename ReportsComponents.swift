@@ -38,12 +38,46 @@ enum ActivityMoneyFormat {
     }
 }
 
-let appleWalletBarGradients: [LinearGradient] = [
-    LinearGradient(colors: [.orange, .pink], startPoint: .bottom, endPoint: .top),
-    LinearGradient(colors: [.pink, .purple], startPoint: .bottom, endPoint: .top),
-    LinearGradient(colors: [.purple, .blue], startPoint: .bottom, endPoint: .top),
-    LinearGradient(colors: [.blue, .cyan], startPoint: .bottom, endPoint: .top),
-]
+/// Skinny rounded-rect bar. Filled bars mask a chart-height spectrum so color is tied to Y.
+/// When `showsTrack` is true, a gray full-height slot sits behind the value fill.
+struct WalletActivityBar: View {
+    let width: CGFloat
+    let barHeight: CGFloat
+    let chartHeight: CGFloat
+    var isPlaceholder: Bool = false
+    var appeared: Bool = true
+    var delay: Double = 0
+    var showsTrack: Bool = false
+
+    var body: some View {
+        let radius = min(2, width / 2)
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        let displayedHeight = appeared ? barHeight : min(6, barHeight)
+        let displayedTrackHeight = appeared ? chartHeight : min(6, chartHeight)
+
+        ZStack(alignment: .bottom) {
+            if showsTrack || isPlaceholder {
+                shape
+                    .fill(Color.secondary.opacity(0.18))
+                    .frame(
+                        width: width,
+                        height: showsTrack ? displayedTrackHeight : displayedHeight
+                    )
+            }
+
+            if !isPlaceholder {
+                Rectangle()
+                    .fill(CategoryStyle.appleCardSpectrum)
+                    .frame(width: width, height: chartHeight)
+                    .mask(alignment: .bottom) {
+                        shape.frame(width: width, height: displayedHeight)
+                    }
+            }
+        }
+        .frame(width: width, height: chartHeight, alignment: .bottom)
+        .animation(.spring(response: 0.55, dampingFraction: 0.78).delay(delay), value: appeared)
+    }
+}
 
 struct WalletTotalSpendingAppleCard: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -67,27 +101,27 @@ struct WalletTotalSpendingAppleCard: View {
             case .year: return "last year"
             }
         }()
+        let periodNoun: String = {
+            switch periodType {
+            case .week: return "week"
+            case .month: return "month"
+            case .year: return "year"
+            }
+        }()
         let diffString = ActivityMoneyFormat.string(usd: absDifference, bitcoin: bitcoinPriceService)
 
         if abs(difference) < 0.01 {
             if isCurrentPeriodInProgress {
                 return "So far, you’ve spent about the same as \(periodName) at this time."
             }
-            return "Same as \(periodName)"
+            return "You spent about the same as the previous \(periodNoun)."
         }
 
         let direction = difference > 0 ? "more" : "less"
         if isCurrentPeriodInProgress {
             return "So far, you’ve spent \(diffString) \(direction) than \(periodName) at this time."
         }
-        return "\(diffString) \(direction) than \(periodName)"
-    }
-
-    private var comparisonColor: Color {
-        guard let previous = previousPeriodExpenses, previous > 0 else { return .secondary }
-        let difference = expenses - previous
-        if abs(difference) < 0.01 { return .secondary }
-        return difference > 0 ? .red : .green
+        return "You spent \(diffString) \(direction) than the previous \(periodNoun)."
     }
 
     private var arrowIcon: String? {
@@ -98,15 +132,16 @@ struct WalletTotalSpendingAppleCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text("Total Spending")
-                    .font(.headline.weight(.semibold))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
                 HStack(alignment: .center, spacing: 8) {
                     Text(ActivityMoneyFormat.string(usd: expenses, bitcoin: bitcoinPriceService))
-                        .font(.system(.title3, design: .rounded, weight: .bold))
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
                         .foregroundStyle(.primary)
-                        .minimumScaleFactor(0.7)
+                        .minimumScaleFactor(0.6)
                         .lineLimit(1)
                     if let arrowIcon {
                         Image(systemName: arrowIcon)
@@ -118,24 +153,18 @@ struct WalletTotalSpendingAppleCard: View {
                 }
                 if let comparisonText {
                     Text(comparisonText)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
-            Divider()
-                .overlay(Color.primary.opacity(0.08))
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("\(periodType.rawValue) Activity")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                CompactWalletStackedCategoryBarChart(
-                    period: periodType,
-                    appeared: appeared,
-                    date: anchorDate
-                )
-            }
+            WalletStackedCategoryBarChart(
+                period: periodType,
+                appeared: appeared,
+                showEveryNthLabel: nil,
+                anchorDate: anchorDate
+            )
         }
         .padding(.vertical, 20)
         .padding(.horizontal, 18)
@@ -206,19 +235,28 @@ struct WalletStackedCategoryBarChart: View {
     private func barHeight(for periodData: (period: String, categories: [(name: String, amount: Decimal)]), chartHeight: CGFloat) -> CGFloat {
         let total = periodData.categories.reduce(Decimal(0)) { $0 + $1.amount }
         let value = (total as NSDecimalNumber).doubleValue
-        // Apple Card leaves empty slots blank; we keep a short grey stub so the grid still reads.
-        guard value > 0 else { return max(14, chartHeight * 0.12) }
+        guard value > 0 else { return 6 }
         return max(8, chartHeight * CGFloat(value / maxValue))
+    }
+
+    private func xAxisLabel(for periodData: (period: String, categories: [(name: String, amount: Decimal)])) -> String {
+        switch period {
+        case .year:
+            return String(periodData.period.prefix(1))
+        case .week, .month:
+            return periodData.period
+        }
     }
 
     var body: some View {
         let chartHeight: CGFloat = 180
         let yAxisWidth: CGFloat = 36
-        let barWidth: CGFloat = categoryBreakdown.count > 8 ? 14 : 22
+        let barWidth: CGFloat = categoryBreakdown.count > 8 ? 10 : 14
+        let columnSpacing: CGFloat = categoryBreakdown.count > 8 ? 4 : 6
         let ticks = yAxisValues
 
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .bottom, spacing: 6) {
+        HStack(alignment: .top, spacing: 6) {
+            VStack(spacing: 6) {
                 ZStack(alignment: .bottom) {
                     VStack(spacing: 0) {
                         ForEach(Array(ticks.reversed().enumerated()), id: \.offset) { index, _ in
@@ -229,58 +267,48 @@ struct WalletStackedCategoryBarChart: View {
                         }
                     }
 
-                    HStack(alignment: .bottom, spacing: 0) {
+                    HStack(alignment: .bottom, spacing: columnSpacing) {
                         ForEach(Array(categoryBreakdown.enumerated()), id: \.offset) { index, periodData in
-                            if index > 0 { Spacer(minLength: 6) }
                             let total = periodData.categories.reduce(Decimal(0)) { $0 + $1.amount }
-                            let hasValue = total > 0
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(
-                                    hasValue
-                                        ? CategoryStyle.valueWeightedGradient(categories: periodData.categories)
-                                        : LinearGradient(
-                                            colors: [
-                                                Color.secondary.opacity(0.18),
-                                                Color.secondary.opacity(0.08)
-                                            ],
-                                            startPoint: .bottom,
-                                            endPoint: .top
-                                        )
-                                )
-                                .frame(width: barWidth, height: barHeight(for: periodData, chartHeight: chartHeight))
+                            WalletActivityBar(
+                                width: barWidth,
+                                barHeight: barHeight(for: periodData, chartHeight: chartHeight),
+                                chartHeight: chartHeight,
+                                isPlaceholder: total <= 0,
+                                appeared: appeared,
+                                delay: Double(index) * 0.03
+                            )
+                            .frame(maxWidth: .infinity)
                         }
                     }
-                    .frame(maxWidth: .infinity)
                 }
                 .frame(height: chartHeight)
 
-                VStack(spacing: 0) {
-                    ForEach(Array(ticks.reversed().enumerated()), id: \.offset) { index, tick in
-                        if index > 0 { Spacer(minLength: 0) }
-                        Text(formatAmount(tick))
+                HStack(spacing: columnSpacing) {
+                    ForEach(Array(categoryBreakdown.enumerated()), id: \.offset) { index, periodData in
+                        Text(xAxisLabel(for: periodData))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                            .opacity(shouldShowLabel(at: index) ? 1 : 0)
                     }
                 }
-                .frame(width: yAxisWidth, height: chartHeight, alignment: .trailing)
             }
 
-            HStack(spacing: 0) {
-                ForEach(Array(categoryBreakdown.enumerated()), id: \.offset) { index, periodData in
-                    if index > 0 { Spacer(minLength: 6) }
-                    Text(periodData.period)
+            VStack(spacing: 0) {
+                ForEach(Array(ticks.reversed().enumerated()), id: \.offset) { index, tick in
+                    if index > 0 { Spacer(minLength: 0) }
+                    Text(formatAmount(tick))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                        .frame(width: barWidth)
-                        .opacity(shouldShowLabel(at: index) ? 1 : 0)
+                        .minimumScaleFactor(0.7)
                 }
-                Spacer(minLength: 0)
-                Color.clear.frame(width: yAxisWidth)
             }
+            .frame(width: yAxisWidth, height: chartHeight, alignment: .trailing)
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 4)
@@ -311,11 +339,9 @@ struct CompactWalletStackedCategoryBarChart: View {
         return (totalAmount as NSDecimalNumber).doubleValue
     }
 
-    private let chartHeight: CGFloat = 78
+    private let chartHeight: CGFloat = 36
     /// Fixed skinny width so Week / Month / Year bars match visually.
-    private let barWidth: CGFloat = 9
-    /// Empty periods still show a stub so the chart reads as a full set of slots.
-    private let emptyBarHeightRatio: CGFloat = 0.45
+    private let barWidth: CGFloat = 7
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 0) {
@@ -326,22 +352,17 @@ struct CompactWalletStackedCategoryBarChart: View {
 
                 let value = actualValue(for: periodData)
                 let hasValue = value > 0
-                let heightRatio = hasValue ? CGFloat(value / maxValue) : emptyBarHeightRatio
+                let height = hasValue ? max(8, chartHeight * CGFloat(value / maxValue)) : 0
 
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(
-                        hasValue
-                            ? CategoryStyle.compactGradient(categories: periodData.categories)
-                            : LinearGradient(
-                                colors: [
-                                    Color.secondary.opacity(0.22),
-                                    Color.secondary.opacity(0.12)
-                                ],
-                                startPoint: .bottom,
-                                endPoint: .top
-                            )
-                    )
-                    .frame(width: barWidth, height: max(10, chartHeight * heightRatio))
+                WalletActivityBar(
+                    width: barWidth,
+                    barHeight: height,
+                    chartHeight: chartHeight,
+                    isPlaceholder: !hasValue,
+                    appeared: appeared,
+                    delay: Double(index) * 0.04,
+                    showsTrack: true
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .center)
@@ -386,7 +407,7 @@ struct WalletAppleBarChart: View {
                         x: .value("Period", label),
                         y: .value("Amount", (values[i] as NSDecimalNumber).doubleValue)
                     )
-                    .foregroundStyle(appleWalletBarGradients[i % appleWalletBarGradients.count])
+                    .foregroundStyle(CategoryStyle.appleCardSpectrum)
                     .cornerRadius(6, style: .continuous)
                 }
             }
@@ -1546,6 +1567,7 @@ struct AddCategorySheet: View {
 struct UsdBtcBacktestSection: View {
     @EnvironmentObject private var reportsViewModel: ReportsViewModel
     let appeared: Bool
+    @State private var shareItem: ShareFileItem?
 
     private let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -1561,6 +1583,9 @@ struct UsdBtcBacktestSection: View {
                     Text("USD vs Bitcoin")
                         .font(.headline)
                     Spacer()
+                    if let report = reportsViewModel.usdBtcReport, reportsViewModel.usdBtcBacktestEnabled, !report.trackedBillNames.isEmpty, !report.months.isEmpty {
+                        shareMenu(for: report)
+                    }
                     Toggle("USD vs Bitcoin", isOn: Binding(
                         get: { reportsViewModel.usdBtcBacktestEnabled },
                         set: { reportsViewModel.setUsdBtcBacktestEnabled($0) }
@@ -1602,7 +1627,7 @@ struct UsdBtcBacktestSection: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else {
-                        Text("Turn on Track in Bitcoin on a bill (Rent, Xcel) to see a 4-year USD vs BTC history. Months without imported payments use the current amount and historical Bitcoin prices.")
+                        Text("Pay a dollar bill in Bitcoin (sats) to see a 4-year USD vs BTC history. Months without imported payments use the current amount and historical Bitcoin prices.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -1619,6 +1644,50 @@ struct UsdBtcBacktestSection: View {
                     )
             )
             .opacity(appeared ? 1 : 0)
+            .sheet(item: $shareItem) { item in
+                ActivityShareSheet(activityItems: [item.url]) {
+                    try? FileManager.default.removeItem(at: item.url)
+                    shareItem = nil
+                }
+            }
+    }
+
+    @ViewBuilder
+    private func shareMenu(for report: UsdBtcReportData) -> some View {
+        if report.bills.count <= 1 {
+            let names = report.trackedBillNames
+            let months = report.bills.first?.months ?? report.months
+            Button {
+                share(title: BillBtcBacktest.shareTitle(billNames: names), months: months, monthsBack: report.monthsBack)
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+            }
+            .accessibilityLabel("Export image")
+        } else {
+            Menu {
+                ForEach(report.bills) { bill in
+                    Button(BillBtcBacktest.shareTitle(billNames: [bill.name])) {
+                        share(title: BillBtcBacktest.shareTitle(billNames: [bill.name]), months: bill.months, monthsBack: report.monthsBack)
+                    }
+                }
+                Button(BillBtcBacktest.shareTitle(billNames: report.trackedBillNames)) {
+                    share(title: BillBtcBacktest.shareTitle(billNames: report.trackedBillNames), months: report.months, monthsBack: report.monthsBack)
+                }
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+            }
+            .accessibilityLabel("Export image")
+        }
+    }
+
+    private func share(title: String, months: [UsdBtcMonthPoint], monthsBack: Int) {
+        guard let url = UsdBtcShareExport.pngURL(title: title, months: months, monthsBack: monthsBack) else { return }
+        HapticManager.shared.buttonTapped()
+        shareItem = ShareFileItem(url: url)
     }
 
     private func backtestStat(title: String, value: String) -> some View {

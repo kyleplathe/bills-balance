@@ -76,6 +76,25 @@ enum CategoryStyle {
         }
     }
 
+    /// Apple Card-style spectrum: coral at the base, gold, magenta, then indigo at the top.
+    /// Long overlapping stops so colors melt instead of banding. Map this to the *chart*
+    /// height (not each bar) so every bar shares the same color at the same Y.
+    static let appleCardSpectrum = LinearGradient(
+        stops: [
+            .init(color: Color(red: 0.98, green: 0.32, blue: 0.18), location: 0.00),
+            .init(color: Color(red: 1.00, green: 0.48, blue: 0.14), location: 0.10),
+            .init(color: Color(red: 1.00, green: 0.62, blue: 0.16), location: 0.22),
+            .init(color: Color(red: 1.00, green: 0.78, blue: 0.22), location: 0.36),
+            .init(color: Color(red: 1.00, green: 0.58, blue: 0.42), location: 0.48),
+            .init(color: Color(red: 0.98, green: 0.36, blue: 0.58), location: 0.60),
+            .init(color: Color(red: 0.86, green: 0.28, blue: 0.78), location: 0.72),
+            .init(color: Color(red: 0.62, green: 0.38, blue: 0.98), location: 0.84),
+            .init(color: Color(red: 0.38, green: 0.52, blue: 1.00), location: 1.00),
+        ],
+        startPoint: .bottom,
+        endPoint: .top
+    )
+
     /// Decorative 2–3 color blend for compact chips. Uses the largest categories.
     static func compactGradient(categories: [(name: String, amount: Decimal)]) -> LinearGradient {
         valueWeightedGradient(categories: categories)
@@ -110,7 +129,7 @@ enum CategoryStyle {
                 return self.color(for: sorted[index + 1].name)
             }()
             // Longer soft overlap between category bands so adjacent colors melt together.
-            let blend = min(0.22, max(0.06, share * 0.45))
+            let blend = min(0.28, max(0.08, share * 0.55))
             let holdEnd = max(cursor, cursor + share - blend)
             let bandEnd = min(1, cursor + share)
             let mid = (holdEnd + bandEnd) / 2

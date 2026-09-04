@@ -1,6 +1,11 @@
 import SwiftUI
 import UIKit
 
+struct ShareFileItem: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
 struct ActivityShareSheet: UIViewControllerRepresentable {
     let activityItems: [Any]
     let completion: (() -> Void)?

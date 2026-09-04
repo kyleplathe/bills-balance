@@ -14,6 +14,7 @@ struct CalendarTabView: View {
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     
     @Binding var selectedMonth: Date?
     @State private var currentMonth: Date = Date()
@@ -45,14 +46,29 @@ struct CalendarTabView: View {
             GeometryReader { proxy in
                 content(for: proxy.size)
                     .onAppear {
-                        isLandscape = proxy.size.width > proxy.size.height
+                        isLandscape = verticalSizeClass == .compact
                     }
-                    .onChange(of: proxy.size) { _, newSize in
-                        isLandscape = newSize.width > newSize.height
+                    .onChange(of: verticalSizeClass) { _, newValue in
+                        isLandscape = newValue == .compact
+                    }
+                    .onChange(of: proxy.size) { _, _ in
+                        isLandscape = verticalSizeClass == .compact
                     }
             }
             .navigationTitle(isLandscape ? "" : "Calendar")
+            .navigationBarTitleDisplayMode(isLandscape ? .inline : .large)
             .toolbar {
+                if isLandscape {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Text(monthFormatter.string(from: currentMonth))
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .accessibilityLabel(monthFormatter.string(from: currentMonth))
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     Menu {
                         Button("Add Bill") { 
@@ -168,59 +184,73 @@ struct CalendarTabView: View {
     // MARK: - Header
     private var monthHeader: some View {
         HStack(spacing: 16) {
-            Button {
+            monthChevronButton(systemName: "chevron.left") {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
                     changeMonth(-1)
                 }
-            } label: {
-                Circle()
-                    .fill(Color(.secondarySystemBackground))
-                    .overlay(Image(systemName: "chevron.left")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.primary))
-                    .frame(width: 36, height: 36)
-                    .shadow(color: Color.black.opacity(0.05), radius: 6, x: 0, y: 3)
             }
-            .buttonStyle(.plain)
+            .accessibilityLabel("Previous month")
             
-            VStack(alignment: horizontalSizeClass == .regular && isLandscape ? .leading : .center, spacing: 4) {
+            Button(action: jumpToToday) {
                 Text(monthFormatter.string(from: currentMonth))
                     .font(.title2.weight(.semibold))
-                Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                        let today = Date()
-                        currentMonth = startOfMonth(for: today)
-                        selectDate(today)
-                    }
-                } label: {
-                    Label("Today", systemImage: "calendar")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
-                        .background(Color.accentColor.opacity(0.18))
-                        .foregroundColor(.accentColor)
-                        .clipShape(Capsule())
-                }
-                .buttonStyle(.borderless)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity, alignment: horizontalSizeClass == .regular && isLandscape ? .leading : .center)
+            .buttonStyle(.plain)
+            .accessibilityLabel(monthFormatter.string(from: currentMonth))
+            .accessibilityHint("Jumps to today")
             
-            Button {
+            monthChevronButton(systemName: "chevron.right") {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
                     changeMonth(1)
                 }
-            } label: {
-                Circle()
-                    .fill(Color(.secondarySystemBackground))
-                    .overlay(Image(systemName: "chevron.right")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.primary))
-                    .frame(width: 36, height: 36)
-                    .shadow(color: Color.black.opacity(0.05), radius: 6, x: 0, y: 3)
             }
-            .buttonStyle(.plain)
+            .accessibilityLabel("Next month")
         }
         .padding(.horizontal, 4)
+    }
+    
+    private var monthSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 40)
+            .onEnded { value in
+                let horizontal = value.translation.width
+                let vertical = value.translation.height
+                guard abs(horizontal) > abs(vertical), abs(horizontal) > 50 else { return }
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                    changeMonth(horizontal < 0 ? 1 : -1)
+                }
+            }
+    }
+    
+    private func monthChevronButton(systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            monthChevronLabel(systemName: systemName, circleSize: 36, chevronSize: 15)
+        }
+        .buttonStyle(.plain)
+    }
+    
+    private func monthChevronLabel(systemName: String, circleSize: CGFloat, chevronSize: CGFloat) -> some View {
+        Circle()
+            .fill(Color(.secondarySystemBackground))
+            .overlay(
+                Image(systemName: systemName)
+                    .font(.system(size: chevronSize, weight: .semibold))
+                    .foregroundStyle(.primary)
+            )
+            .frame(width: circleSize, height: circleSize)
+            .shadow(color: Color.black.opacity(0.05), radius: 6, x: 0, y: 3)
+    }
+    
+    private func jumpToToday() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+            let today = Date()
+            currentMonth = startOfMonth(for: today)
+            selectedMonth = currentMonth
+            selectDate(today)
+        }
     }
     
     private func changeMonth(_ offset: Int) {
@@ -263,45 +293,17 @@ struct CalendarTabView: View {
     }
     
     private var insights: [CalendarInsight] {
-        var items: [CalendarInsight] = []
         let currentStats = monthStats(for: currentMonth)
-        if currentStats.remaining > 0 {
-            items.append(CalendarInsight(title: "Remaining",
-                                         subtitle: monthFormatter.string(from: currentMonth),
-                                         amount: currentStats.remaining,
-                                         tint: .accentColor))
-        }
-        let incomeTotal = incomeStats(for: currentMonth)
-        if incomeTotal > 0 {
-            items.append(CalendarInsight(title: "Income",
-                                         subtitle: monthFormatter.string(from: currentMonth),
-                                         amount: incomeTotal,
-                                         tint: .green))
-        }
-        let upcoming = upcomingSevenDayOutflow
-        if upcoming > 0 {
-            items.append(CalendarInsight(title: "Next 7 days",
-                                         subtitle: "Projected outflow",
-                                         amount: upcoming,
-                                         tint: .orange))
-        }
-        if let nextMonth = calendar.date(byAdding: .month, value: 1, to: currentMonth) {
-            let nextStats = monthStats(for: nextMonth)
-            if nextStats.totalDue > 0 {
-                items.append(CalendarInsight(title: monthFormatter.string(from: nextMonth),
-                                             subtitle: "Projected bills",
-                                             amount: nextStats.totalDue,
-                                             tint: Color.blue))
-            }
-            let nextIncome = incomeStats(for: nextMonth)
-            if nextIncome > 0 {
-                items.append(CalendarInsight(title: "\(monthFormatter.string(from: nextMonth)) Income",
-                                             subtitle: "Projected",
-                                             amount: nextIncome,
-                                             tint: Color.green.opacity(0.8)))
-            }
-        }
-        return Array(items.prefix(4))
+        return [
+            CalendarInsight(title: "Remaining",
+                            subtitle: monthFormatter.string(from: currentMonth),
+                            amount: currentStats.remaining,
+                            tint: .accentColor),
+            CalendarInsight(title: "Next 7 days",
+                            subtitle: "Projected outflow",
+                            amount: upcomingSevenDayOutflow,
+                            tint: .orange)
+        ]
     }
     
     private var monthOccurrences: [BillOccurrence] {
@@ -562,79 +564,71 @@ struct CalendarTabView: View {
     }
     
     @ViewBuilder
+    private var dayDetailDrawer: some View {
+        DayDetailDrawer(date: selectedDate,
+                        bills: occurrences(for: selectedDate),
+                        paychecks: incomeOccurrences(for: selectedDate),
+                        currencyCode: currencyCode,
+                        compact: isLandscape,
+                        onAddBill: { presentBillEditor(nil) },
+                        onAddIncome: { presentPaycheckEditor(nil) },
+                        onAddIncomeTransaction: nil,
+                        onEditBill: { presentBillEditor($0) },
+                        onEditIncome: { paycheck in
+                            let occurrenceDate = incomeOccurrences(for: selectedDate)
+                                .first(where: { $0.paycheck == paycheck })?.date
+                            presentPaycheckEditor(paycheck, occurrenceDate: occurrenceDate)
+                        },
+                        onDeleteBill: { bill in
+                            billToDelete = bill
+                            showingDeleteBillAlert = true
+                        },
+                        onDeleteIncome: { paycheck in
+                            paycheckToDelete = paycheck
+                            showingDeletePaycheckAlert = true
+                        }) {
+            dismissDayDrawer()
+        }
+        .padding(.horizontal, isLandscape ? 12 : 16)
+        .padding(.bottom, isLandscape ? 8 : 12)
+    }
+    
+    @ViewBuilder
     private func content(for size: CGSize) -> some View {
         let useSplit = shouldUseSplitLayout(for: size)
         ZStack(alignment: .bottom) {
             if useSplit {
                 splitLayout(size: size)
             } else {
-                standardLayout
+                standardLayout(size: size)
             }
-            if showDayDrawer {
+            
+            if showDayDrawer, !isLandscape {
                 Color.black.opacity(0.3)
                     .ignoresSafeArea()
                     .onTapGesture {
                         dismissDayDrawer()
                     }
                     .transition(.opacity)
-                
-                DayDetailDrawer(date: selectedDate,
-                                bills: occurrences(for: selectedDate),
-                                paychecks: incomeOccurrences(for: selectedDate),
-                                currencyCode: currencyCode,
-                                onAddBill: { presentBillEditor(nil) },
-                                onAddIncome: { presentPaycheckEditor(nil) },
-                                onAddIncomeTransaction: nil,
-                                onEditBill: { presentBillEditor($0) },
-                                onEditIncome: { paycheck in
-                                    // Find the occurrence date for this paycheck
-                                    let occurrenceDate = incomeOccurrences(for: selectedDate)
-                                        .first(where: { $0.paycheck == paycheck })?.date
-                                    presentPaycheckEditor(paycheck, occurrenceDate: occurrenceDate)
-                                },
-                                onDeleteBill: { bill in
-                                    billToDelete = bill
-                                    showingDeleteBillAlert = true
-                                },
-                                onDeleteIncome: { paycheck in
-                                    paycheckToDelete = paycheck
-                                    showingDeletePaycheckAlert = true
-                                }) {
-                    dismissDayDrawer()
-                }
-                .transition(AnyTransition.move(edge: .bottom).combined(with: .opacity))
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
+            }
+            
+            if showDayDrawer {
+                dayDetailDrawer
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
     }
     
-    private var standardLayout: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 24) {
-                monthHeader
-                insightSection
-                MonthCalendarView(currentMonth: currentMonth,
-                                  selectedDate: selectedDate,
-                                  calendar: calendar,
-                                  billsByDay: billsByDay,
-                                  colorScheme: colorScheme) { date in
-                    selectDate(date)
-                }
-                livingMeansView
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, showDayDrawer ? 260 : 20)
-        }
-    }
-    
-    private func splitLayout(size: CGSize) -> some View {
-let calendarWidth = min(max(size.width * 0.45, 360), 520)
-        return HStack(alignment: .top, spacing: 24) {
+    @ViewBuilder
+    private func standardLayout(size: CGSize) -> some View {
+        if isLandscape {
+            landscapeCalendarLayout(size: size)
+        } else {
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 16) { // Reduced spacing for landscape
+                VStack(spacing: 16) {
                     monthHeader
                     insightSection
                     MonthCalendarView(currentMonth: currentMonth,
@@ -645,6 +639,57 @@ let calendarWidth = min(max(size.width * 0.45, 360), 520)
                         selectDate(date)
                     }
                     livingMeansView
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, showDayDrawer ? 260 : 20)
+            }
+        }
+    }
+    
+    private func landscapeCalendarLayout(size: CGSize) -> some View {
+        let inset: CGFloat = 8
+        let side = max(0, min(size.width, size.height) - inset * 2)
+        
+        return MonthCalendarView(currentMonth: currentMonth,
+                                 selectedDate: selectedDate,
+                                 calendar: calendar,
+                                 billsByDay: billsByDay,
+                                 colorScheme: colorScheme,
+                                 compact: true) { date in
+            selectDate(date)
+        }
+        .frame(width: side, height: side)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .simultaneousGesture(monthSwipeGesture)
+        .accessibilityHint("Swipe left or right to change months")
+        .accessibilityAction(named: "Previous month") {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                changeMonth(-1)
+            }
+        }
+        .accessibilityAction(named: "Next month") {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                changeMonth(1)
+            }
+        }
+        .accessibilityAction(named: "Jump to today", jumpToToday)
+    }
+    
+    private func splitLayout(size: CGSize) -> some View {
+        let calendarWidth = min(max(size.width * 0.45, 360), 520)
+        return HStack(alignment: .top, spacing: 24) {
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 16) { // Reduced spacing for landscape
+                    monthHeader
+                    MonthCalendarView(currentMonth: currentMonth,
+                                      selectedDate: selectedDate,
+                                      calendar: calendar,
+                                      billsByDay: billsByDay,
+                                      colorScheme: colorScheme) { date in
+                        selectDate(date)
+                    }
                 }
                 .padding(.top, 4) // Minimal top padding for landscape
                 .padding(.bottom, 4) // Match top padding
@@ -722,6 +767,7 @@ private struct MonthCalendarView: View {
     let calendar: Calendar
     let billsByDay: [Date: BillDaySummary]
     let colorScheme: ColorScheme
+    var compact: Bool = false
     let onSelect: (Date) -> Void
     
     private var columns: [GridItem] {
@@ -751,41 +797,49 @@ private struct MonthCalendarView: View {
         return days
     }
     
+    private var monthWeeks: [[Date]] {
+        stride(from: 0, to: monthDays.count, by: 7).map { start in
+            Array(monthDays[start..<min(start + 7, monthDays.count)])
+        }
+    }
+    
     var body: some View {
         let background: Color = colorScheme == .dark ? Color.black.opacity(0.9) : Color(.systemBackground)
         let border: Color = colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
         
-        VStack(spacing: 12) {
+        VStack(spacing: compact ? 4 : 12) {
             HStack {
                 ForEach(orderedWeekdaySymbols, id: \.self) { symbol in
                     Text(symbol)
-                        .font(.caption2)
+                        .font(compact ? .caption2.weight(.medium) : .caption2)
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity)
                 }
             }
             
-            LazyVGrid(columns: columns, spacing: 8) {
-                ForEach(monthDays, id: \.self) { date in
-                    let isCurrentMonth = calendar.isDate(date, equalTo: currentMonth, toGranularity: .month)
-                    let isToday = calendar.isDateInToday(date)
-                    let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
-                    let summary = billsByDay[calendar.startOfDay(for: date)]
-                    MonthCalendarDayCell(date: date,
-                                         calendar: calendar,
-                                         colorScheme: colorScheme,
-                            isCurrentMonth: isCurrentMonth,
-                            isToday: isToday,
-                            isSelected: isSelected,
-                                         summary: summary) {
-                        onSelect(date)
+            if compact {
+                VStack(spacing: 3) {
+                    ForEach(monthWeeks.indices, id: \.self) { weekIndex in
+                        HStack(spacing: 3) {
+                            ForEach(monthWeeks[weekIndex], id: \.self) { date in
+                                dayCell(for: date)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: .infinity)
+            } else {
+                LazyVGrid(columns: columns, spacing: 8) {
+                    ForEach(monthDays, id: \.self) { date in
+                        dayCell(for: date)
                     }
                 }
             }
         }
-        .padding(.top, 18)
-        .padding(.bottom, 8)
-        .padding(.horizontal, 16)
+        .padding(.top, compact ? 6 : 18)
+        .padding(.bottom, compact ? 6 : 8)
+        .padding(.horizontal, compact ? 6 : 16)
         .background(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(background)
@@ -794,6 +848,23 @@ private struct MonthCalendarView: View {
                         .stroke(border)
                 )
         )
+    }
+    
+    private func dayCell(for date: Date) -> some View {
+        let isCurrentMonth = calendar.isDate(date, equalTo: currentMonth, toGranularity: .month)
+        let isToday = calendar.isDateInToday(date)
+        let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
+        let summary = billsByDay[calendar.startOfDay(for: date)]
+        return MonthCalendarDayCell(date: date,
+                                    calendar: calendar,
+                                    colorScheme: colorScheme,
+                                    isCurrentMonth: isCurrentMonth,
+                                    isToday: isToday,
+                                    isSelected: isSelected,
+                                    summary: summary,
+                                    compact: compact) {
+            onSelect(date)
+        }
     }
 }
 
@@ -805,26 +876,28 @@ private struct MonthCalendarDayCell: View {
     let isToday: Bool
     let isSelected: Bool
     let summary: BillDaySummary?
+    var compact: Bool = false
     let action: () -> Void
     
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 6) {
+            VStack(spacing: compact ? 3 : 6) {
                     Text(date, format: .dateTime.day())
-                        .font(.system(size: 16, weight: isSelected ? .semibold : .regular))
+                        .font(.system(size: compact ? 15 : 16, weight: isSelected ? .semibold : .regular))
                         .foregroundColor(textColor)
                     
                 if let summary, summary.total > 0 {
                     Circle()
                         .fill(summaryColor(summary))
-                        .frame(width: 6, height: 6)
+                        .frame(width: compact ? 6 : 6, height: compact ? 6 : 6)
                 } else {
                     Circle()
                         .fill(Color.clear)
-                        .frame(width: 6, height: 6)
+                        .frame(width: compact ? 6 : 6, height: compact ? 6 : 6)
                 }
             }
-            .frame(width: cellSize, height: cellSize)
+            .frame(maxWidth: compact ? .infinity : cellSize, maxHeight: compact ? .infinity : cellSize)
+            .frame(width: compact ? nil : cellSize, height: compact ? nil : cellSize)
             .background(backgroundShape)
         }
         .buttonStyle(.plain)
@@ -844,20 +917,23 @@ private struct MonthCalendarDayCell: View {
     @ViewBuilder
     private var backgroundShape: some View {
         if isSelected {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: compact ? 10 : 12, style: .continuous)
                 .fill(Color.accentColor)
-                .shadow(color: Color.accentColor.opacity(0.3), radius: 8, x: 0, y: 4)
+                .shadow(color: Color.accentColor.opacity(compact ? 0.2 : 0.3), radius: compact ? 4 : 8, x: 0, y: compact ? 2 : 4)
         } else if isToday {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: compact ? 10 : 12, style: .continuous)
                 .stroke(Color.accentColor, lineWidth: 1.5)
         } else {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: compact ? 10 : 12, style: .continuous)
                 .fill(Color.clear)
         }
     }
     
     private var cellSize: CGFloat {
-        isSelected ? 50 : 46
+        if compact {
+            return isSelected ? 36 : 32
+        }
+        return isSelected ? 50 : 46
     }
     
     private func summaryColor(_ summary: BillDaySummary) -> Color {

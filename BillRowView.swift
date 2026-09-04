@@ -12,6 +12,7 @@ struct BillRowView: View {
     @EnvironmentObject private var accountViewModel: AccountViewModel
     let bill: Bill
     var onMarkPaid: ((Bill) -> Void)? = nil
+    var compact: Bool = false
     
     @State private var showingReconcileDrawer = false
     @State private var billAmountString: String = ""
@@ -68,7 +69,7 @@ struct BillRowView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 16) {
+            HStack(spacing: compact ? 10 : 16) {
             // Status indicator with bitcoin theme
             Button {
                 // Tap circle = Mark as cleared (paid)
@@ -126,18 +127,18 @@ struct BillRowView: View {
                 let isFullyPaid = bill.isPaid && !hasPendingTransaction
                 Circle()
                     .fill(isFullyPaid ? statusColor : Color.clear)
-                    .frame(width: 26, height: 26)
+                    .frame(width: compact ? 22 : 26, height: compact ? 22 : 26)
                     .overlay(
                         Circle()
                             .stroke(bitcoinPriceService.showInBitcoin && !isFullyPaid ? .orange : statusColor, lineWidth: 2)
                     )
                     .overlay(
                         Image(systemName: "checkmark")
-                            .font(.system(size: 14, weight: .bold))
+                            .font(.system(size: compact ? 11 : 14, weight: .bold))
                             .foregroundColor(.white)
                             .opacity(isFullyPaid ? 1 : 0)
                     )
-                    .padding(.vertical, 4)
+                    .padding(.vertical, compact ? 0 : 4)
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
@@ -145,6 +146,11 @@ struct BillRowView: View {
             .accessibilityHint("Tap to toggle paid state")
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: bitcoinPriceService.showInBitcoin)
             
+            if compact {
+                compactBillInfo
+                Spacer(minLength: 8)
+                compactAmount
+            } else {
             // Bill info
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -263,10 +269,11 @@ struct BillRowView: View {
                 }
             }
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: bitcoinPriceService.showInBitcoin)
+            }
             
             // Removed arrow button - keeping it simple: just check off the bill
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, compact ? 0 : 4)
         
             // Reconcile drawer for BTC accounts (with or without pending transactions)
             if showingReconcileDrawer && isBTCAccount {
@@ -361,6 +368,68 @@ struct BillRowView: View {
                 // Auto-focus bill amount field
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     focusedField = .billAmount
+                }
+            }
+        }
+    }
+    
+    private var compactBillInfo: some View {
+        HStack(spacing: 6) {
+            Text(bill.name ?? "Unknown")
+                .font(.subheadline.weight(.medium))
+                .strikethrough(bill.isPaid && !hasPendingTransaction)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            
+            if bill.autoPay {
+                Image(systemName: "bolt.fill")
+                    .font(.caption2)
+                    .foregroundColor(.orange)
+            }
+            
+            if hasPendingTransaction {
+                Text("PENDING")
+                    .font(.caption2.weight(.bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Color.orange)
+                    .cornerRadius(3)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    
+    @ViewBuilder
+    private var compactAmount: some View {
+        VStack(alignment: .trailing, spacing: 1) {
+            if bitcoinPriceService.showInBitcoin, let amount = bill.amount?.decimalValue {
+                Text(bitcoinPriceService.formatAsSats(amount))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(bill.isPaid ? .green : .orange)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            } else {
+                Text("$\(bill.amount?.stringValue ?? "0")")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(bill.isPaid ? .green : .primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            
+            if let dueDate = bill.dueDate {
+                if !bill.isPaid, daysUntilDue < 0 {
+                    Text("\(abs(daysUntilDue))d overdue")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundColor(.red)
+                } else if !bill.isPaid, daysUntilDue <= 3 {
+                    Text("\(daysUntilDue)d left")
+                        .font(.caption2)
+                        .foregroundColor(.orange)
+                } else {
+                    Text(dateFormatter.string(from: dueDate))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
                 }
             }
         }

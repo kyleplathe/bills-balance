@@ -36,6 +36,7 @@
 		DE61A2092FDC9109004756CF /* ReportsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61A1092FDC9109004756CF /* ReportsComponents.swift */; };
 		DE61A20A2FDC910A004756CF /* LedgerTransactionRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61A10A2FDC910A004756CF /* LedgerTransactionRow.swift */; };
 		DE61A20B2FDC910B004756CF /* ActivityShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61A10B2FDC910B004756CF /* ActivityShareSheet.swift */; };
+		DE65A2012FDC9802004756CF /* UsdBtcShareCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE65A1012FDC9801004756CF /* UsdBtcShareCard.swift */; };
 		DE61B2022FDC9202004756CF /* MoneyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61B1022FDC9202004756CF /* MoneyLogicTests.swift */; };
 		DE7A5C6A2EC60BD700A67202 /* BitcoinPriceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7A5C692EC60BD700A67202 /* BitcoinPriceService.swift */; };
 		DE62C2012FDC9502004756CF /* FallingCurrencyAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE62C1012FDC9501004756CF /* FallingCurrencyAnimation.swift */; };
@@ -108,6 +109,7 @@
 		DE61A1092FDC9109004756CF /* ReportsComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportsComponents.swift; sourceTree = "<group>"; };
 		DE61A10A2FDC910A004756CF /* LedgerTransactionRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerTransactionRow.swift; sourceTree = "<group>"; };
 		DE61A10B2FDC910B004756CF /* ActivityShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityShareSheet.swift; sourceTree = "<group>"; };
+		DE65A1012FDC9801004756CF /* UsdBtcShareCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsdBtcShareCard.swift; sourceTree = "<group>"; };
 		DE61A10C2FDC910C004756CF /* BillsAndBalance.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BillsAndBalance.entitlements; sourceTree = "<group>"; };
 		DE61B1012FDC9201004756CF /* BillsAndBalanceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BillsAndBalanceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		DE61B1022FDC9202004756CF /* MoneyLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyLogicTests.swift; sourceTree = "<group>"; };
@@ -206,6 +208,7 @@
 				DE61A1092FDC9109004756CF /* ReportsComponents.swift */,
 				DE61A10A2FDC910A004756CF /* LedgerTransactionRow.swift */,
 				DE61A10B2FDC910B004756CF /* ActivityShareSheet.swift */,
+				DE65A1012FDC9801004756CF /* UsdBtcShareCard.swift */,
 				DE61A10C2FDC910C004756CF /* BillsAndBalance.entitlements */,
 				DE61B10B2FDC920B004756CF /* BillsAndBalanceTests */,
 				DE5E0D082FDC8C0A004756CF /* SupabaseSupport.swift */,
@@ -474,6 +477,7 @@
 				DE61A2092FDC9109004756CF /* ReportsComponents.swift in Sources */,
 				DE61A20A2FDC910A004756CF /* LedgerTransactionRow.swift in Sources */,
 				DE61A20B2FDC910B004756CF /* ActivityShareSheet.swift in Sources */,
+				DE65A2012FDC9802004756CF /* UsdBtcShareCard.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

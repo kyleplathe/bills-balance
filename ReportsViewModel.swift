@@ -56,10 +56,30 @@ struct ActivityPeriodSnapshot {
     var totalSpending: Decimal { expenses + digitalWalletFees }
 }
 
-/// USD vs Bitcoin for bills flagged Track in Bitcoin: actual ledger overlay, else historical-price estimate.
+struct UsdBtcMonthPoint: Identifiable {
+    var month: Date
+    var usdExpenses: Decimal
+    var btcAtTime: Decimal
+    var btcValueNow: Decimal
+    var btcAmount: Decimal
+    var avgBtcPrice: Decimal
+    var isEstimate: Bool
+    var id: Date { month }
+}
+
+struct UsdBtcBillSeries: Identifiable {
+    var name: String
+    var months: [UsdBtcMonthPoint]
+    var totalUsd: Decimal
+    var totalBtcAtTime: Decimal
+    var totalBtcValueNow: Decimal
+    var id: String { name }
+}
+
+/// USD vs Bitcoin for dollar bills paid in BTC/sats (or flagged Track in Bitcoin): actual ledger overlay, else historical-price estimate.
 struct UsdBtcReportData {
-    /// Per month: USD, value at payment (USD), BTC value today, avg BTC price, and whether the month used estimates.
-    var months: [(month: Date, usdExpenses: Decimal, btcAtTime: Decimal, btcValueNow: Decimal, avgBtcPrice: Decimal, isEstimate: Bool)]
+    var months: [UsdBtcMonthPoint]
+    var bills: [UsdBtcBillSeries]
     var totalUsd: Decimal
     var totalBtcAtTime: Decimal
     var totalBtcValueNow: Decimal
@@ -746,6 +766,7 @@ final class ReportsViewModel: ObservableObject {
         guard !templates.isEmpty else {
             usdBtcReport = UsdBtcReportData(
                 months: [],
+                bills: [],
                 totalUsd: 0,
                 totalBtcAtTime: 0,
                 totalBtcValueNow: 0,
@@ -760,9 +781,13 @@ final class ReportsViewModel: ObservableObject {
         var totalUsd: Decimal = 0
         var totalBtcAtTime: Decimal = 0
         var totalBtcValueNow: Decimal = 0
-        var months: [(Date, Decimal, Decimal, Decimal, Decimal, Bool)] = []
+        var months: [UsdBtcMonthPoint] = []
         var estimatedMonths = 0
         var actualMonths = 0
+        var billMonthPoints = Array(repeating: [UsdBtcMonthPoint](), count: templates.count)
+        var billUsd = Array(repeating: Decimal(0), count: templates.count)
+        var billBtcAt = Array(repeating: Decimal(0), count: templates.count)
+        var billBtcNow = Array(repeating: Decimal(0), count: templates.count)
 
         let rangeEnd = calendar.date(byAdding: .month, value: usdBtcMonthsBack, to: startOfStart) ?? now
         let allEntries = fetchEntries(from: startOfStart, to: rangeEnd)
@@ -790,6 +815,7 @@ final class ReportsViewModel: ObservableObject {
             if mStart > now { continue }
 
             var usdExp: Decimal = 0
+            var btcQty: Decimal = 0
             var btcAt: Decimal = 0
             var btcNow: Decimal = 0
             var priceSum: Decimal = 0
@@ -798,7 +824,7 @@ final class ReportsViewModel: ObservableObject {
             var monthHasActual = false
             var used = Set<Int>()
 
-            for template in templates {
+            for (templateIndex, template) in templates.enumerated() {
                 let due = BillBtcBacktest.dueDate(inMonth: mStart, day: template.dueDay, calendar: calendar)
                 let matchIdx = BillBtcBacktest.matchingIndex(
                     template: template,
@@ -824,9 +850,25 @@ final class ReportsViewModel: ObservableObject {
                     currentPrice: currentPrice
                 ) else { continue }
 
+                let nowValue = amount.btc * (currentPrice > 0 ? currentPrice : amount.price)
+                let point = UsdBtcMonthPoint(
+                    month: mStart,
+                    usdExpenses: amount.usd,
+                    btcAtTime: amount.usd,
+                    btcValueNow: nowValue,
+                    btcAmount: amount.btc,
+                    avgBtcPrice: amount.price,
+                    isEstimate: amount.isEstimate
+                )
+                billMonthPoints[templateIndex].append(point)
+                billUsd[templateIndex] += amount.usd
+                billBtcAt[templateIndex] += amount.usd
+                billBtcNow[templateIndex] += nowValue
+
                 usdExp += amount.usd
+                btcQty += amount.btc
                 btcAt += amount.usd
-                btcNow += amount.btc * (currentPrice > 0 ? currentPrice : amount.price)
+                btcNow += nowValue
                 if amount.price > 0 {
                     priceSum += amount.price
                     priceCount += 1
@@ -839,7 +881,17 @@ final class ReportsViewModel: ObservableObject {
             }
 
             let avgPrice = priceCount > 0 ? priceSum / Decimal(priceCount) : 0
-            months.append((mStart, usdExp, btcAt, btcNow, avgPrice, monthIsEstimate && !monthHasActual))
+            months.append(
+                UsdBtcMonthPoint(
+                    month: mStart,
+                    usdExpenses: usdExp,
+                    btcAtTime: btcAt,
+                    btcValueNow: btcNow,
+                    btcAmount: btcQty,
+                    avgBtcPrice: avgPrice,
+                    isEstimate: monthIsEstimate && !monthHasActual
+                )
+            )
             totalUsd += usdExp
             totalBtcAtTime += btcAt
             totalBtcValueNow += btcNow
@@ -850,8 +902,21 @@ final class ReportsViewModel: ObservableObject {
             }
         }
 
+        let bills: [UsdBtcBillSeries] = templates.enumerated().compactMap { index, template in
+            let points = billMonthPoints[index]
+            guard !points.isEmpty else { return nil }
+            return UsdBtcBillSeries(
+                name: template.name,
+                months: points,
+                totalUsd: billUsd[index],
+                totalBtcAtTime: billBtcAt[index],
+                totalBtcValueNow: billBtcNow[index]
+            )
+        }
+
         usdBtcReport = UsdBtcReportData(
             months: months,
+            bills: bills,
             totalUsd: totalUsd,
             totalBtcAtTime: totalBtcAtTime,
             totalBtcValueNow: totalBtcValueNow,
@@ -963,28 +1028,32 @@ final class ReportsViewModel: ObservableObject {
         let request = NSFetchRequest<Bill>(entityName: "Bill")
         request.fetchBatchSize = 50
         let bills = (try? context.fetch(request)) ?? []
-        var latest: [String: Bill] = [:]
-        for bill in bills where bill.trackInBitcoinFlag {
-            let key = bill.seriesId?.uuidString ?? bill.id?.uuidString ?? bill.objectID.uriRepresentation().absoluteString
-            if let existing = latest[key], let existingDue = existing.dueDate, let due = bill.dueDate {
-                if due > existingDue { latest[key] = bill }
-            } else if latest[key] == nil {
-                latest[key] = bill
+        let sources: [BillBtcBacktest.BillSource] = bills.map { bill in
+            let entries = (bill.ledgerEntries as? Set<LedgerEntry>) ?? []
+            let paidInBitcoin = entries.contains { entry in
+                let usd = entry.usdAmountDecimal > 0 ? entry.usdAmountDecimal : bill.amountDecimal
+                return BillBtcBacktest.isUsdBillPaidInBitcoin(
+                    isCredit: entry.isCredit,
+                    usdAmount: usd,
+                    btcAmount: entry.btcAmountDecimal
+                )
             }
-        }
-        return latest.values.compactMap { bill in
-            let name = (bill.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty else { return nil }
-            let dueDay = calendar.component(.day, from: bill.dueDate ?? Date())
-            return BillBtcBacktest.Template(
-                name: name,
+            return BillBtcBacktest.BillSource(
+                groupingKey: BillBtcBacktest.groupingKey(
+                    seriesId: bill.seriesId,
+                    billId: bill.id,
+                    objectURI: bill.objectID.uriRepresentation().absoluteString
+                ),
+                name: bill.name ?? "",
                 amount: bill.amountDecimal,
-                dueDay: dueDay,
+                dueDate: bill.dueDate,
                 seriesId: bill.seriesId,
-                category: bill.category
+                category: bill.category,
+                trackInBitcoin: bill.trackInBitcoinFlag,
+                paidInBitcoin: paidInBitcoin
             )
         }
-        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        return BillBtcBacktest.templates(from: sources, calendar: calendar)
     }
     
     /// Fetches income entries (positive USD amounts) within the current period

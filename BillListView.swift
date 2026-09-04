@@ -21,6 +21,7 @@ struct BillListView: View {
     @EnvironmentObject private var accountViewModel: AccountViewModel
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var showingAddBill = false
     @State private var selectedBill: Bill?
     @State private var showingDeleteAlert = false
@@ -70,6 +71,16 @@ struct BillListView: View {
     
     init(filterMonth: Date? = nil) {
         self.filterMonth = filterMonth
+    }
+    
+    private var useCompactRows: Bool {
+        verticalSizeClass == .compact || filterMonth != nil
+    }
+    
+    private var billRowInsets: EdgeInsets {
+        useCompactRows
+            ? EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12)
+            : EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16)
     }
 
     @ViewBuilder
@@ -281,6 +292,7 @@ struct BillListView: View {
         NavigationStack {
             mainContent
                 .navigationTitle("Bills")
+                .navigationBarTitleDisplayMode(useCompactRows ? .inline : .large)
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     if isSearchPresented {
                         liquidGlassSearchBar
@@ -747,9 +759,11 @@ struct BillListView: View {
         // Filter by month
         var monthFilteredBills: [Bill]
         if filterMonth != nil {
-            // When filtering by a specific month, show ALL bills for that month
-            // This allows users to uncheck bills they accidentally marked as paid
-            monthFilteredBills = monthBills
+            // Landscape month view: hide paid bills unless the toolbar toggle is on.
+            // Pending (unreconciled) paid bills still show, matching portrait.
+            monthFilteredBills = monthBills.filter { bill in
+                shouldShowBill(bill) || showPaidBills
+            }
         } else {
             // For current month view, show unpaid bills + bills with pending transactions
             // Optionally show all paid bills if toggled
@@ -1070,200 +1084,167 @@ struct BillListView: View {
 
     private var billList: some View {
         List {
-            // Only show summary if not filtering by month
             if filterMonth == nil {
                 summarySection
             }
             
             if billViewModel.bills.isEmpty {
-                Section {
-                    emptyStateView
-                        .frame(maxWidth: .infinity)
-                        .listRowInsets(EdgeInsets())
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                }
+                emptyBillsSection
             } else if filteredBills.isEmpty {
-                Section {
-                    Group {
-                        if filterMonth != nil {
-                            monthFilterEmptyView
-                        } else {
-                            noResultsView
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .listRowInsets(EdgeInsets(top: 32, leading: 20, bottom: 32, trailing: 20))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                }
+                emptyFilteredSection
             } else {
-                ForEach(groupedBills.keys.sorted(), id: \.self) { monthDate in
-                    let bills = billsForMonth(monthDate)
-                    let isCurrentMonth = filterMonth == nil && Calendar.current.isDate(monthDate, equalTo: Date(), toGranularity: .month)
-                    
-                    if isCurrentMonth && showCurrentMonthPaidBills {
-                        // Split current month bills into unpaid and paid sections
-                        let unpaidBills = bills.filter { !$0.isPaid }
-                        let paidBills = bills.filter { $0.isPaid }
-                        
-                        // Unpaid bills section
-                        if !unpaidBills.isEmpty {
-                            Section(header: monthSectionHeader(for: monthDate)) {
-                                ForEach(unpaidBills, id: \.objectID) { bill in
-                                    BillRowView(bill: bill, onMarkPaid: { billToMark in
-                                        // Mark as paid - BillRowView will handle reconcile drawer if needed
-                                        billViewModel.togglePaidStatus(for: billToMark)
-                                        HapticManager.shared.billMarkedPaid()
-                                    })
-                                        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
-                                        .listRowBackground(Color.clear)
-                                        .contentShape(Rectangle())
-                                        .onTapGesture {
-                                            HapticManager.shared.buttonTapped()
-                                            selectedBill = bill
-                                        }
-                                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                            Button(role: .destructive) {
-                                                billToDelete = bill
-                                                showingDeleteAlert = true
-                                            } label: {
-                                                Label("Delete", systemImage: "trash")
-                                            }
-                                        }
-                                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                            Button {
-                                                HapticManager.shared.buttonTapped()
-                                                selectedBill = bill
-                                            } label: {
-                                                Label("Edit", systemImage: "pencil")
-                                            }
-                                            .tint(.blue)
-                                            
-                                            // Mark as Paid (cleared) - same as tapping circle
-                                            if !bill.isPaid {
-                                                Button {
-                                                    billViewModel.togglePaidStatus(for: bill)
-                                                    HapticManager.shared.billMarkedPaid()
-                                                } label: {
-                                                    Label("Paid", systemImage: "checkmark")
-                                                }
-                                                .tint(.green)
-                                            }
-                                        }
-                                }
-                            }
-                        }
-                        
-                        // Paid bills section (with visual separator)
-                        if !paidBills.isEmpty {
-                            Section(header: HStack {
-                                Text(monthFormatter.string(from: monthDate))
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.secondary)
-                                Spacer()
-                                Text("Paid Bills")
-                                    .font(.caption)
-                                    .foregroundColor(.green)
-                            }) {
-                                ForEach(paidBills, id: \.objectID) { bill in
-                                    BillRowView(bill: bill, onMarkPaid: { billToMark in
-                                        // For BTC accounts, show sats input sheet
-                                        if let account = billToMark.account, account.currencyCode == "BTC" {
-                                            billToMarkPaid = billToMark
-                                            satsInputText = ""
-                                            showingSatsInputSheet = true
-                                        } else {
-                                            billViewModel.togglePaidStatus(for: billToMark)
-                                            HapticManager.shared.billMarkedPaid()
-                                        }
-                                    })
-                                        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
-                                        .listRowBackground(Color.clear)
-                                        .contentShape(Rectangle())
-                                        .onTapGesture {
-                                            HapticManager.shared.buttonTapped()
-                                            selectedBill = bill
-                                        }
-                                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                            Button(role: .destructive) {
-                                                billToDelete = bill
-                                                showingDeleteAlert = true
-                                            } label: {
-                                                Label("Delete", systemImage: "trash")
-                                            }
-                                        }
-                                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                            Button {
-                                                HapticManager.shared.buttonTapped()
-                                                selectedBill = bill
-                                            } label: {
-                                                Label("Edit", systemImage: "pencil")
-                                            }
-                                            .tint(.blue)
-                                            
-                                            Button {
-                                                billViewModel.togglePaidStatus(for: bill)
-                                                HapticManager.shared.buttonTapped()
-                                            } label: {
-                                                Label("Unpaid", systemImage: "xmark")
-                                            }
-                                            .tint(.orange)
-                                        }
-                                }
-                            }
-                        }
-                    } else {
-                        // Regular section for other months or when paid bills are hidden
-                        Section(header: monthSectionHeader(for: monthDate)) {
-                            ForEach(bills, id: \.objectID) { bill in
-                                BillRowView(bill: bill, onMarkPaid: { billToMark in
-                                    billViewModel.togglePaidStatus(for: billToMark)
-                                    HapticManager.shared.billMarkedPaid()
-                                })
-                                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
-                                    .listRowBackground(Color.clear)
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        HapticManager.shared.buttonTapped()
-                                        selectedBill = bill
-                                    }
-                                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                        Button(role: .destructive) {
-                                            billToDelete = bill
-                                            showingDeleteAlert = true
-                                        } label: {
-                                            Label("Delete", systemImage: "trash")
-                                        }
-                                    }
-                                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                        Button {
-                                            HapticManager.shared.buttonTapped()
-                                            selectedBill = bill
-                                        } label: {
-                                            Label("Edit", systemImage: "pencil")
-                                        }
-                                        .tint(.blue)
-                                        
-                                        // Mark as Paid (cleared) - same as tapping circle
-                                        if !bill.isPaid {
-                                            Button {
-                                                billViewModel.togglePaidStatus(for: bill)
-                                                HapticManager.shared.billMarkedPaid()
-                                            } label: {
-                                                Label("Paid", systemImage: "checkmark")
-                                            }
-                                            .tint(.green)
-                                        }
-                                    }
-                            }
-                        }
-                    }
-                }
+                groupedBillSections
             }
         }
         .listStyle(.insetGrouped)
+    }
+    
+    private var emptyBillsSection: some View {
+        Section {
+            emptyStateView
+                .frame(maxWidth: .infinity)
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+        }
+    }
+    
+    private var emptyFilteredSection: some View {
+        Section {
+            Group {
+                if filterMonth != nil {
+                    monthFilterEmptyView
+                } else {
+                    noResultsView
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .listRowInsets(EdgeInsets(top: 32, leading: 20, bottom: 32, trailing: 20))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+        }
+    }
+    
+    private var groupedBillSections: some View {
+        ForEach(groupedBills.keys.sorted(), id: \.self) { monthDate in
+            monthBillSections(for: monthDate)
+        }
+    }
+    
+    @ViewBuilder
+    private func monthBillSections(for monthDate: Date) -> some View {
+        let bills = billsForMonth(monthDate)
+        let isCurrentMonth = filterMonth == nil && Calendar.current.isDate(monthDate, equalTo: Date(), toGranularity: .month)
+        
+        if isCurrentMonth && showCurrentMonthPaidBills {
+            unpaidMonthSection(monthDate: monthDate, bills: bills.filter { !$0.isPaid })
+            paidMonthSection(monthDate: monthDate, bills: bills.filter { $0.isPaid })
+        } else {
+            Section(header: monthSectionHeader(for: monthDate)) {
+                ForEach(bills, id: \.objectID) { bill in
+                    billListRow(for: bill)
+                }
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private func unpaidMonthSection(monthDate: Date, bills: [Bill]) -> some View {
+        if !bills.isEmpty {
+            Section(header: monthSectionHeader(for: monthDate)) {
+                ForEach(bills, id: \.objectID) { bill in
+                    billListRow(for: bill)
+                }
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private func paidMonthSection(monthDate: Date, bills: [Bill]) -> some View {
+        if !bills.isEmpty {
+            Section(header: paidBillsSectionHeader(for: monthDate)) {
+                ForEach(bills, id: \.objectID) { bill in
+                    billListRow(for: bill, showsUnpaidSwipe: true)
+                }
+            }
+        }
+    }
+    
+    private func paidBillsSectionHeader(for monthDate: Date) -> some View {
+        HStack {
+            Text(monthFormatter.string(from: monthDate))
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundColor(.secondary)
+            Spacer()
+            Text("Paid Bills")
+                .font(.caption)
+                .foregroundColor(.green)
+        }
+    }
+    
+    private func billListRow(for bill: Bill, showsUnpaidSwipe: Bool = false) -> some View {
+        BillRowView(bill: bill, onMarkPaid: { billToMark in
+            markBillPaidFromRow(billToMark)
+        }, compact: useCompactRows)
+        .listRowInsets(billRowInsets)
+        .listRowBackground(Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            HapticManager.shared.buttonTapped()
+            selectedBill = bill
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive) {
+                billToDelete = bill
+                showingDeleteAlert = true
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            leadingSwipeActions(for: bill, showsUnpaidSwipe: showsUnpaidSwipe)
+        }
+    }
+    
+    @ViewBuilder
+    private func leadingSwipeActions(for bill: Bill, showsUnpaidSwipe: Bool) -> some View {
+        Button {
+            HapticManager.shared.buttonTapped()
+            selectedBill = bill
+        } label: {
+            Label("Edit", systemImage: "pencil")
+        }
+        .tint(.blue)
+        
+        if showsUnpaidSwipe {
+            Button {
+                billViewModel.togglePaidStatus(for: bill)
+                HapticManager.shared.buttonTapped()
+            } label: {
+                Label("Unpaid", systemImage: "xmark")
+            }
+            .tint(.orange)
+        } else if !bill.isPaid {
+            Button {
+                billViewModel.togglePaidStatus(for: bill)
+                HapticManager.shared.billMarkedPaid()
+            } label: {
+                Label("Paid", systemImage: "checkmark")
+            }
+            .tint(.green)
+        }
+    }
+    
+    private func markBillPaidFromRow(_ bill: Bill) {
+        if let account = bill.account, account.currencyCode == "BTC" {
+            billToMarkPaid = bill
+            satsInputText = ""
+            showingSatsInputSheet = true
+        } else {
+            billViewModel.togglePaidStatus(for: bill)
+            HapticManager.shared.billMarkedPaid()
+        }
     }
     
     private var monthFilterEmptyView: some View {
