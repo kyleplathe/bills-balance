@@ -19,8 +19,8 @@ Use standard iOS design. Prefer system defaults (including iOS 26 liquid glass) 
 
 ## Activity Reports (pushed from Balance)
 
-- **Presentation:** Push onto Balance’s `NavigationStack` (slides in from the right). Hide the tab bar. Do **not** wrap Activity in its own `NavigationStack`, `fullScreenCover`, `List`, or paging `TabView`.
-- **Layout:** Same as Balance: `ScrollView` + 16pt horizontal inset + snapshot cards (22pt corners). Period title is left-aligned in the scroll content and scrolls away.
+- **Presentation:** Push onto Balance’s `NavigationStack` (slides in from the right). Hide the tab bar. Do **not** wrap Activity in its own `NavigationStack`, `fullScreenCover`, or `List`. In-content period paging (`TabView` + `.page`) is allowed so adjacent weeks/months/years slide like Apple Card; keep 16pt insets **inside** each page so cards do not edge-bleed.
+- **Layout:** Same as Balance: each period page is a `ScrollView` + 16pt horizontal inset + snapshot cards (22pt corners). Period title is left-aligned in the page content and scrolls away.
 - **Toolbar:** Leading = standard `xmark`. Principal = native Week/Month/Year segmented picker (liquid glass). Trailing = `ellipsis.circle` menu. Do **not** hide the navigation bar background.
 - **Chart:** `WalletStackedCategoryBarChart` inside the Total Spending card (Y-axis on the right, skinny rounded-top bars). Balance uses `CompactWalletStackedCategoryBarChart`.
 

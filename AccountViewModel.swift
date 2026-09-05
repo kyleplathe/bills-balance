@@ -243,6 +243,18 @@ class AccountViewModel: ObservableObject {
         }
         return BalanceMath.totalVisible(amounts: amounts)
     }
+
+    func totalAvailableBalance(bitcoinPriceService: BitcoinPriceService? = nil) -> Decimal {
+        let priceService = bitcoinPriceService ?? BitcoinPriceService.shared
+        let amounts = accounts.map { account -> (amount: Decimal, isHidden: Bool) in
+            let balance = totalBalance(for: account)
+            let usd = account.currencyCode == "BTC"
+                ? priceService.convertBTCToUSD(balance)
+                : balance
+            return (amount: usd, isHidden: account.isHiddenFlag)
+        }
+        return BalanceMath.totalVisible(amounts: amounts)
+    }
     
     // MARK: - Available Balance (Current Balance minus Pending Bills plus Pending Income)
     func availableBalance(for account: Account, billViewModel: BillViewModel? = nil, paycheckViewModel: PaycheckViewModel? = nil, bitcoinPriceService: BitcoinPriceService? = nil, windowDays: Int = 30) -> Decimal {

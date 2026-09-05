@@ -73,7 +73,6 @@ extension Collection {
 
 private enum BalancePrivacy {
     static let placeholder = "$••••••"
-    static let shortPlaceholder = "$••••"
 }
 
 private struct ExportFileItem: Identifiable {
@@ -115,6 +114,7 @@ struct BalanceView: View {
     @State private var showStatementImportSuccessAlert = false
     @State private var statementImportResult: StatementImportResult?
     @State private var isImportParsing = false
+    @State private var selectedRecentTransaction: LedgerEntry?
     
     var body: some View {
         NavigationStack {
@@ -210,6 +210,15 @@ struct BalanceView: View {
             )
             .environmentObject(accountViewModel)
             .environmentObject(categoryManager)
+        }
+        .sheet(item: Binding(
+            get: { selectedRecentTransaction.map { LedgerEntrySheetItem($0) } },
+            set: { selectedRecentTransaction = $0?.entry }
+        )) { item in
+            TransactionEditorSheet(entry: item.entry)
+                .environmentObject(accountViewModel)
+                .environmentObject(bitcoinPriceService)
+                .environmentObject(categoryManager)
         }
         .overlay {
             if isImportParsing {
@@ -426,7 +435,7 @@ struct BalanceView: View {
                         ? "Total balance hidden"
                         : "Total balance \(totalBalance.formatted(.currency(code: "USD")))"
                 )
-                .accessibilityHint("Shows or hides balances on this screen")
+                .accessibilityHint("Shows or hides total balance")
 
                 FittedChipLine(
                     text: balanceChipSubtitle,
@@ -464,7 +473,8 @@ struct BalanceView: View {
 
                     CompactWalletStackedCategoryBarChart(
                         period: activityPeriod,
-                        appeared: activityChartAppeared
+                        appeared: activityChartAppeared,
+                        date: reportsViewModel.presentPeriodAnchor()
                     )
                 }
             }
@@ -559,9 +569,25 @@ struct BalanceView: View {
                     Text("Recent")
                         .font(.title3.weight(.semibold))
                     
-                    VStack(spacing: 8) {
+                    VStack(spacing: 0) {
                         ForEach(Array(transactions), id: \.objectID) { entry in
-                            TransactionChipCard(entry: entry)
+                            if let account = entry.account {
+                                TransactionRow(
+                                    entry: entry,
+                                    account: account,
+                                    showsRunningBalance: false,
+                                    showsAccountInSubtitle: true,
+                                    showsReconcileControl: false,
+                                    onReconcile: { entry in
+                                        HapticManager.shared.buttonTapped()
+                                        selectedRecentTransaction = entry
+                                    }
+                                ) {
+                                    HapticManager.shared.buttonTapped()
+                                    selectedRecentTransaction = entry
+                                }
+                                .padding(.vertical, 6)
+                            }
                         }
                     }
                 }
@@ -594,15 +620,11 @@ struct BalanceView: View {
     }
 
     private var activityChipSpendingText: String {
-        if hideBalances { return BalancePrivacy.shortPlaceholder }
-        return periodSpendingTotal.formatted(.currency(code: "USD"))
+        periodSpendingTotal.formatted(.currency(code: "USD"))
     }
 
     private var periodSpendingTotal: Decimal {
-        reportsViewModel.categoryBreakdownByPeriod(period: activityPeriod)
-            .reduce(into: Decimal(0)) { sum, bucket in
-                sum += bucket.categories.reduce(Decimal(0)) { $0 + $1.amount }
-            }
+        reportsViewModel.periodSpendingTotal(for: activityPeriod)
     }
 
     private var balanceChipSubtitle: String {
@@ -612,7 +634,7 @@ struct BalanceView: View {
     }
     
     private var totalBalance: Decimal {
-        accountViewModel.totalClearedBalance(bitcoinPriceService: bitcoinPriceService)
+        accountViewModel.totalAvailableBalance(bitcoinPriceService: bitcoinPriceService)
     }
     
     private var activityPeriod: ReportsViewModel.WalletPeriod {
@@ -804,7 +826,6 @@ private enum AccountChipLayout {
 private struct AccountChipCard: View {
     @EnvironmentObject private var accountViewModel: AccountViewModel
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
-    @AppStorage("hideBalances") private var hideBalances = false
     let account: Account
     let onTap: () -> Void
     
@@ -851,17 +872,12 @@ private struct AccountChipCard: View {
     }
     
     private var displayedBalance: String {
-        hideBalances
-            ? BalancePrivacy.placeholder
-            : formatAccountBalanceUSD(accountViewModel.clearedBalance(for: account), account: account)
+        formatAccountBalanceUSD(accountViewModel.totalBalance(for: account), account: account)
     }
     
     private var accessibilityBalanceLabel: String {
         let name = account.name ?? "Account"
-        if hideBalances {
-            return "\(name), balance hidden"
-        }
-        return "\(name), \(formatAccountBalanceUSD(accountViewModel.clearedBalance(for: account), account: account))"
+        return "\(name), \(displayedBalance)"
     }
     
     private var accountGradient: LinearGradient {
@@ -904,89 +920,3 @@ private struct AccountChipCard: View {
     }
 }
 
-// MARK: - Transaction Chip Card
-
-private struct TransactionChipCard: View {
-    @AppStorage("hideBalances") private var hideBalances = false
-    let entry: LedgerEntry
-    
-    var body: some View {
-        ChipCard {
-            HStack(spacing: 12) {
-                // Transaction icon
-                Circle()
-                    .fill(entry.isCredit ? Color.green.opacity(0.2) : Color.red.opacity(0.2))
-                    .frame(width: 40, height: 40)
-                    .overlay(
-                        Image(systemName: entry.isCredit ? "arrow.up" : "arrow.down")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(entry.isCredit ? .green : .red)
-                    )
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(entry.title ?? "Transaction")
-                        .font(.body)
-                        .foregroundColor(.primary)
-                    
-                    HStack(spacing: 8) {
-                        if let date = entry.date {
-                            Text(formatDate(date))
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        if let accountName = entry.account?.name {
-                            Text("•")
-                                .foregroundColor(.secondary)
-                            Text(accountName)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-                
-                Spacer()
-                
-                // Display USD amount for all transactions
-                let usdAmount: Decimal = {
-                    guard let account = entry.account else {
-                        return entry.usdAmountDecimal != .zero ? entry.usdAmountDecimal : entry.amountDecimal
-                    }
-                    if account.currencyCode == "BTC" {
-                        // For BTC accounts, use USD amount if available
-                        if entry.usdAmountDecimal != .zero {
-                            return entry.usdAmountDecimal
-                        } else if entry.btcAmountDecimal != .zero && entry.btcPriceAtTransactionDecimal > 0 {
-                            // Convert BTC to USD using transaction price
-                            return entry.btcAmountDecimal * entry.btcPriceAtTransactionDecimal
-                        }
-                        return .zero
-                    } else {
-                        // For USD accounts, use USD amount or regular amount
-                        return entry.usdAmountDecimal != .zero ? entry.usdAmountDecimal : entry.amountDecimal
-                    }
-                }()
-                
-                if hideBalances {
-                    Text(BalancePrivacy.shortPlaceholder)
-                        .font(.body)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.secondary)
-                        .privacySensitive()
-                } else if usdAmount != .zero {
-                    let signedAmount = entry.isCredit ? usdAmount : -usdAmount
-                    let formattedAmount = abs(signedAmount).formatted(.currency(code: "USD"))
-                    Text((entry.isCredit ? "+" : "-") + formattedAmount)
-                        .font(.body)
-                        .fontWeight(.semibold)
-                        .foregroundColor(entry.isCredit ? .green : .red)
-                        .privacySensitive()
-                }
-            }
-        }
-    }
-    
-    private func formatDate(_ date: Date) -> String {
-        RelativeDateFormatter.string(from: date)
-    }
-}

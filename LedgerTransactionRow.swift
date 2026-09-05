@@ -13,6 +13,9 @@ struct TransactionRow: View {
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     let entry: LedgerEntry
     let account: Account
+    var showsRunningBalance: Bool = true
+    var showsAccountInSubtitle: Bool = false
+    var showsReconcileControl: Bool = true
     let onReconcile: (LedgerEntry) -> Void
     let onTap: () -> Void
     
@@ -130,97 +133,105 @@ struct TransactionRow: View {
     private func formatTransactionDate(_ date: Date) -> String {
         RelativeDateFormatter.string(from: date)
     }
+
+    private var subtitleText: String? {
+        var parts: [String] = []
+        if let date = entry.date {
+            parts.append(formatTransactionDate(date))
+        }
+        if showsAccountInSubtitle, let name = account.name, !name.isEmpty {
+            parts.append(name)
+        }
+        if let category = entry.category, !category.isEmpty {
+            parts.append(category)
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " • ")
+    }
     
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            // Transaction status icon - green circle with white checkmark for cleared
-            // Tappable to toggle reconciled status
-            Button {
-                // When checking off (reconciling) a transaction:
-                // If it's a BTC account and missing sats, open reconcile drawer
-                // Otherwise, toggle reconciled status directly
-                if account.currencyCode == "BTC" && !entry.isReconciledFlag && entry.btcAmountDecimal == 0 {
-                    // About to reconcile but missing sats - show reconciliation drawer
-                    onReconcile(entry)
-                } else {
-                    // Has sats, not BTC account, or unreconciling - toggle directly
-                    accountViewModel.toggleReconciled(for: entry)
-                }
-            } label: {
-                if entry.isReconciledFlag {
-                    ZStack {
+        HStack(alignment: .center, spacing: 16) {
+            if showsReconcileControl {
+                Button {
+                    if account.currencyCode == "BTC" && !entry.isReconciledFlag && entry.btcAmountDecimal == 0 {
+                        onReconcile(entry)
+                    } else {
+                        accountViewModel.toggleReconciled(for: entry)
+                    }
+                } label: {
+                    if entry.isReconciledFlag {
+                        ZStack {
+                            Circle()
+                                .fill(Color.green)
+                                .frame(width: 26, height: 26)
+                            
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                    } else {
                         Circle()
-                            .fill(Color.green)
-                            .frame(width: 24, height: 24)
-                        
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 2)
+                            .frame(width: 26, height: 26)
                     }
-                } else {
-                    Circle()
-                        .stroke(Color.gray.opacity(0.3), lineWidth: 2)
-                        .frame(width: 24, height: 24)
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(entry.isReconciledFlag ? "Mark uncleared" : "Mark cleared")
             }
-            .buttonStyle(.plain)
             
-            VStack(alignment: .leading, spacing: 4) {
-                // Transaction title
-                Text(entry.title ?? "Transaction")
-                    .font(.body)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.primary)
-                
-                // Date
-                if let date = entry.date {
-                    Text(formatTransactionDate(date))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                // Account/Category line
-                HStack(spacing: 4) {
-                    if let accountName = account.name {
-                        Text(accountName)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(entry.title ?? "Transaction")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                     
-                    if let category = entry.category, !category.isEmpty {
-                        Text("•")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Text(category)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                    if !entry.isReconciledFlag {
+                        Text("PENDING")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(.orange, in: Capsule())
+                            .fixedSize()
                     }
                 }
-            }
-            
-            Spacer()
-            
-            VStack(alignment: .trailing, spacing: 4) {
-                // Transaction amount with +/- prefix
-                Text((entry.isCredit ? "+ " : "- ") + formattedAmount)
-                    .font(.body)
-                    .fontWeight(.semibold)
-                    .foregroundColor(entry.isCredit ? .green : .red)
                 
-                // Running balance after this transaction
-                Text(formattedRunningBalance)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                if let subtitleText {
+                    Text(subtitleText)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            
+            Spacer(minLength: 12)
+            
+            VStack(alignment: .trailing, spacing: 1) {
+                Text((entry.isCredit ? "+ " : "- ") + formattedAmount)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(entry.isCredit ? .green : .red)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                
+                if showsRunningBalance && entry.isReconciledFlag {
+                    Text(formattedRunningBalance)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+            }
+            .layoutPriority(1)
             .id("\(entry.objectID)-\(bitcoinPriceService.showInBitcoin)")
         }
-        .padding(.vertical, 12)
         .contentShape(Rectangle())
         .onTapGesture {
             onTap()
         }
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
-            // Swipe right to toggle reconciled status
             Button {
                 accountViewModel.toggleReconciled(for: entry)
             } label: {
@@ -230,14 +241,12 @@ struct TransactionRow: View {
             .tint(entry.isReconciledFlag ? .orange : .green)
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            // Swipe left to delete
             Button(role: .destructive) {
                 accountViewModel.deleteLedgerEntry(entry)
             } label: {
                 Label("Delete", systemImage: "trash")
             }
             
-            // Swipe left to edit
             Button {
                 onTap()
             } label: {

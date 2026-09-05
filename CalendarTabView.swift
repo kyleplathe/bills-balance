@@ -43,142 +43,221 @@ struct CalendarTabView: View {
     
     var body: some View {
         NavigationStack {
-            GeometryReader { proxy in
-                content(for: proxy.size)
-                    .onAppear {
-                        isLandscape = verticalSizeClass == .compact
-                    }
-                    .onChange(of: verticalSizeClass) { _, newValue in
-                        isLandscape = newValue == .compact
-                    }
-                    .onChange(of: proxy.size) { _, _ in
-                        isLandscape = verticalSizeClass == .compact
-                    }
-            }
-            .navigationTitle(isLandscape ? "" : "Calendar")
-            .navigationBarTitleDisplayMode(isLandscape ? .inline : .large)
-            .toolbar {
-                if isLandscape {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Text(monthFormatter.string(from: currentMonth))
-                            .font(.headline.weight(.semibold))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-                            .accessibilityLabel(monthFormatter.string(from: currentMonth))
-                    }
-                    .sharedBackgroundVisibility(.hidden)
-                }
-                ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    Menu {
-                        Button("Add Bill") { 
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                presentBillEditor(nil)
-                            }
-                        }
-                        Button("Add Income") { 
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                presentPaycheckEditor(nil)
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "plus.circle")
-                            .font(.title2)
-                    }
-                    .transaction { transaction in
-                        transaction.animation = .spring(response: 0.3, dampingFraction: 0.7)
-                    }
-                }
-            }
+            calendarNavigationContent
         }
         .sheet(isPresented: $showingBillEditor) {
-            AddEditBillView(bill: billToEdit, defaultDate: selectedDate)
-                .environmentObject(billViewModel)
-                .environmentObject(accountViewModel)
+            billEditorSheet
         }
         .sheet(isPresented: $showingPaycheckEditor) {
-            PaycheckEditorSheet(paycheck: paycheckToEdit, 
-                              defaultDate: selectedDate,
-                              occurrenceDate: paycheckOccurrenceDate)
-                .environmentObject(paycheckViewModel)
-                .environmentObject(accountViewModel)
+            paycheckEditorSheet
         }
-        .alert("Delete Bill", isPresented: $showingDeleteBillAlert, presenting: billToDelete) { bill in
-            Button("Cancel", role: .cancel) {
+        .alert("Delete Bill", isPresented: $showingDeleteBillAlert, presenting: billToDelete, actions: deleteBillAlertButtons, message: deleteBillAlertMessage)
+        .alert("Delete Income", isPresented: $showingDeletePaycheckAlert, presenting: paycheckToDelete, actions: deletePaycheckAlertButtons, message: deletePaycheckAlertMessage)
+        .onAppear(perform: initializeVisibleMonth)
+        .onChange(of: selectedMonth, handleSelectedMonthChange)
+    }
+    
+    private var calendarNavigationContent: some View {
+        GeometryReader { proxy in
+            content(for: proxy.size)
+                .onAppear(perform: updateLandscapeFromSizeClass)
+                .onChange(of: verticalSizeClass, handleVerticalSizeClassChange)
+                .onChange(of: proxy.size) { _, _ in
+                    updateLandscapeFromSizeClass()
+                }
+        }
+        .navigationTitle(isLandscape ? "" : "Calendar")
+        .navigationBarTitleDisplayMode(isLandscape ? .inline : .large)
+        .toolbar { calendarToolbar }
+    }
+    
+    @ToolbarContentBuilder
+    private var calendarToolbar: some ToolbarContent {
+        if isLandscape {
+            landscapeMonthToolbarItem
+        }
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
+            addItemMenu
+        }
+    }
+    
+    @ToolbarContentBuilder
+    private var landscapeMonthToolbarItem: some ToolbarContent {
+        if #available(iOS 26.0, *) {
+            ToolbarItem(placement: .principal) {
+                landscapeMonthTitle
+            }
+            .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .principal) {
+                landscapeMonthTitle
+            }
+        }
+    }
+    
+    private var landscapeMonthTitle: some View {
+        HStack(spacing: 6) {
+            landscapeMonthChevron(systemName: "chevron.left") {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                    changeMonth(-1)
+                }
+            }
+            .accessibilityLabel("Previous month")
+            
+            Button(action: jumpToToday) {
+                Text(monthFormatter.string(from: currentMonth))
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(monthFormatter.string(from: currentMonth))
+            .accessibilityHint("Jumps to today")
+            
+            landscapeMonthChevron(systemName: "chevron.right") {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                    changeMonth(1)
+                }
+            }
+            .accessibilityLabel("Next month")
+        }
+        .fixedSize()
+    }
+    
+    private func landscapeMonthChevron(systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+    
+    private var addItemMenu: some View {
+        Menu {
+            Button("Add Bill") {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    presentBillEditor(nil)
+                }
+            }
+            Button("Add Income") {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    presentPaycheckEditor(nil)
+                }
+            }
+        } label: {
+            Image(systemName: "plus.circle")
+                .font(.title2)
+        }
+        .transaction { transaction in
+            transaction.animation = .spring(response: 0.3, dampingFraction: 0.7)
+        }
+    }
+    
+    private var billEditorSheet: some View {
+        AddEditBillView(bill: billToEdit, defaultDate: selectedDate)
+            .environmentObject(billViewModel)
+            .environmentObject(accountViewModel)
+    }
+    
+    private var paycheckEditorSheet: some View {
+        PaycheckEditorSheet(
+            paycheck: paycheckToEdit,
+            defaultDate: selectedDate,
+            occurrenceDate: paycheckOccurrenceDate
+        )
+        .environmentObject(paycheckViewModel)
+        .environmentObject(accountViewModel)
+    }
+    
+    @ViewBuilder
+    private func deleteBillAlertButtons(_ bill: Bill) -> some View {
+        Button("Cancel", role: .cancel) {
+            billToDelete = nil
+        }
+        if let recurrenceType = bill.recurrenceType, recurrenceType != "none" {
+            Button("This Bill Only", role: .destructive) {
+                billViewModel.deleteBill(bill)
                 billToDelete = nil
             }
-            // Check if bill is recurring
-            if let recurrenceType = bill.recurrenceType, recurrenceType != "none" {
-                Button("This Bill Only", role: .destructive) {
-                    billViewModel.deleteBill(bill)
-                    billToDelete = nil
-                }
-                Button("This and Future Bills", role: .destructive) {
-                    billViewModel.deleteRecurringBillAndFuture(bill)
-                    billToDelete = nil
-                }
-            } else {
-                Button("Delete", role: .destructive) {
-                    billViewModel.deleteBill(bill)
-                    billToDelete = nil
-                }
+            Button("This and Future Bills", role: .destructive) {
+                billViewModel.deleteRecurringBillAndFuture(bill)
+                billToDelete = nil
             }
-        } message: { bill in
-            if let recurrenceType = bill.recurrenceType, recurrenceType != "none" {
-                Text("Do you want to delete just this bill, or delete this bill and all future bills in the series?")
-            } else {
-                Text("Are you sure you want to delete \"\(bill.name ?? "this bill")\"? This action cannot be undone.")
+        } else {
+            Button("Delete", role: .destructive) {
+                billViewModel.deleteBill(bill)
+                billToDelete = nil
             }
         }
-        .alert("Delete Income", isPresented: $showingDeletePaycheckAlert, presenting: paycheckToDelete) { paycheck in
-            Button("Cancel", role: .cancel) {
+    }
+    
+    private func deleteBillAlertMessage(_ bill: Bill) -> Text {
+        if let recurrenceType = bill.recurrenceType, recurrenceType != "none" {
+            Text("Do you want to delete just this bill, or delete this bill and all future bills in the series?")
+        } else {
+            Text("Are you sure you want to delete \"\(bill.name ?? "this bill")\"? This action cannot be undone.")
+        }
+    }
+    
+    @ViewBuilder
+    private func deletePaycheckAlertButtons(_ paycheck: Paycheck) -> some View {
+        Button("Cancel", role: .cancel) {
+            paycheckToDelete = nil
+        }
+        if let recurrenceType = paycheck.recurrenceType, recurrenceType != "none" {
+            Button("This Income Only", role: .destructive) {
+                paycheckViewModel.deletePaycheck(paycheck)
                 paycheckToDelete = nil
             }
-            // Check if paycheck is recurring
-            if let recurrenceType = paycheck.recurrenceType, recurrenceType != "none" {
-                Button("This Income Only", role: .destructive) {
-                    // For recurring income, deleting the template removes all future occurrences
-                    // This is the same as "all future" since paychecks are templates
-                    paycheckViewModel.deletePaycheck(paycheck)
-                    paycheckToDelete = nil
-                }
-                Button("Delete All Future Income", role: .destructive) {
-                    // Delete the template which removes all future occurrences
-                    paycheckViewModel.deletePaycheck(paycheck)
-                    paycheckToDelete = nil
-                }
-            } else {
-                Button("Delete", role: .destructive) {
-                    paycheckViewModel.deletePaycheck(paycheck)
-                    paycheckToDelete = nil
-                }
+            Button("Delete All Future Income", role: .destructive) {
+                paycheckViewModel.deletePaycheck(paycheck)
+                paycheckToDelete = nil
             }
-        } message: { paycheck in
-            if let recurrenceType = paycheck.recurrenceType, recurrenceType != "none" {
-                Text("Deleting this income will remove all future occurrences. This action cannot be undone.")
-            } else {
-                Text("Are you sure you want to delete \"\(paycheck.name ?? "this income")\"? This action cannot be undone.")
+        } else {
+            Button("Delete", role: .destructive) {
+                paycheckViewModel.deletePaycheck(paycheck)
+                paycheckToDelete = nil
             }
         }
-        .onAppear {
-            let today = Date()
-            currentMonth = startOfMonth(for: today)
-            selectedDate = calendar.startOfDay(for: today)
-            showDayDrawer = false
-            
-            // Initialize shared month selection
-            if selectedMonth == nil {
-                selectedMonth = currentMonth
-            } else {
-                // Sync currentMonth with selectedMonth if provided
-                currentMonth = startOfMonth(for: selectedMonth ?? today)
-            }
+    }
+    
+    private func deletePaycheckAlertMessage(_ paycheck: Paycheck) -> Text {
+        if let recurrenceType = paycheck.recurrenceType, recurrenceType != "none" {
+            Text("Deleting this income will remove all future occurrences. This action cannot be undone.")
+        } else {
+            Text("Are you sure you want to delete \"\(paycheck.name ?? "this income")\"? This action cannot be undone.")
         }
-        .onChange(of: selectedMonth) { oldValue, newValue in
-            if let newValue = newValue, !calendar.isDate(newValue, equalTo: currentMonth, toGranularity: .month) {
-                currentMonth = startOfMonth(for: newValue)
-            }
+    }
+    
+    private func initializeVisibleMonth() {
+        let today = Date()
+        currentMonth = startOfMonth(for: today)
+        selectedDate = calendar.startOfDay(for: today)
+        showDayDrawer = false
+        
+        if selectedMonth == nil {
+            selectedMonth = currentMonth
+        } else {
+            currentMonth = startOfMonth(for: selectedMonth ?? today)
         }
+    }
+    
+    private func handleSelectedMonthChange(_ oldValue: Date?, _ newValue: Date?) {
+        if let newValue, !calendar.isDate(newValue, equalTo: currentMonth, toGranularity: .month) {
+            currentMonth = startOfMonth(for: newValue)
+        }
+    }
+    
+    private func updateLandscapeFromSizeClass() {
+        isLandscape = verticalSizeClass == .compact
+    }
+    
+    private func handleVerticalSizeClassChange(_ oldValue: UserInterfaceSizeClass?, _ newValue: UserInterfaceSizeClass?) {
+        isLandscape = newValue == .compact
     }
     
     // MARK: - Header
@@ -625,7 +704,7 @@ struct CalendarTabView: View {
     @ViewBuilder
     private func standardLayout(size: CGSize) -> some View {
         if isLandscape {
-            landscapeCalendarLayout(size: size)
+            landscapeCalendarLayout()
         } else {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 16) {
@@ -647,9 +726,8 @@ struct CalendarTabView: View {
         }
     }
     
-    private func landscapeCalendarLayout(size: CGSize) -> some View {
-        let inset: CGFloat = 8
-        let side = max(0, min(size.width, size.height) - inset * 2)
+    private func landscapeCalendarLayout() -> some View {
+        let margin: CGFloat = 10
         
         return MonthCalendarView(currentMonth: currentMonth,
                                  selectedDate: selectedDate,
@@ -659,8 +737,10 @@ struct CalendarTabView: View {
                                  compact: true) { date in
             selectDate(date)
         }
-        .frame(width: side, height: side)
+        .aspectRatio(1.08, contentMode: .fit)
+        .padding(margin)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .ignoresSafeArea(edges: .trailing)
         .contentShape(Rectangle())
         .simultaneousGesture(monthSwipeGesture)
         .accessibilityHint("Swipe left or right to change months")
@@ -807,7 +887,7 @@ private struct MonthCalendarView: View {
         let background: Color = colorScheme == .dark ? Color.black.opacity(0.9) : Color(.systemBackground)
         let border: Color = colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
         
-        VStack(spacing: compact ? 4 : 12) {
+        VStack(spacing: compact ? 8 : 12) {
             HStack {
                 ForEach(orderedWeekdaySymbols, id: \.self) { symbol in
                     Text(symbol)
@@ -837,9 +917,9 @@ private struct MonthCalendarView: View {
                 }
             }
         }
-        .padding(.top, compact ? 6 : 18)
-        .padding(.bottom, compact ? 6 : 8)
-        .padding(.horizontal, compact ? 6 : 16)
+        .padding(.top, compact ? 12 : 18)
+        .padding(.bottom, compact ? 10 : 8)
+        .padding(.horizontal, compact ? 14 : 16)
         .background(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(background)

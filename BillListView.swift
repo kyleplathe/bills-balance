@@ -39,9 +39,6 @@ struct BillListView: View {
     @State private var neonGlowIntensity: Double = 0.5
     @State private var lastProgressState: (paid: Int, total: Int) = (0, 0)
     @State private var isComplete: Bool = false
-    @State private var showingSatsInputSheet = false
-    @State private var billToMarkPaid: Bill?
-    @State private var satsInputText: String = ""
     @State private var completionPulseScale: Double = 1.0
     @State private var completionShimmerOffset: Double = -1.0
     @State private var completionGlowRadius: Double = 8.0
@@ -261,30 +258,6 @@ struct BillListView: View {
                 deleteBillAlertButtons
             } message: {
                 deleteBillAlertMessage
-            }
-            .sheet(isPresented: $showingSatsInputSheet) {
-                if let bill = billToMarkPaid {
-                    SatsInputSheet(
-                        bill: bill,
-                        satsInputText: $satsInputText,
-                        onConfirm: { satsAmount in
-                            if let sats = satsAmount {
-                                withAnimation(.spring(response: 0.28, dampingFraction: 0.7)) {
-                                    billViewModel.togglePaidStatus(for: bill, satsAmount: sats)
-                                }
-                                HapticManager.shared.billMarkedPaid()
-                            }
-                            showingSatsInputSheet = false
-                            billToMarkPaid = nil
-                            satsInputText = ""
-                        },
-                        onCancel: {
-                            showingSatsInputSheet = false
-                            billToMarkPaid = nil
-                            satsInputText = ""
-                        }
-                    )
-                }
             }
     }
     
@@ -704,37 +677,8 @@ struct BillListView: View {
         searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     
-    // Helper to check if a bill is paid with credit card only (no account)
-    private func isCreditCardOnlyBill(_ bill: Bill) -> Bool {
-        if let paymentCard = bill.paymentCard, !paymentCard.isEmpty, bill.account == nil {
-            return true
-        }
-        return false
-    }
-    
-    // Helper to check if a bill has pending transactions (unreconciled ledger entries)
-    private func hasPendingTransaction(_ bill: Bill) -> Bool {
-        // Credit card bills shouldn't have pending transactions
-        if isCreditCardOnlyBill(bill) {
-            return false
-        }
-        guard let entries = bill.ledgerEntries as? Set<LedgerEntry>, !entries.isEmpty else { return false }
-        // Bill has pending transaction if it has any unreconciled ledger entries
-        return entries.contains { !$0.isReconciledFlag }
-    }
-    
-    // Helper to check if bill should be shown (unpaid or has pending transactions)
     private func shouldShowBill(_ bill: Bill) -> Bool {
-        // Always show unpaid bills
-        if !bill.isPaid {
-            return true
-        }
-        // Credit card bills that are paid should not show (they don't affect account balance)
-        if isCreditCardOnlyBill(bill) {
-            return false
-        }
-        // Show paid bills that have pending (unreconciled) transactions
-        return hasPendingTransaction(bill)
+        !bill.isPaid
     }
     
     private var filteredBills: [Bill] {
@@ -760,12 +704,11 @@ struct BillListView: View {
         var monthFilteredBills: [Bill]
         if filterMonth != nil {
             // Landscape month view: hide paid bills unless the toolbar toggle is on.
-            // Pending (unreconciled) paid bills still show, matching portrait.
             monthFilteredBills = monthBills.filter { bill in
                 shouldShowBill(bill) || showPaidBills
             }
         } else {
-            // For current month view, show unpaid bills + bills with pending transactions
+            // For current month view, show unpaid bills.
             // Optionally show all paid bills if toggled
             let currentMonthBills = monthBills
             let currentMonthVisibleBills = currentMonthBills.filter { bill in
@@ -789,15 +732,14 @@ struct BillListView: View {
                 return billMonth != currentMonth
             }
             
-            // Include other bills if they should be shown (unpaid or pending), or if showPaidBills is on
+            // Include other bills if they should be shown (unpaid), or if showPaidBills is on
             let filteredOtherBills = otherBills.filter { bill in
                 shouldShowBill(bill) || showPaidBills
             }
             
-            // Include next month's bills - show all unpaid bills and bills with pending transactions
+            // Include next month's unpaid bills
             let nextMonthVisibleBills = nextMonthBills.filter { bill in
-                // Show if unpaid or has pending transaction
-                !bill.isPaid || hasPendingTransaction(bill)
+                !bill.isPaid
             }
             
             // Combine all bills and deduplicate by objectID to prevent showing the same bill multiple times
@@ -1237,14 +1179,8 @@ struct BillListView: View {
     }
     
     private func markBillPaidFromRow(_ bill: Bill) {
-        if let account = bill.account, account.currencyCode == "BTC" {
-            billToMarkPaid = bill
-            satsInputText = ""
-            showingSatsInputSheet = true
-        } else {
-            billViewModel.togglePaidStatus(for: bill)
-            HapticManager.shared.billMarkedPaid()
-        }
+        billViewModel.togglePaidStatus(for: bill)
+        HapticManager.shared.billMarkedPaid()
     }
     
     private var monthFilterEmptyView: some View {
@@ -1291,135 +1227,6 @@ private struct SummaryPill: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(tint.opacity(0.12))
         )
-    }
-}
-
-
-// MARK: - Sats Input Sheet
-private struct SatsInputSheet: View {
-    let bill: Bill
-    @Binding var satsInputText: String
-    let onConfirm: (Decimal?) -> Void
-    let onCancel: () -> Void
-    @Environment(\.dismiss) private var dismiss
-    @FocusState private var isTextFieldFocused: Bool
-    @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
-    
-    var body: some View {
-        NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(spacing: 24) {
-                        VStack(spacing: 12) {
-                            Image(systemName: "bitcoinsign.circle.fill")
-                                .font(.system(size: 50))
-                                .foregroundColor(.orange)
-                            
-                            Text("Enter Sats Amount")
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                            
-                            Text("Bill: \(bill.name ?? "Unknown")")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            
-                            if let amount = bill.amount?.decimalValue {
-                                Text("Bill Amount: $\(amount, format: .number.precision(.fractionLength(2)))")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .padding(.top, 20)
-                        
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Sats Amount")
-                                .font(.headline)
-                                .foregroundColor(.primary)
-                            
-                            TextField("0", text: $satsInputText)
-                                .keyboardType(.numberPad)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.title3)
-                                .focused($isTextFieldFocused)
-                                .id("satsInputField")
-                                .onChange(of: isTextFieldFocused) { _, isFocused in
-                                    if isFocused {
-                                        // Scroll to input field when keyboard appears
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                            withAnimation {
-                                                proxy.scrollTo("satsInputField", anchor: .center)
-                                            }
-                                        }
-                                    }
-                                }
-                                .onAppear {
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                        isTextFieldFocused = true
-                                    }
-                                }
-                        
-                        if let satsValue = Decimal(string: satsInputText.replacingOccurrences(of: ",", with: "")), satsValue > 0 {
-                            let btcAmount = satsValue / 100_000_000
-                            if let usdString = formatUSD(bitcoinPriceService.convertBTCToUSD(btcAmount)) {
-                                Text("≈ \(usdString)")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-                    
-                    VStack(spacing: 12) {
-                        Button {
-                            if let sats = Decimal(string: satsInputText.replacingOccurrences(of: ",", with: "")), sats > 0 {
-                                onConfirm(sats)
-                                dismiss()
-                            }
-                        } label: {
-                            Text("Confirm")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(
-                                    Decimal(string: satsInputText.replacingOccurrences(of: ",", with: "")) != nil &&
-                                    (Decimal(string: satsInputText.replacingOccurrences(of: ",", with: "")) ?? 0) > 0
-                                    ? Color.green : Color.gray
-                                )
-                                .cornerRadius(12)
-                        }
-                        .disabled(Decimal(string: satsInputText.replacingOccurrences(of: ",", with: "")) == nil ||
-                                 (Decimal(string: satsInputText.replacingOccurrences(of: ",", with: "")) ?? 0) <= 0)
-                        
-                        Button {
-                            onCancel()
-                            dismiss()
-                        } label: {
-                            Text("Cancel")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color(.secondarySystemBackground))
-                                .cornerRadius(12)
-                        }
-                    }
-                    .padding(.horizontal)
-                    .padding(.top, 20)
-                    .padding(.bottom, 40)
-                    }
-                }
-            }
-            .navigationTitle("Pay with Bitcoin")
-            .navigationBarTitleDisplayMode(.inline)
-        }
-    }
-    
-    private func formatUSD(_ value: Decimal) -> String? {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = "USD"
-        return formatter.string(from: value as NSDecimalNumber)
     }
 }
 

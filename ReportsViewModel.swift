@@ -54,6 +54,9 @@ struct ActivityPeriodSnapshot {
     let byCategory: [(name: String, amount: Decimal)]
 
     var totalSpending: Decimal { expenses + digitalWalletFees }
+    var hasActivity: Bool {
+        income != 0 || expenses != 0 || digitalWalletFees != 0 || !byCategory.isEmpty
+    }
 }
 
 struct UsdBtcMonthPoint: Identifiable {
@@ -181,6 +184,7 @@ final class ReportsViewModel: ObservableObject {
     @Published var yearWrapReport: YearWrapData?
     @Published var weeklyReport: WeeklyReportData?
     @Published var usdBtcReport: UsdBtcReportData?
+    @Published var currentPeriodSnapshot: ActivityPeriodSnapshot?
     @Published var previousPeriodSnapshot: ActivityPeriodSnapshot?
     @Published var nextPeriodSnapshot: ActivityPeriodSnapshot?
     @Published var selectedMonth: Date = Date()
@@ -255,16 +259,54 @@ final class ReportsViewModel: ObservableObject {
     
     /// Jumps to the current period (today's week/month/year)
     func jumpToCurrentPeriod() {
+        applyAnchorDate(presentPeriodAnchor())
+    }
+
+    /// Moves the selected week/month/year by `offset` periods. Ignores moves into the future.
+    func shiftPeriod(_ offset: Int) {
+        guard offset != 0 else { return }
+        let target = adjacentAnchorDate(offset: offset)
+        if offset > 0, isAnchorAfterPresentPeriod(target) { return }
+        applyAnchorDate(target)
+    }
+
+    func presentPeriodAnchor() -> Date {
         let now = Date()
         switch lastUsedWalletPeriod {
         case .week:
-            selectedWeekStart = startOfWeek(for: now)
+            return startOfWeek(for: now)
+        case .month:
+            return calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
+        case .year:
+            return calendar.date(from: DateComponents(year: calendar.component(.year, from: now), month: 1, day: 1)) ?? now
+        }
+    }
+
+    func isAnchorAfterPresentPeriod(_ date: Date) -> Bool {
+        startOfPeriod(for: date) > presentPeriodAnchor()
+    }
+
+    private func startOfPeriod(for date: Date) -> Date {
+        switch lastUsedWalletPeriod {
+        case .week:
+            return startOfWeek(for: date)
+        case .month:
+            return calendar.date(from: calendar.dateComponents([.year, .month], from: date)) ?? date
+        case .year:
+            return calendar.date(from: DateComponents(year: calendar.component(.year, from: date), month: 1, day: 1)) ?? date
+        }
+    }
+
+    private func applyAnchorDate(_ date: Date) {
+        switch lastUsedWalletPeriod {
+        case .week:
+            selectedWeekStart = startOfWeek(for: date)
             loadWeekReport()
         case .month:
-            selectedMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? now
+            selectedMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: date)) ?? date
             loadMonthlyReport()
         case .year:
-            selectedYear = calendar.component(.year, from: now)
+            selectedYear = calendar.component(.year, from: date)
             loadYearWrapReport()
         }
     }
@@ -363,12 +405,12 @@ final class ReportsViewModel: ObservableObject {
                 expenses += abs(usd)
                 let cat = entry.category?.isEmpty == false ? entry.category! : "Uncategorized"
                 byCategory[cat, default: 0] += abs(usd)
-            }
-            if isDigitalWallet(account) {
-                let fee = calculateDigitalWalletFee(for: entry, account: account, btcService: bitcoinPriceService)
-                fees += fee
-                if fee > 0 {
-                    byCategory["Digital Wallet Fees", default: 0] += fee
+                if isDigitalWallet(account) {
+                    let fee = calculateDigitalWalletFee(for: entry, account: account, btcService: bitcoinPriceService)
+                    if fee > 0 {
+                        fees += fee
+                        byCategory["Digital Wallet Fees", default: 0] += fee
+                    }
                 }
             }
         }
@@ -387,16 +429,22 @@ final class ReportsViewModel: ObservableObject {
         )
     }
 
+    /// Spending total used by both the Balance activity chip and Activity Total Spending.
+    func periodSpendingTotal(for period: WalletPeriod, date: Date? = nil) -> Decimal {
+        categoryBreakdownByPeriod(period: period, date: date ?? presentPeriodAnchor())
+            .reduce(into: Decimal(0)) { sum, bucket in
+                sum += bucket.categories.reduce(Decimal(0)) { $0 + $1.amount }
+            }
+    }
+
     func refreshAdjacentSnapshots() {
         let period = lastUsedWalletPeriod
-        let previousDate = adjacentAnchorDate(offset: -1)
+        currentPeriodSnapshot = makeSnapshot(period: period, date: currentAnchorDate())
+        previousPeriodSnapshot = makeSnapshot(period: period, date: adjacentAnchorDate(offset: -1))
         let nextDate = adjacentAnchorDate(offset: 1)
-        previousPeriodSnapshot = hasDataForPeriod(period, date: previousDate)
-            ? makeSnapshot(period: period, date: previousDate)
-            : nil
-        nextPeriodSnapshot = hasDataForPeriod(period, date: nextDate)
-            ? makeSnapshot(period: period, date: nextDate)
-            : nil
+        nextPeriodSnapshot = isAnchorAfterPresentPeriod(nextDate)
+            ? nil
+            : makeSnapshot(period: period, date: nextDate)
     }
 
     func periodBounds(for period: WalletPeriod, date: Date) -> (Date, Date) {

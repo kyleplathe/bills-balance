@@ -566,52 +566,6 @@ class BillViewModel: ObservableObject {
         saveContext()
     }
     
-    // MARK: - Add Pending Transaction for Auto-Pay
-    private func addPendingTransactionForAutoPay(for bill: Bill) {
-        // Create a pending transaction for auto-pay bills
-        // This creates a ledger entry without marking the bill as paid
-        
-        // Check if bill already has an unreconciled pending transaction
-        if let entries = bill.ledgerEntries as? Set<LedgerEntry>,
-           entries.contains(where: { !$0.isReconciledFlag }) {
-            // Bill already has a pending transaction, don't create another one
-            print("⏸️ Bill \(bill.name ?? "Unknown") already has a pending transaction")
-            return
-        }
-        
-        guard let amountDecimal = bill.amount?.decimalValue else { return }
-        
-        // Use due date or current date for the transaction
-        let transactionDate = bill.dueDate ?? Date()
-        
-        // Create pending transaction (isReconciledFlag defaults to false)
-        accountViewModel?.recordLedgerEntry(for: bill,
-                                            amount: amountDecimal,
-                                            date: transactionDate,
-                                            isCredit: false,
-                                            title: bill.name,
-                                            notes: bill.notes,
-                                            satsAmount: nil)
-        
-        // Save without triggering fetchBills() to prevent recursive calls
-        do {
-            try context.save()
-            invalidateMonthBillsCache()
-            // Manually update bills list without triggering auto-pay
-            let request = NSFetchRequest<Bill>(entityName: "Bill")
-            request.sortDescriptors = [NSSortDescriptor(keyPath: \Bill.dueDate, ascending: true)]
-            request.fetchBatchSize = 50
-            let fetched = try context.fetch(request)
-            let visible = filterVisibleBills(from: fetched)
-            bills = visible
-            accountViewModel?.refreshData()
-            updateAppBadge()
-            print("✅ Created pending transaction for auto-pay bill: \(bill.name ?? "Unknown")")
-        } catch {
-            print("❌ Error saving pending transaction: \(error)")
-        }
-    }
-    
     private func filterVisibleBills(from bills: [Bill]) -> [Bill] {
         let cutoff = Calendar.current.date(byAdding: .day, value: -3, to: Date()) ?? Date.distantPast
         var visible: [Bill] = []
@@ -1201,9 +1155,8 @@ class BillViewModel: ObservableObject {
             notificationManager.cancelNotification(for: bill)
             notificationManager.deliverAutoPayNotification(for: bill)
             
-            // Create a pending transaction instead of marking as paid immediately
-            // This allows the user to reconcile it later when the payment actually clears
-            addPendingTransactionForAutoPay(for: bill)
+            // Mark paid and create a pending ledger row. Clearing happens on the account.
+            togglePaidStatus(for: bill, viaAutoPay: true)
         }
     }
     

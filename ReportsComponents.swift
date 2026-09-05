@@ -340,8 +340,8 @@ struct CompactWalletStackedCategoryBarChart: View {
     }
 
     private let chartHeight: CGFloat = 36
-    /// Fixed skinny width so Week / Month / Year bars match visually.
     private let barWidth: CGFloat = 7
+    private var endInset: CGFloat { period == .year ? 2 : 6 }
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 0) {
@@ -365,7 +365,8 @@ struct CompactWalletStackedCategoryBarChart: View {
                 )
             }
         }
-        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.horizontal, endInset)
+        .frame(maxWidth: .infinity)
         .frame(height: chartHeight, alignment: .bottom)
     }
 }

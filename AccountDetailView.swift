@@ -32,6 +32,7 @@ struct AccountDetailView: View {
     var body: some View {
         accountList
             .listStyle(.insetGrouped)
+            .listSectionSpacing(.compact)
             .navigationTitle(account.name ?? "Account")
             .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -216,27 +217,9 @@ struct AccountDetailView: View {
         List {
             Section {
                 balanceHero
-                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 8, trailing: 16))
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
-            }
-            
-            Section {
-                LabeledContent("Pending") {
-                    Text(formattedPendingBalance)
-                        .fontWeight(.semibold)
-                        .monospacedDigit()
-                        .foregroundStyle(pendingForeground)
-                }
-                .accessibilityLabel("Pending \(formattedPendingBalance)")
-                
-                LabeledContent("Available") {
-                    Text(formattedAvailableBalance)
-                        .fontWeight(.semibold)
-                        .monospacedDigit()
-                        .foregroundStyle(.primary)
-                }
-                .accessibilityLabel("Available \(formattedAvailableBalance)")
             }
             
             transactionsSection
@@ -259,23 +242,18 @@ struct AccountDetailView: View {
                         .font(.headline)
                 }
             } else {
+                if !pendingTransactions.isEmpty {
+                    Section {
+                        ForEach(pendingTransactions, id: \.objectID) { entry in
+                            transactionRow(for: entry)
+                        }
+                    }
+                }
                 ForEach(groupedTransactions.keys.sorted(by: >), id: \.self) { monthDate in
                     let transactions = transactionsForMonth(monthDate)
                     Section(header: monthSectionHeader(for: monthDate)) {
                         ForEach(transactions, id: \.objectID) { entry in
-                            TransactionRow(
-                                entry: entry,
-                                account: account,
-                                onReconcile: { entry in
-                                    transactionToReconcile = entry
-                                    showingReconcileDrawer = true
-                                }
-                            ) {
-                                selectedTransaction = entry
-                                showingTransactionEditor = true
-                            }
-                            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
-                            .listRowBackground(Color.clear)
+                            transactionRow(for: entry)
                         }
                     }
                 }
@@ -283,70 +261,141 @@ struct AccountDetailView: View {
         }
     }
     
+    private func transactionRow(for entry: LedgerEntry) -> some View {
+        TransactionRow(
+            entry: entry,
+            account: account,
+            onReconcile: { entry in
+                transactionToReconcile = entry
+                showingReconcileDrawer = true
+            }
+        ) {
+            selectedTransaction = entry
+            showingTransactionEditor = true
+        }
+        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+        .listRowBackground(Color.clear)
+    }
+    
     // MARK: - Balance Hero
     
     private var balanceHero: some View {
-        VStack(spacing: 6) {
-            if account.currencyCode == "BTC" {
-                Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        showingCurrencyToggle.toggle()
-                    }
-                } label: {
-                    ZStack {
-                        if !showingCurrencyToggle {
-                            Text(formattedClearedBalance)
-                                .font(.system(size: dynamicClearedBalanceFontSize, weight: .bold, design: .rounded))
-                                .monospacedDigit()
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.5)
-                                .transition(.asymmetric(
-                                    insertion: .move(edge: .trailing).combined(with: .opacity),
-                                    removal: .move(edge: .leading).combined(with: .opacity)
-                                ))
+        VStack(spacing: 8) {
+            VStack(spacing: 4) {
+                if account.currencyCode == "BTC" {
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            showingCurrencyToggle.toggle()
                         }
-                        
-                        if showingCurrencyToggle {
-                            Text(formattedClearedBalance)
-                                .font(.system(size: dynamicClearedBalanceFontSize, weight: .bold, design: .rounded))
-                                .monospacedDigit()
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.5)
-                                .transition(.asymmetric(
-                                    insertion: .move(edge: .trailing).combined(with: .opacity),
-                                    removal: .move(edge: .leading).combined(with: .opacity)
-                                ))
+                    } label: {
+                        ZStack {
+                            if !showingCurrencyToggle {
+                                Text(formattedAvailableBalance)
+                                    .font(.system(size: dynamicHeroBalanceFontSize, weight: .bold, design: .rounded))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.5)
+                                    .transition(.asymmetric(
+                                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                                        removal: .move(edge: .leading).combined(with: .opacity)
+                                    ))
+                            }
+                            
+                            if showingCurrencyToggle {
+                                Text(formattedAvailableBalance)
+                                    .font(.system(size: dynamicHeroBalanceFontSize, weight: .bold, design: .rounded))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.5)
+                                    .transition(.asymmetric(
+                                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                                        removal: .move(edge: .leading).combined(with: .opacity)
+                                    ))
+                            }
                         }
+                        .id(showingCurrencyToggle ? "btc" : "usd")
+                        .frame(height: dynamicHeroBalanceFontSize + 8)
                     }
-                    .id(showingCurrencyToggle ? "btc" : "usd")
-                    .frame(height: dynamicClearedBalanceFontSize + 8)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Available balance \(formattedAvailableBalance). Double tap to switch currency.")
+                    
+                    Text(showingCurrencyToggle ? "≈ \(usdEquivalent)" : "≈ \(btcEquivalent)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                } else {
+                    Text(formattedAvailableBalance)
+                        .font(.system(size: dynamicHeroBalanceFontSize, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                        .frame(height: dynamicHeroBalanceFontSize + 8)
+                        .accessibilityLabel("Available balance \(formattedAvailableBalance)")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Cleared balance \(formattedClearedBalance). Double tap to switch currency.")
-                
-                Text(showingCurrencyToggle ? "≈ \(formattedClearedBalanceUSD)" : "≈ \(formattedClearedBalanceBTC)")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            } else {
-                Text(formattedClearedBalance)
-                    .font(.system(size: dynamicClearedBalanceFontSize, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-                    .frame(height: dynamicClearedBalanceFontSize + 8)
-                    .accessibilityLabel("Cleared balance \(formattedClearedBalance)")
             }
-
-            Text("Cleared")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            
+            balanceDetailsDisclosure
         }
         .frame(maxWidth: .infinity)
         .multilineTextAlignment(.center)
+    }
+    
+    private var balanceDetailsDisclosure: some View {
+        VStack(spacing: 8) {
+            Button {
+                withAnimation(.smooth(duration: 0.32)) {
+                    showingBalanceDetails.toggle()
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Balance")
+                        .font(.caption.weight(.semibold))
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                        .rotationEffect(.degrees(showingBalanceDetails ? 180 : 0))
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+            }
+            .buttonStyle(.plain)
+            .modifier(BalanceDetailsPillChrome())
+            .accessibilityLabel(showingBalanceDetails ? "Hide Balance" : "Balance")
+            .accessibilityHint("Shows cleared and pending")
+            
+            if showingBalanceDetails {
+                VStack(spacing: 6) {
+                    balanceBreakdownRow(label: "Cleared", value: formattedClearedBalance)
+                    balanceBreakdownRow(
+                        label: "Pending",
+                        value: formattedPendingBalance,
+                        valueColor: pendingForeground
+                    )
+                }
+                .padding(.horizontal, 4)
+                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+            }
+        }
+        .clipped()
+    }
+    
+    private func balanceBreakdownRow(label: String, value: String, valueColor: Color = .primary) -> some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .monospacedDigit()
+                .foregroundStyle(valueColor)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(label) \(value)")
     }
     
     // MARK: - Cleared Balance Formatters
@@ -368,17 +417,8 @@ struct AccountDetailView: View {
         }
     }
     
-    private var formattedClearedBalanceUSD: String {
-        let usd = bitcoinPriceService.convertBTCToUSD(clearedBalance)
-        return formatUSDBalance(usd)
-    }
-    
-    private var formattedClearedBalanceBTC: String {
-        return formatBTCBalance(clearedBalance)
-    }
-    
-    private var dynamicClearedBalanceFontSize: CGFloat {
-        let balanceString = formattedClearedBalance
+    private var dynamicHeroBalanceFontSize: CGFloat {
+        let balanceString = formattedAvailableBalance
         let characterCount = balanceString.count
         let baseSize: CGFloat = 48
         if characterCount <= 8 {
@@ -789,9 +829,14 @@ struct AccountDetailView: View {
         return formatter
     }()
     
+    private var pendingTransactions: [LedgerEntry] {
+        accountTransactions.filter { !$0.isReconciledFlag }
+    }
+    
     private var groupedTransactions: [Date: [LedgerEntry]] {
         let calendar = Calendar.current
-        return Dictionary(grouping: accountTransactions) { entry in
+        let cleared = accountTransactions.filter { $0.isReconciledFlag }
+        return Dictionary(grouping: cleared) { entry in
             guard let date = entry.date else { return Date.distantPast }
             let components = calendar.dateComponents([.year, .month], from: date)
             return calendar.date(from: components) ?? Date.distantPast
@@ -878,6 +923,19 @@ struct AccountDetailView: View {
         transactionToReconcile = nil
         reconcileSatsString = ""
         reconcileBTCPriceString = ""
+    }
+}
+
+private struct BalanceDetailsPillChrome: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            content
+                .background(Capsule().fill(Color.secondary.opacity(0.12)))
+        }
     }
 }
 

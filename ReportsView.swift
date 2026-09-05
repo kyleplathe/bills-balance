@@ -2,8 +2,8 @@
 //  ReportsView.swift
 //  BillsAndBalance
 //
-//  Activity: pushed from Balance. ScrollView + snapshot cards (same chrome as Balance).
-//  No List, no paging TabView, no edge-bleed padding.
+//  Activity: pushed from Balance. Apple Card-style paging between periods.
+//  Each page is a ScrollView + 16pt inset + snapshot cards. No wrapping NavigationStack.
 //
 
 import SwiftUI
@@ -23,6 +23,8 @@ struct ReportsView: View {
     @State private var expandedCategories: Set<String> = []
     @State private var selectedTransaction: LedgerEntry?
     @State private var showCategorizeReview = false
+    @State private var selectedAnchor: Date?
+    @State private var isRecenteringPager = false
 
     private var walletPeriod: ReportsViewModel.WalletPeriod {
         reportsViewModel.lastUsedWalletPeriod
@@ -36,28 +38,10 @@ struct ReportsView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(periodTitle)
-                    .font(.system(size: 34, weight: .bold))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                periodBody
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 24)
-        }
+        periodPager
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
-        .scrollContentBackground(.hidden)
         .toolbar(.hidden, for: .tabBar)
         .activityFloatingTabBarHidden()
-        .refreshable {
-            reportsViewModel.loadMonthlyReport()
-            reportsViewModel.loadYearWrapReport()
-            reportsViewModel.loadWeekReport()
-            await reportsViewModel.loadUsdBtcReport()
-        }
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar {
@@ -135,19 +119,26 @@ struct ReportsView: View {
                 .environmentObject(categoryManager)
         }
         .onAppear(perform: handleAppear)
-        .onChange(of: reportsViewModel.selectedMonth) { _, _ in
-            reportsViewModel.loadMonthlyReport()
+        .onChange(of: selectedAnchor) { _, newValue in
+            if let newValue {
+                handleAnchorChange(newValue)
+            }
         }
-        .onChange(of: reportsViewModel.lastUsedWalletPeriod) { _, p in
-            handlePeriodChange(p)
+        .onChange(of: reportsViewModel.selectedMonth) { _, _ in
+            if walletPeriod == .month, !isRecenteringPager {
+                reportsViewModel.loadMonthlyReport()
+            }
+        }
+        .onChange(of: reportsViewModel.lastUsedWalletPeriod) { _, _ in
+            handlePeriodChange()
         }
         .onChange(of: reportsViewModel.selectedYear) { _, _ in
-            if walletPeriod == .year {
+            if walletPeriod == .year, !isRecenteringPager {
                 reportsViewModel.loadYearWrapReport()
             }
         }
         .onChange(of: reportsViewModel.selectedWeekStart) { _, _ in
-            if walletPeriod == .week {
+            if walletPeriod == .week, !isRecenteringPager {
                 reportsViewModel.loadWeekReport()
             }
         }
@@ -156,85 +147,140 @@ struct ReportsView: View {
         }
     }
 
-    @ViewBuilder
-    private var periodBody: some View {
-        if reportsViewModel.isLoading && !walletHasReport {
-            ProgressView("Loading…")
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 32)
-        } else if walletPeriod == .week, let r = reportsViewModel.weeklyReport {
-            periodCards(
-                expenses: r.expenses + r.digitalWalletFees,
-                income: r.income,
-                creditCardSpending: reportsViewModel.creditCardSpending(for: .week),
-                byCategory: r.byCategory,
-                period: .week,
-                anchorDate: r.weekStart,
-                showBacktest: true
-            )
-        } else if walletPeriod == .month, let r = reportsViewModel.monthlyReport {
-            periodCards(
-                expenses: r.expenses + r.digitalWalletFees,
-                income: r.income,
-                creditCardSpending: reportsViewModel.creditCardSpending(for: .month),
-                byCategory: r.byCategory,
-                period: .month,
-                anchorDate: r.month,
-                showBacktest: true
-            )
-        } else if walletPeriod == .year, let r = reportsViewModel.yearWrapReport {
-            periodCards(
-                expenses: r.expenses + r.digitalWalletFees,
-                income: r.income,
-                creditCardSpending: reportsViewModel.creditCardSpending(for: .year),
-                byCategory: r.byCategory,
-                period: .year,
-                anchorDate: reportsViewModel.currentAnchorDate(),
-                showBacktest: true
-            )
-        } else {
-            VStack(spacing: 12) {
-                Image(systemName: "chart.bar.doc.horizontal")
-                    .font(.system(size: 44))
-                    .foregroundStyle(.secondary)
-                Text("No data for this period")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+    private var periodPager: some View {
+        GeometryReader { geo in
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 0) {
+                    ForEach(pageAnchors, id: \.self) { date in
+                        activityPage(
+                            snapshot: snapshot(for: date),
+                            fallbackTitle: reportsViewModel.periodTitle(for: walletPeriod, date: date),
+                            showBacktest: isCurrentPage(date)
+                        )
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .id(date)
+                    }
+                }
+                .scrollTargetLayout()
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 32)
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $selectedAnchor)
+            .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        }
+        .accessibilityHint("Swipe left or right to change periods")
+    }
+
+    private var pageAnchors: [Date] {
+        var dates = [
+            reportsViewModel.adjacentAnchorDate(offset: -1),
+            reportsViewModel.currentAnchorDate()
+        ]
+        let next = reportsViewModel.adjacentAnchorDate(offset: 1)
+        if !reportsViewModel.isAnchorAfterPresentPeriod(next) {
+            dates.append(next)
+        }
+        return dates
+    }
+
+    private func snapshot(for date: Date) -> ActivityPeriodSnapshot? {
+        let snapshots = [
+            reportsViewModel.previousPeriodSnapshot,
+            reportsViewModel.currentPeriodSnapshot,
+            reportsViewModel.nextPeriodSnapshot
+        ].compactMap { $0 }
+        return snapshots.first { isSamePeriod($0.anchorDate, date) }
+    }
+
+    private func isCurrentPage(_ date: Date) -> Bool {
+        isSamePeriod(date, reportsViewModel.currentAnchorDate())
+    }
+
+    private func isSamePeriod(_ lhs: Date, _ rhs: Date) -> Bool {
+        let calendar = Calendar.current
+        switch walletPeriod {
+        case .week:
+            return calendar.isDate(lhs, equalTo: rhs, toGranularity: .weekOfYear)
+        case .month:
+            return calendar.isDate(lhs, equalTo: rhs, toGranularity: .month)
+        case .year:
+            return calendar.isDate(lhs, equalTo: rhs, toGranularity: .year)
         }
     }
 
-    @ViewBuilder
-    private func periodCards(
-        expenses: Decimal,
-        income: Decimal,
-        creditCardSpending: Decimal,
-        byCategory: [(name: String, amount: Decimal)],
-        period: ReportsViewModel.WalletPeriod,
-        anchorDate: Date,
+    private func activityPage(
+        snapshot: ActivityPeriodSnapshot?,
+        fallbackTitle: String,
         showBacktest: Bool
     ) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(snapshot?.title ?? fallbackTitle)
+                    .font(.system(size: 34, weight: .bold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let snapshot {
+                    if snapshot.hasActivity {
+                        periodCards(from: snapshot, showBacktest: showBacktest)
+                    } else {
+                        emptyPeriodPlaceholder
+                    }
+                } else if reportsViewModel.isLoading {
+                    ProgressView("Loading…")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 32)
+                } else {
+                    emptyPeriodPlaceholder
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 24)
+        }
+        .scrollContentBackground(.hidden)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .refreshable {
+            reportsViewModel.loadMonthlyReport()
+            reportsViewModel.loadYearWrapReport()
+            reportsViewModel.loadWeekReport()
+            await reportsViewModel.loadUsdBtcReport()
+        }
+    }
+
+    private var emptyPeriodPlaceholder: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "chart.bar.doc.horizontal")
+                .font(.system(size: 44))
+                .foregroundStyle(.secondary)
+            Text("No data for this period")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 32)
+    }
+
+    @ViewBuilder
+    private func periodCards(from snapshot: ActivityPeriodSnapshot, showBacktest: Bool) -> some View {
         WalletTotalSpendingAppleCard(
-            expenses: expenses,
-            previousPeriodExpenses: reportsViewModel.previousPeriodExpenses(for: period),
-            periodType: period,
+            expenses: reportsViewModel.periodSpendingTotal(for: snapshot.period, date: snapshot.anchorDate),
+            previousPeriodExpenses: snapshot.previousComparableSpending,
+            periodType: snapshot.period,
             appeared: appeared,
-            isCurrentPeriodInProgress: reportsViewModel.isCurrentPeriodInProgress(period),
-            anchorDate: anchorDate
+            isCurrentPeriodInProgress: snapshot.isCurrentPeriodInProgress,
+            anchorDate: snapshot.anchorDate
         )
         WalletIncomeFeesRows(
-            income: income,
-            creditCardSpending: creditCardSpending,
+            income: snapshot.income,
+            creditCardSpending: snapshot.creditCardSpending,
             appeared: appeared,
             onIncomeTap: {
                 selectedCategory = "Income"
             }
         )
-        if !byCategory.isEmpty {
+        if !snapshot.byCategory.isEmpty {
             WalletCategorySection(
-                items: byCategory,
+                items: snapshot.byCategory,
                 appeared: appeared,
                 expandedCategories: $expandedCategories,
                 onCategoryTap: { category in
@@ -243,58 +289,13 @@ struct ReportsView: View {
                 onTransactionTap: { entry in
                     selectedTransaction = entry
                 },
-                period: period,
-                anchorDate: anchorDate
+                period: snapshot.period,
+                anchorDate: snapshot.anchorDate
             )
         }
         if showBacktest, reportsViewModel.hasActiveBitcoinDigitalWallet {
             UsdBtcBacktestSection(appeared: appeared)
         }
-    }
-
-    private var walletHasReport: Bool {
-        switch walletPeriod {
-        case .week: return reportsViewModel.weeklyReport != nil
-        case .month: return reportsViewModel.monthlyReport != nil
-        case .year: return reportsViewModel.yearWrapReport != nil
-        }
-    }
-
-    private var periodTitle: String {
-        switch walletPeriod {
-        case .week:
-            if let r = reportsViewModel.weeklyReport {
-                return weekRangeLabel(r.weekStart)
-            }
-            return "Week"
-        case .month:
-            return monthYearLabel(reportsViewModel.selectedMonth)
-        case .year:
-            if let r = reportsViewModel.yearWrapReport {
-                return String(r.year)
-            }
-            return String(reportsViewModel.selectedYear)
-        }
-    }
-
-    private func weekRangeLabel(_ weekStart: Date) -> String {
-        let cal = Calendar.current
-        guard let end = cal.date(byAdding: .day, value: 6, to: weekStart) else { return "" }
-        let f = DateFormatter()
-        f.dateFormat = "MMM d"
-        let y = DateFormatter()
-        y.dateFormat = "yyyy"
-        let startY = cal.component(.year, from: weekStart)
-        let endY = cal.component(.year, from: end)
-        let startStr = startY != endY ? "\(f.string(from: weekStart)), \(y.string(from: weekStart))" : f.string(from: weekStart)
-        let endStr = startY != endY ? "\(f.string(from: end)), \(y.string(from: end))" : f.string(from: end)
-        return "\(startStr) – \(endStr)"
-    }
-
-    private func monthYearLabel(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "MMMM yyyy"
-        return f.string(from: date)
     }
 
     @ViewBuilder
@@ -321,14 +322,22 @@ struct ReportsView: View {
         .simultaneousGesture(
             TapGesture(count: 2)
                 .onEnded {
+                    isRecenteringPager = true
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                         reportsViewModel.jumpToCurrentPeriod()
+                        selectedAnchor = reportsViewModel.currentAnchorDate()
+                    }
+                    DispatchQueue.main.async {
+                        isRecenteringPager = false
                     }
                 }
         )
     }
 
     private func handleAppear() {
+        isRecenteringPager = true
+        reportsViewModel.jumpToCurrentPeriod()
+        selectedAnchor = reportsViewModel.currentAnchorDate()
         reportsViewModel.loadMonthlyReport()
         reportsViewModel.loadYearWrapReport()
         reportsViewModel.loadWeekReport()
@@ -336,19 +345,29 @@ struct ReportsView: View {
             await reportsViewModel.loadUsdBtcReport()
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            isRecenteringPager = false
             appeared = true
         }
     }
 
-    private func handlePeriodChange(_ p: ReportsViewModel.WalletPeriod) {
-        switch p {
-        case .week:
-            reportsViewModel.selectedWeekStart = reportsViewModel.startOfWeek(for: Date())
-            reportsViewModel.loadWeekReport()
-        case .month:
-            reportsViewModel.loadMonthlyReport()
-        case .year:
-            reportsViewModel.loadYearWrapReport()
+    private func handleAnchorChange(_ newValue: Date) {
+        guard !isRecenteringPager else { return }
+        let current = reportsViewModel.currentAnchorDate()
+        guard !isSamePeriod(newValue, current) else { return }
+        isRecenteringPager = true
+        reportsViewModel.shiftPeriod(newValue < current ? -1 : 1)
+        selectedAnchor = reportsViewModel.currentAnchorDate()
+        DispatchQueue.main.async {
+            isRecenteringPager = false
+        }
+    }
+
+    private func handlePeriodChange() {
+        isRecenteringPager = true
+        reportsViewModel.jumpToCurrentPeriod()
+        selectedAnchor = reportsViewModel.currentAnchorDate()
+        DispatchQueue.main.async {
+            isRecenteringPager = false
         }
     }
 
