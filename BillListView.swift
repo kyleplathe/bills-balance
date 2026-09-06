@@ -20,6 +20,7 @@ struct BillListView: View {
     @EnvironmentObject private var billViewModel: BillViewModel
     @EnvironmentObject private var accountViewModel: AccountViewModel
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
+    @EnvironmentObject private var notificationManager: NotificationManager
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var showingAddBill = false
@@ -113,6 +114,7 @@ struct BillListView: View {
             }
         }
         .onShake {
+            guard accountViewModel.hasActiveBitcoinDigitalWallet else { return }
             // Debounce: prevent rapid shakes (at least 0.5 seconds apart)
             let now = Date()
             guard now.timeIntervalSince(lastShakeTime) > 0.5 else { return }
@@ -253,6 +255,7 @@ struct BillListView: View {
                 ManageBillsView()
                     .environmentObject(billViewModel)
                     .environmentObject(accountViewModel)
+                    .environmentObject(notificationManager)
             }
             .alert("Delete Bill", isPresented: $showingDeleteAlert) {
                 deleteBillAlertButtons

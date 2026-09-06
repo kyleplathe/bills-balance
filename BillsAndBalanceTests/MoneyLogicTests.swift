@@ -63,6 +63,47 @@ final class RecurrenceCalculatorTests: XCTestCase {
     }
 }
 
+final class MoneyFormattingTests: XCTestCase {
+    func testParseUSDStripsCurrencyAndCommas() {
+        XCTAssertEqual(MoneyFormatting.parse("$1,234.50"), Decimal(string: "1234.50"))
+        XCTAssertEqual(MoneyFormatting.parse("1.2"), Decimal(string: "1.2"))
+        XCTAssertNil(MoneyFormatting.parse(""))
+        XCTAssertNil(MoneyFormatting.parse("   "))
+        XCTAssertNil(MoneyFormatting.parse("abc"))
+    }
+
+    func testParseCollapsesExtraDecimals() {
+        XCTAssertEqual(MoneyFormatting.parse("1.2.3"), Decimal(string: "1.23"))
+    }
+
+    func testFormatUSDTwoDecimalsWithGrouping() {
+        XCTAssertEqual(MoneyFormatting.format(Decimal(string: "1234.5")!, kind: .usd), "1,234.50")
+        XCTAssertEqual(MoneyFormatting.format(Decimal(10), kind: .usd, includeSymbol: true), "$10.00")
+    }
+
+    func testFormatForDisplay() {
+        XCTAssertEqual(MoneyFormatting.formatForDisplay("1.2", kind: .usd), "1.20")
+        XCTAssertEqual(MoneyFormatting.formatForDisplay("", kind: .usd), "")
+        XCTAssertEqual(MoneyFormatting.formatForDisplay("1000", kind: .sats), "1,000")
+    }
+
+    func testParseSatsIgnoresDecimals() {
+        XCTAssertEqual(MoneyFormatting.parse("1,000,000", kind: .sats), Decimal(1_000_000))
+        XCTAssertEqual(MoneyFormatting.parse("12.3", kind: .sats), Decimal(123))
+    }
+
+    func testBTCFromSatsInput() {
+        XCTAssertEqual(MoneyFormatting.btcAmount(fromInput: "100000000", displayFormat: "sats"), Decimal(1))
+        XCTAssertEqual(MoneyFormatting.btcAmount(fromInput: "0.5", displayFormat: "bitcoin"), Decimal(string: "0.5"))
+        XCTAssertNil(MoneyFormatting.btcAmount(fromInput: "", displayFormat: "sats"))
+    }
+
+    func testDisplayStringForBTC() {
+        XCTAssertEqual(MoneyFormatting.displayString(forBTC: Decimal(1), displayFormat: "sats"), "100,000,000")
+        XCTAssertEqual(MoneyFormatting.displayString(forBTC: Decimal(string: "0.5")!, displayFormat: "bitcoin"), "0.50")
+    }
+}
+
 final class DuplicateBillGuardTests: XCTestCase {
     func testIdentityKeyStableForSameDay() {
         let calendar = Calendar(identifier: .gregorian)
@@ -983,3 +1024,41 @@ final class CategorySuggesterTests: XCTestCase {
         XCTAssertEqual(CategorySuggester.suggest(for: "Apple"), "")
     }
 }
+
+final class NotificationScheduleTests: XCTestCase {
+    private var calendar: Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        return cal
+    }
+
+    private func date(_ year: Int, _ month: Int, _ day: Int, hour: Int = 12) -> Date {
+        calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour))!
+    }
+
+    func testManualBillRemindsMorningBeforeDue() {
+        let due = date(2026, 9, 10, hour: 18)
+        let now = date(2026, 9, 1)
+        let reminder = NotificationSchedule.reminderDate(dueDate: due, autoPay: false, now: now, calendar: calendar)
+        XCTAssertNotNil(reminder)
+        XCTAssertEqual(calendar.component(.day, from: reminder!), 9)
+        XCTAssertEqual(calendar.component(.hour, from: reminder!), 9)
+    }
+
+    func testAutoPayRemindsMorningOfDue() {
+        let due = date(2026, 9, 10, hour: 18)
+        let now = date(2026, 9, 1)
+        let reminder = NotificationSchedule.reminderDate(dueDate: due, autoPay: true, now: now, calendar: calendar)
+        XCTAssertNotNil(reminder)
+        XCTAssertEqual(calendar.component(.day, from: reminder!), 10)
+        XCTAssertEqual(calendar.component(.hour, from: reminder!), 9)
+    }
+
+    func testPastDueDoesNotSchedule() {
+        let due = date(2026, 8, 1)
+        let now = date(2026, 9, 6)
+        XCTAssertNil(NotificationSchedule.reminderDate(dueDate: due, autoPay: false, now: now, calendar: calendar))
+        XCTAssertNil(NotificationSchedule.reminderDate(dueDate: due, autoPay: true, now: now, calendar: calendar))
+    }
+}
+

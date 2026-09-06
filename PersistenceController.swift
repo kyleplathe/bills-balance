@@ -13,14 +13,7 @@ extension Notification.Name {
 
 struct PersistenceController {
     static let shared = PersistenceController()
-    static let cloudKitContainerIdentifier = "iCloud.com.kyle.billsandbalance"
     private(set) static var isStoreLoaded = false
-
-    /// CloudKit requires matching entitlements; skip it when the ubiquity container isn't available.
-    private static var canUseCloudKit: Bool {
-        guard FileManager.default.ubiquityIdentityToken != nil else { return false }
-        return FileManager.default.url(forUbiquityContainerIdentifier: cloudKitContainerIdentifier) != nil
-    }
 
     static func waitForStores() async {
         if isStoreLoaded { return }
@@ -80,12 +73,7 @@ struct PersistenceController {
     let container: NSPersistentContainer
 
     init(inMemory: Bool = false) {
-        let iCloudAvailable = !inMemory && Self.canUseCloudKit
-        if iCloudAvailable {
-            container = NSPersistentCloudKitContainer(name: "BillsAndBalance")
-        } else {
-            container = NSPersistentContainer(name: "BillsAndBalance")
-        }
+        container = NSPersistentContainer(name: "BillsAndBalance")
 
         guard let description = container.persistentStoreDescriptions.first else {
             fatalError("Missing persistent store description")
@@ -93,35 +81,16 @@ struct PersistenceController {
 
         if inMemory {
             description.url = URL(fileURLWithPath: "/dev/null")
-            description.cloudKitContainerOptions = nil
-        } else {
-            description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
-            description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
-            if iCloudAvailable {
-                description.cloudKitContainerOptions = NSPersistentCloudKitContainerOptions(
-                    containerIdentifier: Self.cloudKitContainerIdentifier
-                )
-            } else {
-                description.cloudKitContainerOptions = nil
-            }
         }
 
+        description.cloudKitContainerOptions = nil
+        description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
+        description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
         description.setOption(true as NSNumber, forKey: NSMigratePersistentStoresAutomaticallyOption)
         description.setOption(true as NSNumber, forKey: NSInferMappingModelAutomaticallyOption)
 
-        let loadedContainer = container
-        container.loadPersistentStores { storeDescription, error in
+        container.loadPersistentStores { _, error in
             if let error = error as NSError? {
-                if storeDescription.cloudKitContainerOptions != nil {
-                    storeDescription.cloudKitContainerOptions = nil
-                    loadedContainer.loadPersistentStores { _, retryError in
-                        if let retryError = retryError as NSError? {
-                            fatalError("Unresolved error \(retryError), \(retryError.userInfo)")
-                        }
-                        Self.markStoreLoaded()
-                    }
-                    return
-                }
                 fatalError("Unresolved error \(error), \(error.userInfo)")
             }
             Self.markStoreLoaded()

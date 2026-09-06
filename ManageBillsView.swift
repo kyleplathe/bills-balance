@@ -14,6 +14,7 @@ struct ManageBillsView: View {
     @EnvironmentObject private var accountViewModel: AccountViewModel
     @EnvironmentObject private var cardManager: CreditCardManager
     @EnvironmentObject private var categoryManager: CategoryManager
+    @EnvironmentObject private var notificationManager: NotificationManager
     
     @State private var selectedBill: Bill?
     @State private var showingAddBill = false
@@ -35,6 +36,7 @@ struct ManageBillsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                remindersSection
                 billsSection
             }
             .navigationTitle("Manage Bills")
@@ -122,6 +124,31 @@ struct ManageBillsView: View {
         }
     }
     
+    private var remindersSection: some View {
+        Section {
+            if notificationManager.authorizationStatus == .authorized
+                || notificationManager.authorizationStatus == .provisional {
+                Label("Reminders are on", systemImage: "bell.fill")
+                    .foregroundStyle(.secondary)
+            } else {
+                Button {
+                    notificationManager.requestAuthorization()
+                    OnboardingManager.shared.hasRequestedNotifications = true
+                } label: {
+                    Label("Enable Bill Reminders", systemImage: "bell.badge")
+                }
+            }
+        } header: {
+            Text("Notifications")
+        } footer: {
+            Text("Get a reminder the day before a bill is due, or the morning of auto-pay. You can also allow this the first time you add a bill.")
+                .font(.footnote)
+        }
+        .onAppear {
+            notificationManager.refreshAuthorizationStatus()
+        }
+    }
+
     private var billsSection: some View {
         Section {
             if billViewModel.bills.isEmpty {

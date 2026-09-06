@@ -7,11 +7,14 @@
 
 import SwiftUI
 import CoreData
+import UniformTypeIdentifiers
 
 struct AccountDetailView: View {
     @EnvironmentObject private var accountViewModel: AccountViewModel
     @EnvironmentObject private var categoryManager: CategoryManager
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
+    @EnvironmentObject private var billViewModel: BillViewModel
+    @EnvironmentObject private var reportsViewModel: ReportsViewModel
     
     let account: Account
     
@@ -28,6 +31,16 @@ struct AccountDetailView: View {
     @State private var reconcileSatsString: String = ""
     @State private var reconcileBTCPriceString: String = ""
     @State private var lastShakeTime: Date = Date.distantPast
+    @State private var showingImportPicker = false
+    @State private var showingStatementImportSheet = false
+    @State private var statementImportFileName = ""
+    @State private var statementImportTransactions: [ParsedStatementTransaction] = []
+    @State private var showStatementImportSuccessAlert = false
+    @State private var statementImportResult: StatementImportResult?
+    @State private var isImportParsing = false
+    @State private var importErrorMessage: String?
+    @State private var showImportErrorAlert = false
+    @State private var showingUsdBtcBacktest = false
     
     var body: some View {
         accountList
@@ -79,7 +92,7 @@ struct AccountDetailView: View {
             .environmentObject(bitcoinPriceService)
         }
         .sheet(isPresented: $showingAddTransaction) {
-            ManualTransactionEntrySheet(account: account)
+            TransactionEditorSheet(account: account)
                 .environmentObject(accountViewModel)
                 .environmentObject(categoryManager)
                 .environmentObject(bitcoinPriceService)
@@ -88,6 +101,47 @@ struct AccountDetailView: View {
             TransferSheet(fromAccount: account)
                 .environmentObject(accountViewModel)
                 .environmentObject(bitcoinPriceService)
+        }
+        .sheet(isPresented: $showingUsdBtcBacktest) {
+            UsdBtcBacktestView()
+                .environmentObject(reportsViewModel)
+                .environmentObject(bitcoinPriceService)
+        }
+        .fileImporter(
+            isPresented: $showingImportPicker,
+            allowedContentTypes: [.commaSeparatedText, .plainText],
+            allowsMultipleSelection: false
+        ) { result in
+            handleStatementFile(result)
+        }
+        .sheet(isPresented: $showingStatementImportSheet) {
+            StatementImportSheet(
+                fileName: statementImportFileName,
+                transactions: statementImportTransactions,
+                initialAccount: account,
+                onImport: handleStatementImport
+            )
+            .environmentObject(accountViewModel)
+            .environmentObject(categoryManager)
+        }
+        .overlay {
+            if isImportParsing {
+                Color.black.opacity(0.3)
+                    .ignoresSafeArea()
+                ProgressView("Reading file…")
+                    .tint(.white)
+                    .scaleEffect(1.2)
+            }
+        }
+        .alert("Import Error", isPresented: $showImportErrorAlert, presenting: importErrorMessage) { _ in
+            Button("OK", role: .cancel) { }
+        } message: { message in
+            Text(message)
+        }
+        .alert("Import successful", isPresented: $showStatementImportSuccessAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            statementImportSuccessMessage
         }
         .sheet(isPresented: $showingTransactionEditor) {
             if let entry = selectedTransaction {
@@ -221,7 +275,22 @@ struct AccountDetailView: View {
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
             }
-            
+
+            Section {
+                Button {
+                    showingImportPicker = true
+                } label: {
+                    Label("Import Statement", systemImage: "square.and.arrow.down")
+                }
+                if account.isBitcoinDigitalWallet {
+                    Button {
+                        showingUsdBtcBacktest = true
+                    } label: {
+                        Label("USD vs Bitcoin", systemImage: "chart.line.uptrend.xyaxis")
+                    }
+                }
+            }
+
             transactionsSection
         }
     }
@@ -853,6 +922,76 @@ struct AccountDetailView: View {
             .fontWeight(.semibold)
             .foregroundStyle(.secondary)
     }
+
+    private var statementImportSuccessMessage: Text {
+        guard let result = statementImportResult else {
+            return Text("Import complete.")
+        }
+        var parts: [String] = []
+        parts.append("Imported \(result.importedCount) transaction\(result.importedCount == 1 ? "" : "s")")
+        if result.skippedCount > 0 {
+            parts[0] += " and skipped \(result.skippedCount) duplicate\(result.skippedCount == 1 ? "" : "s")"
+        }
+        parts[0] += "."
+        if result.matchedCount > 0 {
+            parts.append("Marked \(result.matchedCount) matching bill\(result.matchedCount == 1 ? "" : "s") paid.")
+        }
+        if result.keptBalance && result.importedCount > 0 {
+            parts.append("Current balance is unchanged.")
+        }
+        return Text(parts.joined(separator: " "))
+    }
+
+    private func handleStatementFile(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            let fileName = url.lastPathComponent
+            isImportParsing = true
+            Task {
+                do {
+                    guard url.startAccessingSecurityScopedResource() else {
+                        throw AccountExportError.decodeFailed
+                    }
+                    defer { url.stopAccessingSecurityScopedResource() }
+                    let data = try Data(contentsOf: url)
+                    let txs = try TransactionCSVParser.parse(data: data)
+                    await MainActor.run {
+                        isImportParsing = false
+                        statementImportFileName = fileName
+                        statementImportTransactions = txs
+                    }
+                    try await Task.sleep(nanoseconds: 350_000_000)
+                    await MainActor.run {
+                        showingStatementImportSheet = true
+                    }
+                } catch {
+                    await MainActor.run {
+                        isImportParsing = false
+                        importErrorMessage = error.localizedDescription
+                        showImportErrorAlert = true
+                    }
+                }
+            }
+        case .failure(let error):
+            importErrorMessage = error.localizedDescription
+            showImportErrorAlert = true
+        }
+    }
+
+    private func handleStatementImport(account: Account, transactions: [ParsedStatementTransaction], keepCurrentBalance: Bool) {
+        let result = StatementImportRunner.importTransactions(
+            account: account,
+            transactions: transactions,
+            keepCurrentBalance: keepCurrentBalance,
+            accountViewModel: accountViewModel,
+            billViewModel: billViewModel
+        )
+        reportsViewModel.refresh()
+        statementImportResult = result
+        showStatementImportSuccessAlert = true
+        loadTransactions()
+    }
     
     private func loadTransactions() {
         account.managedObjectContext?.refresh(account, mergeChanges: true)
@@ -948,23 +1087,13 @@ private struct TransactionReconcileDrawer: View {
     @Binding var btcPriceString: String
     let onSave: () -> Void
     let onCancel: () -> Void
-    @FocusState private var focusedField: Field?
-    
-    enum Field {
-        case sats
-        case btcPrice
-    }
-    
+
     private var usdAmount: Decimal {
         entry.usdAmountDecimal
     }
-    
+
     private var formattedUSDAmount: String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = "USD"
-        formatter.maximumFractionDigits = 2
-        return formatter.string(from: usdAmount as NSDecimalNumber) ?? "$0.00"
+        MoneyFormatting.currencyString(usdAmount)
     }
     
     var body: some View {
@@ -982,27 +1111,16 @@ private struct TransactionReconcileDrawer: View {
                 }
                 
                 Section {
-                    HStack {
-                        let account = entry.account
-                        let displayFormat = account?.btcDisplayFormat ?? "sats"
-                        let placeholder = displayFormat == "sats" ? "Sats" : "BTC Amount"
-                        TextField(placeholder, text: $satsString)
-                            .keyboardType(displayFormat == "sats" ? .numberPad : .decimalPad)
-                            .focused($focusedField, equals: .sats)
-                            .onChange(of: satsString) { _, newValue in
-                                // Auto-calculate BTC price when sats/BTC are entered
-                                autoCalculatePrice()
-                            }
-                        if !satsString.isEmpty {
-                            Button {
-                                satsString = ""
-                                btcPriceString = ""
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.secondary)
-                                    .font(.system(size: 16))
-                            }
-                        }
+                    MoneyTextField(
+                        text: $satsString,
+                        kind: MoneyFormatting.kindForBTCDisplay(entry.account?.btcDisplayFormat ?? "sats"),
+                        placeholder: (entry.account?.btcDisplayFormat ?? "sats") == "sats" ? "Sats" : "BTC Amount",
+                        accessibilityLabel: "Bitcoin amount",
+                        suffix: (entry.account?.btcDisplayFormat ?? "sats") == "sats" ? "sats" : nil,
+                        autoFocus: true
+                    )
+                    .onChange(of: satsString) { _, _ in
+                        autoCalculatePrice()
                     }
                     
                     HStack {
@@ -1049,22 +1167,13 @@ private struct TransactionReconcileDrawer: View {
             }
             .navigationTitle("Reconcile Transaction")
             .navigationBarTitleDisplayMode(.inline)
+            .formEntryChrome()
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        onCancel()
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        onSave()
-                    }
-                    .fontWeight(.semibold)
-                    .disabled(satsString.isEmpty)
-                }
-            }
-            .onAppear {
-                focusedField = .sats
+                FormSheetToolbar(
+                    canSave: !satsString.isEmpty,
+                    onClose: onCancel,
+                    onSave: onSave
+                )
             }
         }
     }
@@ -1108,409 +1217,5 @@ private struct TransactionReconcileDrawer: View {
         formatter.maximumFractionDigits = 2
         formatter.minimumFractionDigits = 2
         return formatter.string(from: price as NSDecimalNumber) ?? "0.00"
-    }
-}
-
-// MARK: - Transaction Editor Sheet
-
-struct TransactionEditorSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var accountViewModel: AccountViewModel
-    @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
-    @EnvironmentObject private var categoryManager: CategoryManager
-    
-    let entry: LedgerEntry
-    
-    @State private var date: Date
-    @State private var title: String
-    @State private var isCredit: Bool
-    @State private var btcSatsAmountString: String = ""
-    @State private var usdAmountString: String = ""
-    @State private var btcPriceString: String = ""
-    @State private var feeAmountString: String = ""
-    @State private var isCleared: Bool
-    @State private var notes: String
-    @State private var category: String
-    @State private var showBulkCategoryAlert = false
-    @State private var bulkCategoryCount = 0
-    
-    init(entry: LedgerEntry) {
-        self.entry = entry
-        _date = State(initialValue: entry.date ?? Date())
-        _title = State(initialValue: entry.title ?? "")
-        _isCredit = State(initialValue: entry.isCredit)
-        _isCleared = State(initialValue: entry.isReconciledFlag)
-        _notes = State(initialValue: entry.notes ?? "")
-        _category = State(initialValue: entry.category ?? "")
-        
-        // Initialize amount strings based on entry data with proper formatting
-        if let account = entry.account, account.currencyCode == "BTC" {
-            let btc = entry.btcAmountDecimal
-            if btc != .zero {
-                let displayFormat = account.btcDisplayFormat ?? "sats"
-                if displayFormat == "sats" {
-                    let sats = btc * 100_000_000
-                    let formatter = NumberFormatter()
-                    formatter.numberStyle = .decimal
-                    formatter.groupingSeparator = ","
-                    formatter.usesGroupingSeparator = true
-                    formatter.maximumFractionDigits = 0
-                    _btcSatsAmountString = State(initialValue: formatter.string(from: sats as NSDecimalNumber) ?? "")
-                } else {
-                    let formatter = NumberFormatter()
-                    formatter.numberStyle = .decimal
-                    formatter.groupingSeparator = ","
-                    formatter.usesGroupingSeparator = true
-                    formatter.minimumFractionDigits = 2
-                    formatter.maximumFractionDigits = 8
-                    _btcSatsAmountString = State(initialValue: formatter.string(from: btc as NSDecimalNumber) ?? "")
-                }
-            }
-            let usd = entry.usdAmountDecimal
-            if usd != .zero {
-                let formatter = NumberFormatter()
-                formatter.numberStyle = .decimal
-                formatter.groupingSeparator = ","
-                formatter.usesGroupingSeparator = true
-                formatter.minimumFractionDigits = 2
-                formatter.maximumFractionDigits = 2
-                _usdAmountString = State(initialValue: formatter.string(from: abs(usd) as NSDecimalNumber) ?? "")
-            }
-            let price = entry.btcPriceAtTransactionDecimal
-            if price != .zero {
-                let formatter = NumberFormatter()
-                formatter.numberStyle = .decimal
-                formatter.groupingSeparator = ","
-                formatter.usesGroupingSeparator = true
-                formatter.minimumFractionDigits = 2
-                formatter.maximumFractionDigits = 2
-                _btcPriceString = State(initialValue: formatter.string(from: price as NSDecimalNumber) ?? "")
-            }
-            // Initialize fee amount if present
-            let fee = entry.feeAmountDecimal
-            if fee != .zero {
-                let formatter = NumberFormatter()
-                formatter.numberStyle = .decimal
-                formatter.groupingSeparator = ","
-                formatter.usesGroupingSeparator = true
-                formatter.minimumFractionDigits = 2
-                formatter.maximumFractionDigits = 2
-                _feeAmountString = State(initialValue: formatter.string(from: fee as NSDecimalNumber) ?? "")
-            }
-        } else {
-            let usd = entry.usdAmountDecimal
-            if usd != .zero {
-                let formatter = NumberFormatter()
-                formatter.numberStyle = .decimal
-                formatter.groupingSeparator = ","
-                formatter.usesGroupingSeparator = true
-                formatter.minimumFractionDigits = 2
-                formatter.maximumFractionDigits = 2
-                _usdAmountString = State(initialValue: formatter.string(from: abs(usd) as NSDecimalNumber) ?? "")
-            } else {
-                let amount = entry.amountDecimal
-                if amount != .zero {
-                    let formatter = NumberFormatter()
-                    formatter.numberStyle = .decimal
-                    formatter.groupingSeparator = ","
-                    formatter.usesGroupingSeparator = true
-                    formatter.minimumFractionDigits = 2
-                    formatter.maximumFractionDigits = 2
-                    _usdAmountString = State(initialValue: formatter.string(from: abs(amount) as NSDecimalNumber) ?? "")
-                }
-            }
-        }
-    }
-    
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    HStack {
-                        TextField("Title", text: $title)
-                            .onChange(of: title) { _, newValue in
-                                // Auto-categorize based on transaction name
-                                if category.isEmpty {
-                                    let suggested = CategorySuggester.suggest(
-                                        for: newValue,
-                                        priorCategory: accountViewModel.suggestedCategory(forTitle: newValue, account: entry.account)
-                                    )
-                                    if !suggested.isEmpty {
-                                        category = suggested
-                                    }
-                                }
-                            }
-                        if !title.isEmpty {
-                            Button {
-                                title = ""
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.secondary)
-                                    .font(.system(size: 16))
-                            }
-                        }
-                    }
-                    
-                    DatePicker("Date", selection: $date, displayedComponents: .date)
-                    
-                    Picker("", selection: $isCredit) {
-                        Text("Add (+)").tag(true)
-                        Text("Subtract (-)").tag(false)
-                    }
-                    .pickerStyle(.segmented)
-                    
-                    CategoryPicker(selection: $category, usage: accountViewModel.categoryUsage())
-                        .environmentObject(categoryManager)
-                } header: {
-                    Text("Transaction Details")
-                }
-                    
-                if let account = entry.account, account.currencyCode == "BTC" {
-                    Section {
-                        // Sats Amount
-                        HStack {
-                            TextField("Sats Amount", text: $btcSatsAmountString)
-                                .keyboardType(.numberPad)
-                            if !btcSatsAmountString.isEmpty {
-                                Button {
-                                    btcSatsAmountString = ""
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundColor(.secondary)
-                                        .font(.system(size: 16))
-                                }
-                            }
-                        }
-                        
-                        // USD Amount
-                        HStack {
-                            Text("$")
-                                .foregroundColor(.secondary)
-                            TextField("USD Amount", text: $usdAmountString)
-                                .keyboardType(.decimalPad)
-                            if !usdAmountString.isEmpty {
-                                Button {
-                                    usdAmountString = ""
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundColor(.secondary)
-                                        .font(.system(size: 16))
-                                }
-                            }
-                        }
-                        
-                        // Fee Amount
-                        HStack {
-                            Text("$")
-                                .foregroundColor(.secondary)
-                            TextField("Fee (Optional)", text: $feeAmountString)
-                                .keyboardType(.decimalPad)
-                            if !feeAmountString.isEmpty {
-                                Button {
-                                    feeAmountString = ""
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundColor(.secondary)
-                                        .font(.system(size: 16))
-                                }
-                            }
-                        }
-                        
-                        // BTC Price (read-only display of current or stored price)
-                        HStack {
-                            Text("BTC Price")
-                            Spacer()
-                            if !btcPriceString.isEmpty {
-                                Text("$\(btcPriceString)")
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                Text(formatPrice(bitcoinPriceService.btcToUsdRate))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    } header: {
-                        Text("Amount")
-                    }
-                } else {
-                    Section {
-                        // USD accounts - simple amount field
-                        HStack {
-                            Text("$")
-                                .foregroundColor(.secondary)
-                            TextField("Amount", text: $usdAmountString)
-                                .keyboardType(.decimalPad)
-                            if !usdAmountString.isEmpty {
-                                Button {
-                                    usdAmountString = ""
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundColor(.secondary)
-                                        .font(.system(size: 16))
-                                }
-                            }
-                        }
-                    } header: {
-                        Text("Amount")
-                    }
-                }
-                
-                Section {
-                    HStack(alignment: .top) {
-                        TextField("Notes", text: $notes, axis: .vertical)
-                            .lineLimit(3...6)
-                        if !notes.isEmpty {
-                            Button {
-                                notes = ""
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.secondary)
-                                    .font(.system(size: 16))
-                            }
-                            .padding(.top, 4)
-                        }
-                    }
-                    
-                    Toggle("Cleared", isOn: $isCleared)
-                } header: {
-                    Text("Additional Information")
-                }
-            }
-            .navigationTitle("Edit Transaction")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    LiveDateTimeView()
-                }
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        saveTransaction()
-                    }
-                    .fontWeight(.semibold)
-                }
-            }
-            .interactiveDismissDisabled()
-            .alert(
-                "Apply to All?",
-                isPresented: $showBulkCategoryAlert
-            ) {
-                Button("Just This One") {
-                    finishSave()
-                }
-                Button("Apply to All (\(bulkCategoryCount))") {
-                    accountViewModel.bulkSetCategory(category, forTitle: title)
-                    finishSave()
-                }
-            } message: {
-                Text("Set \(bulkCategoryCount) other \"\(title)\" transaction\(bulkCategoryCount == 1 ? "" : "s") to \"\(category)\" too?")
-            }
-        }
-    }
-    
-    private func formatPrice(_ price: Decimal) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = "USD"
-        formatter.currencySymbol = "$"
-        formatter.maximumFractionDigits = 2
-        formatter.minimumFractionDigits = 2
-        return formatter.string(from: price as NSDecimalNumber) ?? "$0.00"
-    }
-    
-    private func saveTransaction() {
-        guard let account = entry.account else {
-            dismiss()
-            return
-        }
-        
-        let btcAmount: Decimal? = {
-            if account.currencyCode == "BTC" {
-                let displayFormat = account.btcDisplayFormat ?? "sats"
-                if displayFormat == "sats" {
-                    if let sats = Int(btcSatsAmountString), sats != 0 {
-                        let btc = Decimal(sats) / 100_000_000 // Convert sats to BTC
-                        return isCredit ? btc : -btc
-                    }
-                } else {
-                    let cleaned = btcSatsAmountString.replacingOccurrences(of: ",", with: "")
-                    if let btc = Decimal(string: cleaned), btc != 0 {
-                        return isCredit ? btc : -btc
-                    }
-                }
-            }
-            return nil
-        }()
-        
-        let usdAmount: Decimal? = {
-            let cleaned = usdAmountString.replacingOccurrences(of: ",", with: "").replacingOccurrences(of: "$", with: "")
-            if let amount = Decimal(string: cleaned), amount != 0 {
-                return isCredit ? amount : -amount
-            }
-            return nil
-        }()
-        
-        let btcPrice: Decimal? = {
-            if account.currencyCode == "BTC" {
-                let cleaned = btcPriceString.replacingOccurrences(of: ",", with: "").replacingOccurrences(of: "$", with: "")
-                if let price = Decimal(string: cleaned), price > 0 {
-                    return price
-                }
-            }
-            return nil
-        }()
-        
-        let feeAmount: Decimal? = {
-            if account.currencyCode == "BTC" {
-                let cleaned = feeAmountString.replacingOccurrences(of: ",", with: "").replacingOccurrences(of: "$", with: "")
-                if let fee = Decimal(string: cleaned), fee > 0 {
-                    return fee
-                }
-            }
-            return nil
-        }()
-        
-        let categoryValue = category.isEmpty ? nil : category
-        
-        accountViewModel.updateLedgerEntry(
-            entry,
-            date: date,
-            title: title,
-            btcAmount: btcAmount,
-            usdAmount: usdAmount,
-            btcPrice: btcPrice,
-            isReconciled: isCleared,
-            notes: notes.isEmpty ? nil : notes,
-            category: categoryValue,
-            feeAmount: feeAmount
-        )
-        
-        // Check if we should offer to bulk-categorize matching transactions
-        let originalCategory = entry.category ?? ""
-        let newCategory = categoryValue ?? ""
-        let entryTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        if !newCategory.isEmpty, newCategory != originalCategory, !entryTitle.isEmpty {
-            let matchCount = accountViewModel.countMatchingUncategorizedEntries(title: entryTitle, category: newCategory)
-            if matchCount > 0 {
-                bulkCategoryCount = matchCount
-                showBulkCategoryAlert = true
-                return // Don't dismiss yet — wait for alert response
-            }
-        }
-        
-        finishSave()
-    }
-    
-    private func finishSave() {
-        accountViewModel.fetchAccounts()
-        accountViewModel.saveContext()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            NotificationCenter.default.post(name: NSManagedObjectContext.didSaveObjectsNotification, object: nil)
-        }
-        dismiss()
     }
 }

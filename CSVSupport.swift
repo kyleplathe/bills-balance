@@ -127,7 +127,13 @@ enum CSVSupport {
             formatter.dateFormat = format
             formatter.isLenient = false
             if let date = formatter.date(from: trimmed) {
-                return calendar.startOfDay(for: date)
+                let start = calendar.startOfDay(for: date)
+                var parts = calendar.dateComponents([.year, .month, .day], from: start)
+                if let year = parts.year, year < 100 {
+                    parts.year = year < 70 ? 2000 + year : 1900 + year
+                    return calendar.date(from: parts).map { calendar.startOfDay(for: $0) }
+                }
+                return start
             }
         }
         return nil

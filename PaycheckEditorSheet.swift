@@ -16,25 +16,48 @@ struct PaycheckEditorSheet: View {
     @State private var autoReconcile: Bool
     @State private var notes: String
     @State private var selectedAccountID: UUID?
-    @State private var showValidationAlert = false
-    @State private var validationMessage: String?
     @State private var showUpdateScopeAlert = false
     @State private var pendingSaveData: (name: String, amount: Decimal, account: Account)?
     @State private var showDeleteScopeAlert = false
-    
+    @FocusState private var isAmountFocused: Bool
+
     enum DeleteScope {
         case thisOccurrenceOnly
         case allFutureOccurrences
     }
-    
-    let recurrenceOptions = ["none", "daily", "weekly", "monthly", "quarterly", "semiannually", "yearly"]
+
+    private var parsedAmount: Decimal? {
+        MoneyFormatting.parse(amount, kind: .usd)
+    }
+
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (parsedAmount ?? 0) > 0
+            && accountViewModel.account(with: selectedAccountID) != nil
+    }
+
+    private var amountFooter: String? {
+        if amount.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "Enter an amount"
+        }
+        if parsedAmount == nil || (parsedAmount ?? 0) <= 0 {
+            return "Enter a valid amount"
+        }
+        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Enter a name"
+        }
+        if accountViewModel.account(with: selectedAccountID) == nil {
+            return "Select an account"
+        }
+        return nil
+    }
     
     init(paycheck: Paycheck? = nil, defaultDate: Date? = nil, occurrenceDate: Date? = nil) {
         self.paycheck = paycheck
         self.occurrenceDate = occurrenceDate
         _name = State(initialValue: paycheck?.name ?? "")
-        if let amountValue = paycheck?.amount?.decimalValue {
-            _amount = State(initialValue: NSDecimalNumber(decimal: amountValue).stringValue)
+        if let amountValue = paycheck?.amount?.decimalValue, amountValue != 0 {
+            _amount = State(initialValue: MoneyFormatting.format(amountValue, kind: .usd))
         } else {
             _amount = State(initialValue: "")
         }
@@ -70,20 +93,25 @@ struct PaycheckEditorSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Income Name", text: $name)
-                    
-                    HStack {
-                        Text("$")
-                        TextField("0.00", text: $amount)
-                            .keyboardType(.decimalPad)
+                    MoneyAmountHeader(
+                        text: $amount,
+                        kind: .usd,
+                        tone: .inflow,
+                        isFocused: $isAmountFocused
+                    )
+                } footer: {
+                    if let amountFooter {
+                        Text(amountFooter)
                     }
-                    
+                }
+
+                Section {
+                    TextField("Name", text: $name)
                     DatePicker("First Deposit", selection: $firstDepositDate, displayedComponents: .date)
-                    
                     if accountViewModel.accounts.isEmpty {
                         Text("Add an account in the Balance tab first.")
                             .font(.footnote)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     } else {
                         Picker("Account", selection: Binding(get: {
                             selectedAccountID ?? accountViewModel.selectedAccount?.id
@@ -96,94 +124,38 @@ struct PaycheckEditorSheet: View {
                             }
                         }
                     }
-                    
-                    Toggle("Auto-Reconcile", isOn: $autoReconcile)
-                    
-                    Picker("Repeat", selection: $recurrenceType) {
-                        ForEach(recurrenceOptions, id: \.self) { option in
-                            Text(recurrenceDisplayName(for: option)).tag(option)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .onChange(of: recurrenceType) { oldType, newType in
-                        guard oldType != newType else { return }
-                        switch newType {
-                        case "none": break
-                        case "daily":
-                            if recurrenceInterval < 1 { recurrenceInterval = 1 }
-                            else if recurrenceInterval > 365 { recurrenceInterval = 365 }
-                        case "weekly":
-                            if recurrenceInterval < 1 { recurrenceInterval = 1 }
-                            else if recurrenceInterval > 52 { recurrenceInterval = 52 }
-                        case "monthly", "quarterly", "semiannually", "yearly":
-                            recurrenceInterval = 1
-                        default: recurrenceInterval = 1
-                        }
-                    }
-                    
-                    // Show interval selector for daily and weekly
-                    if recurrenceType == "daily" || recurrenceType == "weekly" {
-                        let maxInterval = recurrenceType == "daily" ? 365 : 52
-                        let unit = recurrenceType == "daily" ? (recurrenceInterval == 1 ? "day" : "days") : (recurrenceInterval == 1 ? "week" : "weeks")
-                        
-                        HStack {
-                            Text("Every")
-                                .foregroundColor(.secondary)
-                            Stepper(value: $recurrenceInterval, in: 1...maxInterval) {
-                                HStack {
-                                Text("\(recurrenceInterval)")
-                                        .fontWeight(.medium)
-                                    Text(unit)
-                                .foregroundColor(.secondary)
-                                }
-                        }
-                    }
+                    RecurrenceFields(
+                        recurrenceType: $recurrenceType,
+                        recurrenceInterval: $recurrenceInterval,
+                        noneLabel: "One-time"
+                    )
                 }
-                
-                    TextEditor(text: $notes)
-                        .frame(minHeight: 80)
-                        .textInputAutocapitalization(.sentences)
+
+                Section {
+                    Toggle("Auto-Reconcile", isOn: $autoReconcile)
+                    NotesField(text: $notes)
                 }
             }
             .navigationTitle(paycheck == nil ? "New Income" : "Edit Income")
             .navigationBarTitleDisplayMode(.inline)
+            .formEntryChrome()
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") { 
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            dismiss()
-                        }
-                    }
-                    .transaction { transaction in
-                        transaction.animation = .spring(response: 0.3, dampingFraction: 0.7)
-                    }
-                }
-                ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    // Show delete button only when editing an existing income
-                    if paycheck != nil {
-                        Button(role: .destructive) {
-                            // Ask about scope before deleting
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                showDeleteScopeAlert = true
-                            }
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                        .transaction { transaction in
-                            transaction.animation = .spring(response: 0.3, dampingFraction: 0.7)
-                        }
-                    }
-                    Button("Save") { savePaycheck() }
-                        .fontWeight(.semibold)
-                        .transaction { transaction in
-                            transaction.animation = .spring(response: 0.3, dampingFraction: 0.7)
-                        }
-                }
+                FormSheetToolbar(
+                    canSave: canSave,
+                    showDelete: paycheck != nil,
+                    onClose: { dismiss() },
+                    onSave: savePaycheck,
+                    onDelete: { showDeleteScopeAlert = true }
+                )
             }
-            .alert("Validation Error", isPresented: $showValidationAlert, presenting: validationMessage) { _ in
-                Button("OK", role: .cancel) { }
-            } message: { message in
-                Text(message)
+            .onAppear {
+                accountViewModel.fetchAccounts()
+                if selectedAccountID == nil {
+                    selectedAccountID = accountViewModel.selectedAccount?.id
+                }
+                if paycheck == nil {
+                    isAmountFocused = true
+                }
             }
             .alert("Update Scope", isPresented: $showUpdateScopeAlert) {
                 if occurrenceDate != nil {
@@ -247,80 +219,13 @@ struct PaycheckEditorSheet: View {
                     Text("Do you want to delete just this income, or delete the template and all future income?")
                 }
             }
-            .onAppear {
-                accountViewModel.fetchAccounts()
-                if selectedAccountID == nil {
-                    selectedAccountID = accountViewModel.selectedAccount?.id
-                }
-            }
         }
     }
-    
-    private func recurrenceDisplayName(for option: String) -> String {
-        switch option {
-        case "none":
-            return "One-time"
-        case "daily":
-            return "Daily"
-        case "weekly":
-            return "Weekly"
-        case "monthly":
-            return "Monthly"
-        case "quarterly":
-            return "Quarterly"
-        case "semiannually":
-            return "Semi-annually"
-        case "yearly":
-            return "Yearly"
-        default:
-            return option.capitalized
-        }
-    }
-    
-    private var intervalUnitLabel: String {
-        guard recurrenceType != "none" else { return "" }
-        
-        var unit: String
-        switch recurrenceType {
-        case "daily":
-            unit = recurrenceInterval == 1 ? "day" : "days"
-        case "weekly":
-            unit = recurrenceInterval == 1 ? "week" : "weeks"
-        case "monthly":
-            unit = recurrenceInterval == 1 ? "month" : "months"
-        case "quarterly":
-            unit = recurrenceInterval == 1 ? "quarter" : "quarters"
-        case "semiannually":
-            unit = recurrenceInterval == 1 ? "half year" : "half years"
-        case "yearly":
-            unit = recurrenceInterval == 1 ? "year" : "years"
-        default:
-            unit = recurrenceType
-        }
-        return unit
-    }
-    
 
     private func savePaycheck() {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else {
-            validationMessage = "Name cannot be empty."
-            showValidationAlert = true
-            return
-        }
-        let sanitizedAmount = amount
-            .replacingOccurrences(of: ",", with: "")
-            .replacingOccurrences(of: "$", with: "")
-        guard let amountDecimal = Decimal(string: sanitizedAmount), amountDecimal > 0 else {
-            validationMessage = "Enter a valid amount."
-            showValidationAlert = true
-            return
-        }
-        guard let account = accountViewModel.account(with: selectedAccountID) else {
-            validationMessage = "Select an account for this income."
-            showValidationAlert = true
-            return
-        }
+        guard !trimmedName.isEmpty, let amountDecimal = parsedAmount, amountDecimal > 0 else { return }
+        guard let account = accountViewModel.account(with: selectedAccountID) else { return }
         
         // If editing an existing paycheck, always ask for scope
         if paycheck != nil {

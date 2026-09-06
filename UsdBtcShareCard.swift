@@ -90,8 +90,29 @@ struct UsdBtcShareCard: View {
             }
         }
         .padding(28)
-        .frame(width: UsdBtcShareExport.canvasSide, height: UsdBtcShareExport.canvasSide, alignment: .topLeading)
+        .frame(width: UsdBtcShareCard.canvasSide, height: UsdBtcShareCard.canvasSide, alignment: .topLeading)
         .background(shareBackground)
+    }
+
+    static let canvasSide: CGFloat = 400
+
+    static func pngURL(title: String, months: [UsdBtcMonthPoint], monthsBack: Int) -> URL? {
+        let card = UsdBtcShareCard(title: title, months: months, monthsBack: monthsBack)
+        let renderer = ImageRenderer(content: card)
+        renderer.scale = 1080 / canvasSide
+        renderer.isOpaque = true
+        renderer.proposedSize = ProposedViewSize(width: canvasSide, height: canvasSide)
+        guard let image = renderer.uiImage, let data = image.pngData() else { return nil }
+        let safe = title
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(safe).png")
+        do {
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            return nil
+        }
     }
 
     private func legendDot(color: Color, title: String) -> some View {
@@ -200,29 +221,5 @@ private struct UsdBtcShareChart: View {
             return [(0, String(startYear)), (1, String(endYear))]
         }
         return [(0, String(startYear)), (1, String(endYear))]
-    }
-}
-
-@MainActor
-enum UsdBtcShareExport {
-    static let canvasSide: CGFloat = 400
-
-    static func pngURL(title: String, months: [UsdBtcMonthPoint], monthsBack: Int) -> URL? {
-        let card = UsdBtcShareCard(title: title, months: months, monthsBack: monthsBack)
-        let renderer = ImageRenderer(content: card)
-        renderer.scale = 1080 / canvasSide
-        renderer.isOpaque = true
-        renderer.proposedSize = ProposedViewSize(width: canvasSide, height: canvasSide)
-        guard let image = renderer.uiImage, let data = image.pngData() else { return nil }
-        let safe = title
-            .replacingOccurrences(of: "/", with: "-")
-            .replacingOccurrences(of: ":", with: "-")
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(safe).png")
-        do {
-            try data.write(to: url, options: .atomic)
-            return url
-        } catch {
-            return nil
-        }
     }
 }

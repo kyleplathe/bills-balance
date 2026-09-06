@@ -154,8 +154,7 @@ struct ReportsView: View {
                     ForEach(pageAnchors, id: \.self) { date in
                         activityPage(
                             snapshot: snapshot(for: date),
-                            fallbackTitle: reportsViewModel.periodTitle(for: walletPeriod, date: date),
-                            showBacktest: isCurrentPage(date)
+                            fallbackTitle: reportsViewModel.periodTitle(for: walletPeriod, date: date)
                         )
                         .frame(width: geo.size.width, height: geo.size.height)
                         .id(date)
@@ -192,10 +191,6 @@ struct ReportsView: View {
         return snapshots.first { isSamePeriod($0.anchorDate, date) }
     }
 
-    private func isCurrentPage(_ date: Date) -> Bool {
-        isSamePeriod(date, reportsViewModel.currentAnchorDate())
-    }
-
     private func isSamePeriod(_ lhs: Date, _ rhs: Date) -> Bool {
         let calendar = Calendar.current
         switch walletPeriod {
@@ -210,8 +205,7 @@ struct ReportsView: View {
 
     private func activityPage(
         snapshot: ActivityPeriodSnapshot?,
-        fallbackTitle: String,
-        showBacktest: Bool
+        fallbackTitle: String
     ) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -221,7 +215,7 @@ struct ReportsView: View {
 
                 if let snapshot {
                     if snapshot.hasActivity {
-                        periodCards(from: snapshot, showBacktest: showBacktest)
+                        periodCards(from: snapshot)
                     } else {
                         emptyPeriodPlaceholder
                     }
@@ -243,7 +237,6 @@ struct ReportsView: View {
             reportsViewModel.loadMonthlyReport()
             reportsViewModel.loadYearWrapReport()
             reportsViewModel.loadWeekReport()
-            await reportsViewModel.loadUsdBtcReport()
         }
     }
 
@@ -261,7 +254,7 @@ struct ReportsView: View {
     }
 
     @ViewBuilder
-    private func periodCards(from snapshot: ActivityPeriodSnapshot, showBacktest: Bool) -> some View {
+    private func periodCards(from snapshot: ActivityPeriodSnapshot) -> some View {
         WalletTotalSpendingAppleCard(
             expenses: reportsViewModel.periodSpendingTotal(for: snapshot.period, date: snapshot.anchorDate),
             previousPeriodExpenses: snapshot.previousComparableSpending,
@@ -292,9 +285,6 @@ struct ReportsView: View {
                 period: snapshot.period,
                 anchorDate: snapshot.anchorDate
             )
-        }
-        if showBacktest, reportsViewModel.hasActiveBitcoinDigitalWallet {
-            UsdBtcBacktestSection(appeared: appeared)
         }
     }
 
@@ -341,9 +331,6 @@ struct ReportsView: View {
         reportsViewModel.loadMonthlyReport()
         reportsViewModel.loadYearWrapReport()
         reportsViewModel.loadWeekReport()
-        Task {
-            await reportsViewModel.loadUsdBtcReport()
-        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
             isRecenteringPager = false
             appeared = true

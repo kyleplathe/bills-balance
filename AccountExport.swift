@@ -164,9 +164,6 @@ enum AccountExportService {
                 ($0.name ?? "") == row.name && CSVSupport.normalizeAccountType($0.type ?? "") == row.type
             }) {
                 account = match
-            } else if existing.filter({ $0.name == row.name }).count == 1,
-                      let match = existing.first(where: { $0.name == row.name }) {
-                account = match
             } else {
                 account = Account(context: context)
                 account.id = UUID()

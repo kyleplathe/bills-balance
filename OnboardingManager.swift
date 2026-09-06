@@ -11,6 +11,7 @@ import SwiftUI
 class OnboardingManager: ObservableObject {
     @AppStorage("hasCompletedOnboarding") var hasCompletedOnboarding: Bool = false
     @AppStorage("hasRequestedNotifications") var hasRequestedNotifications: Bool = false
+    @AppStorage("shouldLoadSampleData") var shouldLoadSampleData: Bool = false
     @AppStorage("defaultDigitalWalletCurrency") var defaultDigitalWalletCurrency: String = "USD"
     
     static let shared = OnboardingManager()

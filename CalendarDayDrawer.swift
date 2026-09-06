@@ -324,9 +324,13 @@ struct DayDetailDrawer: View {
 // MARK: - Insights UI
 struct CalendarInsight {
     let title: String
-    let subtitle: String
+    let billCount: Int
     let amount: Decimal
     let tint: Color
+    
+    var billCountLabel: String {
+        billCount == 1 ? "1 bill" : "\(billCount) bills"
+    }
 }
 
 struct CalendarInsightGrid: View {
@@ -334,14 +338,14 @@ struct CalendarInsightGrid: View {
     let currencyCode: String
     
     private var columns: [GridItem] {
-        [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+        [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
     }
     
     var body: some View {
         if insights.isEmpty {
             EmptyView()
         } else {
-            LazyVGrid(columns: insights.count == 1 ? [GridItem(.flexible())] : columns, spacing: 12) {
+            LazyVGrid(columns: insights.count == 1 ? [GridItem(.flexible())] : columns, spacing: 8) {
                 ForEach(Array(insights.enumerated()), id: \.offset) { item in
                     CalendarInsightCard(insight: item.element, currencyCode: currencyCode)
                 }
@@ -351,36 +355,31 @@ struct CalendarInsightGrid: View {
 }
 
 struct CalendarInsightCard: View {
-    @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     let insight: CalendarInsight
     let currencyCode: String
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(insight.title.uppercased())
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-            if bitcoinPriceService.showInBitcoin {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(bitcoinPriceService.formatAsSats(insight.amount))
-                        .font(.headline.weight(.semibold))
-                    Text("$\(insight.amount, format: .number.precision(.fractionLength(2)))")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                Text(insight.amount, format: .currency(code: currencyCode))
-                    .font(.headline.weight(.semibold))
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(insight.title.uppercased())
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                Text(insight.billCountLabel)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            Text(insight.subtitle)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text(insight.amount, format: .currency(code: currencyCode))
+                .font(.headline.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
-        .padding(.vertical, 16)
-        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(insight.tint.opacity(0.12))
         )
     }
@@ -432,7 +431,6 @@ struct DayOccurrences {
 }
 
 struct MonthBillList: View {
-    @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     @EnvironmentObject private var accountViewModel: AccountViewModel
     let dayOccurrences: [(date: Date, data: DayOccurrences)]
     let calendar: Calendar
@@ -510,20 +508,9 @@ struct MonthBillList: View {
             }
             Spacer()
             if net != .zero {
-                if bitcoinPriceService.showInBitcoin {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(bitcoinPriceService.formatAsSats(net))
-                            .font(.subheadline.weight(.semibold))
-                        Text("$\(net, format: .number.precision(.fractionLength(2)))")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
+                Text(net, format: .currency(code: currencyCode))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundColor(net >= 0 ? .green : .primary)
-                } else {
-                    Text(net, format: .currency(code: currencyCode))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(net >= 0 ? .green : .primary)
-                }
             }
         }
     }
@@ -634,7 +621,6 @@ struct MonthBillList: View {
 
 // MARK: - Bill Row
 struct BillDueRow: View {
-    @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     let occurrence: BillOccurrence
     let currencyCode: String
     var compact: Bool = false
@@ -664,20 +650,9 @@ struct BillDueRow: View {
             }
             Spacer()
             if let amountDecimal = bill.amount?.decimalValue {
-                if bitcoinPriceService.showInBitcoin {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(bitcoinPriceService.formatAsSats(amountDecimal))
-                            .fontWeight(.semibold)
-                        Text("$\(amountDecimal, format: .number.precision(.fractionLength(2)))")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
+                Text(amountDecimal, format: .currency(code: currencyCode))
+                    .fontWeight(.semibold)
                     .foregroundColor(amountColor)
-                } else {
-                    Text(amountDecimal, format: .currency(code: currencyCode))
-                        .fontWeight(.semibold)
-                        .foregroundColor(amountColor)
-                }
             }
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -731,7 +706,6 @@ struct BillDueRow: View {
 }
 
 struct PaycheckRow: View {
-    @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     @EnvironmentObject private var accountViewModel: AccountViewModel
     let occurrence: PaycheckOccurrence
     let currencyCode: String
@@ -791,20 +765,9 @@ struct PaycheckRow: View {
             Spacer()
             HStack(spacing: 12) {
                 if let amountDecimal = paycheck.amount?.decimalValue {
-                    if bitcoinPriceService.showInBitcoin {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(bitcoinPriceService.formatAsSats(amountDecimal))
-                                .fontWeight(.semibold)
-                            Text("$\(amountDecimal, format: .number.precision(.fractionLength(2)))")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                        }
+                    Text(amountDecimal, format: .currency(code: currencyCode))
+                        .fontWeight(.semibold)
                         .foregroundColor(.green)
-                    } else {
-                        Text(amountDecimal, format: .currency(code: currencyCode))
-                            .fontWeight(.semibold)
-                            .foregroundColor(.green)
-                    }
                 }
                 
                 // Action button - simple arrow button for all states

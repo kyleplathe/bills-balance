@@ -60,7 +60,7 @@ struct OnboardingView: View {
                     Spacer()
                     if currentPage < pages.count - 1 {
                         Button(action: {
-                            completeOnboarding()
+                            completeOnboarding(loadSampleData: false, requestNotifications: false)
                         }) {
                             Text("Skip")
                                 .font(.body)
@@ -87,11 +87,10 @@ struct OnboardingView: View {
                 // Bottom buttons
                 VStack(spacing: 16) {
                     if currentPage == pages.count - 1 {
-                        // On last page - show Get Started button
                         Button(action: {
-                            completeOnboarding()
+                            completeOnboarding(loadSampleData: false, requestNotifications: true)
                         }) {
-                            Text("Get Started")
+                            Text("Start Empty")
                                 .font(.headline)
                                 .foregroundColor(.white)
                                 .frame(maxWidth: .infinity)
@@ -100,6 +99,14 @@ struct OnboardingView: View {
                                 .cornerRadius(16)
                         }
                         .padding(.horizontal, 32)
+
+                        Button(action: {
+                            completeOnboarding(loadSampleData: true, requestNotifications: true)
+                        }) {
+                            Text("Try Sample Data")
+                                .font(.body.weight(.semibold))
+                                .foregroundColor(pages[currentPage].color)
+                        }
                     } else {
                         // On other pages - show Next button
                         Button(action: {
@@ -124,11 +131,12 @@ struct OnboardingView: View {
         }
     }
     
-    private func completeOnboarding() {
-        // Request notification permissions before completing
-        notificationManager.requestAuthorization()
-        onboardingManager.hasRequestedNotifications = true
-        
+    private func completeOnboarding(loadSampleData: Bool, requestNotifications: Bool) {
+        if requestNotifications {
+            notificationManager.requestAuthorization()
+            onboardingManager.hasRequestedNotifications = true
+        }
+        onboardingManager.shouldLoadSampleData = loadSampleData
         HapticManager.shared.buttonTapped()
         onboardingManager.completeOnboarding()
     }

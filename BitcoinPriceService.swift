@@ -21,11 +21,24 @@ class BitcoinPriceService: ObservableObject {
     private let cacheRateKey = "btcToUsdRate"
     private let cacheDateKey = "btcToUsdRateDate"
     private let refreshInterval: TimeInterval = 180
+    private var isActive = false
 
     private init() {
         loadCachedRate()
+    }
+
+    func activate() {
+        guard !isActive else { return }
+        isActive = true
         fetchBitcoinPrice()
         startPeriodicUpdates()
+    }
+
+    func deactivate() {
+        isActive = false
+        refreshTask?.cancel()
+        refreshTask = nil
+        showInBitcoin = false
     }
 
     private func loadCachedRate() {
@@ -55,6 +68,7 @@ class BitcoinPriceService: ObservableObject {
     }
 
     func refreshPrice() async {
+        guard isActive else { return }
         let alreadyLoading = await MainActor.run { isLoading }
         guard !alreadyLoading else { return }
         await MainActor.run {

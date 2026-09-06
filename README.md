@@ -1,30 +1,30 @@
 # Bills & Balance
 
-A local-first iOS checkbook and bills app: recurring bills, multi-account ledger, calendar, and activity reports. Persistence is **Core Data**, with **CloudKit** as the single sync backend when the user is signed into iCloud.
+A local-first iOS checkbook and bills app: recurring bills, multi-account ledger, calendar, and activity reports. Persistence is **Core Data on this device**. Backup is a file you export to Files or iCloud Drive. There is no cloud account and no CloudKit sync in this release.
 
 ## What’s in the app
 
-- **Bills** — recurrence, auto-pay, notifications, badge, categories, manage/import/export
-- **Balance** — multi-account ledger, cleared vs available, transfers, JSON account export/import, statement CSV import (from Activity)
+- **Bills** — recurrence, auto-pay, optional notifications, badge, categories, manage/import/export
+- **Balance** — multi-account ledger, cleared vs available, transfers, JSON backup in Manage Accounts, statement CSV import on the account
 - **Calendar** — month grid and day drawer for bills and income
 - **Activity** — week / month / year spending, income, fees, and categories
-- **Extras** — onboarding, CoinGecko BTC price, credit cards, custom categories
+- **Extras** — onboarding with sample data, optional Face ID lock, CoinGecko BTC price only after a Bitcoin digital wallet
 
 ## Available balance
 
 **Cleared** is starting balance plus reconciled ledger entries (checkbook).
 
-**Available** is current balance minus unpaid bills plus expected income inside a look-ahead window (14 / 30 / 60 / 90 days). The window lives in Settings on the Balance menu (**Available Balance Window**) and is stored locally in UserDefaults.
+**Available** is current balance minus unpaid bills plus expected income inside a look-ahead window (14 / 30 / 60 / 90 days). The window lives in settings on the Balance menu (**Available Balance Window**) and is stored locally in UserDefaults.
 
-## Sync
+## Storage and privacy
 
-One backend: **CloudKit** (`iCloud.com.kyle.billsandbalance`).
+- Signed-out, on-device SQLite via Core Data (`NSPersistentContainer`)
+- Optional Face ID / device passcode lock in Manage Accounts
+- Export / Import backup in Manage Accounts (share sheet → Files or iCloud Drive)
+- **Supabase is parked** (stubs in `SupabaseSupport.swift`; WIP under `Parked/SupabaseWIP/`)
+- **CloudKit is parked** — do not enable the iCloud capability for v1
 
-- Signed into iCloud on device → `NSPersistentCloudKitContainer`
-- Simulator / no iCloud / CloudKit store failure → local Core Data fallback
-- **Supabase is parked** (stubs in `SupabaseSupport.swift`; WIP under `Parked/SupabaseWIP/`). Do not enable both.
-
-Create the CloudKit container in the Apple Developer portal for the App ID `com.kyle.billsandbalance` if you want multi-device sync.
+See [PRIVACY.md](PRIVACY.md). App Store listing copy is in [APP_STORE_LISTING.md](APP_STORE_LISTING.md).
 
 ## Architecture
 

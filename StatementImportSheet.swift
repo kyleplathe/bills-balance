@@ -15,6 +15,7 @@ struct StatementImportSheet: View {
 
     let fileName: String
     let transactions: [ParsedStatementTransaction]
+    var initialAccount: Account? = nil
     let onImport: (Account, [ParsedStatementTransaction], Bool) -> Void
 
     private var isStrikeImport: Bool {
@@ -193,6 +194,9 @@ struct StatementImportSheet: View {
     }
 
     private func preferredAccount() -> Account? {
+        if let initialAccount, availableAccounts.contains(where: { $0.objectID == initialAccount.objectID }) {
+            return initialAccount
+        }
         if isStrikeImport {
             if let strike = availableAccounts.first(where: { ($0.name ?? "").localizedCaseInsensitiveContains("strike") && $0.currencyCode == "BTC" }) {
                 return strike

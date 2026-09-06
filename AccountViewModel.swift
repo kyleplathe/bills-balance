@@ -61,6 +61,19 @@ class AccountViewModel: ObservableObject {
             accounts = []
             selectedAccount = nil
         }
+        syncBitcoinPriceService()
+    }
+
+    var hasActiveBitcoinDigitalWallet: Bool {
+        accounts.contains(where: \.isBitcoinDigitalWallet)
+    }
+
+    func syncBitcoinPriceService() {
+        if hasActiveBitcoinDigitalWallet {
+            BitcoinPriceService.shared.activate()
+        } else {
+            BitcoinPriceService.shared.deactivate()
+        }
     }
     
     func refreshLedgerEntries() {

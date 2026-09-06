@@ -178,7 +178,7 @@ final class ReportsViewModel: ObservableObject {
     private static let lastPeriodKey = "ReportsLastWalletPeriod"
     private static let lastCreditCardViewModeKey = "ReportsLastCreditCardViewMode"
     private static let categorySortDescendingKey = "ReportsCategorySortDescending"
-    private static let usdBtcBacktestEnabledKey = "ReportsUsdBtcBacktestEnabled"
+    private static let usdBtcMonthsBackKey = "ReportsUsdBtcMonthsBack"
 
     @Published var monthlyReport: MonthlyReportData?
     @Published var yearWrapReport: YearWrapData?
@@ -224,7 +224,10 @@ final class ReportsViewModel: ObservableObject {
         if UserDefaults.standard.object(forKey: Self.categorySortDescendingKey) != nil {
             categorySortDescending = UserDefaults.standard.bool(forKey: Self.categorySortDescendingKey)
         }
-        usdBtcBacktestEnabled = UserDefaults.standard.bool(forKey: Self.usdBtcBacktestEnabledKey)
+        let storedMonths = UserDefaults.standard.integer(forKey: Self.usdBtcMonthsBackKey)
+        if storedMonths >= 12 {
+            usdBtcMonthsBack = min(48, storedMonths)
+        }
     }
 
     var hasActiveBitcoinDigitalWallet: Bool {
@@ -232,9 +235,7 @@ final class ReportsViewModel: ObservableObject {
         request.predicate = NSPredicate(format: "currency == %@", "BTC")
         request.fetchLimit = 20
         let accounts = (try? context.fetch(request)) ?? []
-        return accounts.contains { account in
-            !account.isHiddenFlag && isDigitalWallet(account)
-        }
+        return accounts.contains { $0.isBitcoinDigitalWallet }
     }
 
     func setCategorySortDescending(_ descending: Bool) {
@@ -242,9 +243,16 @@ final class ReportsViewModel: ObservableObject {
         UserDefaults.standard.set(descending, forKey: Self.categorySortDescendingKey)
     }
 
+    func setUsdBtcMonthsBack(_ months: Int) {
+        let clamped = min(48, max(12, months))
+        guard clamped != usdBtcMonthsBack else { return }
+        usdBtcMonthsBack = clamped
+        UserDefaults.standard.set(clamped, forKey: Self.usdBtcMonthsBackKey)
+        Task { await loadUsdBtcReport() }
+    }
+
     func setUsdBtcBacktestEnabled(_ enabled: Bool) {
         usdBtcBacktestEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: Self.usdBtcBacktestEnabledKey)
         if enabled, hasActiveBitcoinDigitalWallet {
             Task { await loadUsdBtcReport() }
         } else if !enabled {
@@ -799,7 +807,7 @@ final class ReportsViewModel: ObservableObject {
     }
 
     func loadUsdBtcReport() async {
-        guard hasActiveBitcoinDigitalWallet, usdBtcBacktestEnabled else {
+        guard hasActiveBitcoinDigitalWallet else {
             usdBtcReport = nil
             return
         }

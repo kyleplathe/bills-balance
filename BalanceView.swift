@@ -1,6 +1,5 @@
 import SwiftUI
 import Charts
-import UniformTypeIdentifiers
 
 // Cash register style balance text with digit rotation
 private struct CashRegisterBalanceText: View {
@@ -75,11 +74,6 @@ private enum BalancePrivacy {
     static let placeholder = "$••••••"
 }
 
-private struct ExportFileItem: Identifiable {
-    let id = UUID()
-    let url: URL
-}
-
 // MARK: - Main Balance View
 struct BalanceView: View {
     @EnvironmentObject private var accountViewModel: AccountViewModel
@@ -87,6 +81,8 @@ struct BalanceView: View {
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     @EnvironmentObject private var reportsViewModel: ReportsViewModel
     @EnvironmentObject private var categoryManager: CategoryManager
+    @EnvironmentObject private var paycheckViewModel: PaycheckViewModel
+    @EnvironmentObject private var appLockManager: AppLockManager
     @State private var showingManageAccounts = false
     @State private var showingReports = false
     @State private var showingAddAccount = false
@@ -94,26 +90,9 @@ struct BalanceView: View {
     @State private var selectedAccount: Account?
     @State private var showInactiveAccounts = false
     @AppStorage("hideBalances") private var hideBalances = false
-    @State private var showingImportPicker = false
-    @State private var showClearImportedAlert = false
-    @State private var showClearImportedSuccessAlert = false
-    @State private var clearedImportCount = 0
-    @State private var exportShareItem: ExportFileItem?
     @State private var showingTransfer = false
     @State private var currentAccountPage = 0
     @State private var activityChartAppeared = false
-    @State private var exportErrorMessage: String?
-    @State private var showExportErrorAlert = false
-    @State private var importErrorMessage: String?
-    @State private var showImportErrorAlert = false
-    @State private var showImportSuccessAlert = false
-    @State private var importedAccountCount = 0
-    @State private var showingStatementImportSheet = false
-    @State private var statementImportFileName = ""
-    @State private var statementImportTransactions: [ParsedStatementTransaction] = []
-    @State private var showStatementImportSuccessAlert = false
-    @State private var statementImportResult: StatementImportResult?
-    @State private var isImportParsing = false
     @State private var selectedRecentTransaction: LedgerEntry?
     
     var body: some View {
@@ -144,12 +123,16 @@ struct BalanceView: View {
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 addButton
+                transferButton
                 menuButton
             }
         }
         .sheet(isPresented: $showingManageAccounts) {
             ManageAccountsView()
                 .environmentObject(accountViewModel)
+                .environmentObject(billViewModel)
+                .environmentObject(paycheckViewModel)
+                .environmentObject(appLockManager)
         }
         .sheet(isPresented: $showingAddAccount) {
             AccountEditorSheet(account: nil) { name, type, startingBalance, isHidden, currency, btcDisplayFormat, feePercentage, startingBalanceUSD, startingBalanceBTCPrice in
@@ -173,12 +156,6 @@ struct BalanceView: View {
                 .environmentObject(accountViewModel)
                 .environmentObject(bitcoinPriceService)
         }
-        .sheet(item: $exportShareItem) { item in
-            ActivityShareSheet(activityItems: [item.url]) {
-                try? FileManager.default.removeItem(at: item.url)
-                exportShareItem = nil
-            }
-        }
         .navigationDestination(isPresented: $showingReports) {
             ReportsView()
                 .environmentObject(accountViewModel)
@@ -193,23 +170,9 @@ struct BalanceView: View {
                     .environmentObject(accountViewModel)
                     .environmentObject(bitcoinPriceService)
                     .environmentObject(categoryManager)
+                    .environmentObject(billViewModel)
+                    .environmentObject(reportsViewModel)
             }
-        }
-        .fileImporter(
-            isPresented: $showingImportPicker,
-            allowedContentTypes: [.commaSeparatedText, .plainText, .json],
-            allowsMultipleSelection: false
-        ) { result in
-            handleAccountImport(result)
-        }
-        .sheet(isPresented: $showingStatementImportSheet) {
-            StatementImportSheet(
-                fileName: statementImportFileName,
-                transactions: statementImportTransactions,
-                onImport: handleStatementImport
-            )
-            .environmentObject(accountViewModel)
-            .environmentObject(categoryManager)
         }
         .sheet(item: Binding(
             get: { selectedRecentTransaction.map { LedgerEntrySheetItem($0) } },
@@ -219,51 +182,6 @@ struct BalanceView: View {
                 .environmentObject(accountViewModel)
                 .environmentObject(bitcoinPriceService)
                 .environmentObject(categoryManager)
-        }
-        .overlay {
-            if isImportParsing {
-                Color.black.opacity(0.3)
-                    .ignoresSafeArea()
-                ProgressView("Reading file…")
-                    .tint(.white)
-                    .scaleEffect(1.2)
-            }
-        }
-        .alert("Export Error", isPresented: $showExportErrorAlert, presenting: exportErrorMessage) { _ in
-            Button("OK", role: .cancel) { }
-        } message: { message in
-            Text(message)
-        }
-        .alert("Import Error", isPresented: $showImportErrorAlert, presenting: importErrorMessage) { _ in
-            Button("OK", role: .cancel) { }
-        } message: { message in
-            Text(message)
-        }
-        .alert("Import Successful", isPresented: $showImportSuccessAlert) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text("Imported \(importedAccountCount) account\(importedAccountCount == 1 ? "" : "s"). Matching accounts were updated in place.")
-        }
-        .alert("Import successful", isPresented: $showStatementImportSuccessAlert) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            statementImportSuccessMessage
-        }
-        .alert("Clear Imported Data", isPresented: $showClearImportedAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Clear All Imported", role: .destructive) {
-                clearedImportCount = accountViewModel.clearImportedEntries()
-                showClearImportedSuccessAlert = true
-            }
-        } message: {
-            Text("Imported transactions will be deleted and starting balances will be restored to before those imports (the Keep current balance adjustment is undone). This cannot be undone.")
-        }
-        .alert("Imported Data Cleared", isPresented: $showClearImportedSuccessAlert) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(clearedImportCount == 0
-                 ? "No imported transactions were found."
-                 : "Removed \(clearedImportCount) imported transaction\(clearedImportCount == 1 ? "" : "s") and restored starting balances.")
         }
         .onAppear {
             accountViewModel.fetchAccounts()
@@ -297,6 +215,17 @@ struct BalanceView: View {
         }
         .accessibilityLabel("Add Account")
     }
+
+    private var transferButton: some View {
+        Button {
+            showingTransfer = true
+        } label: {
+            Image(systemName: "arrow.left.arrow.right")
+                .font(.title2)
+        }
+        .accessibilityLabel("Transfer")
+        .disabled(visibleAccounts.count < 2)
+    }
     
     private var menuButton: some View {
         Menu {
@@ -305,35 +234,7 @@ struct BalanceView: View {
             } label: {
                 Label("Manage Accounts", systemImage: "building.columns")
             }
-            
-            Menu {
-                Button {
-                    showingImportPicker = true
-                } label: {
-                    Label("Import", systemImage: "square.and.arrow.down")
-                }
-                Button {
-                    exportAccounts()
-                } label: {
-                    Label("Export", systemImage: "square.and.arrow.up")
-                }
-                Divider()
-                Button(role: .destructive) {
-                    showClearImportedAlert = true
-                } label: {
-                    Label("Clear Imported Data", systemImage: "trash")
-                }
-            } label: {
-                Label("Import/Export", systemImage: "arrow.up.arrow.down")
-            }
-            
-            Button {
-                showingTransfer = true
-            } label: {
-                Label("Transfer", systemImage: "arrow.left.arrow.right")
-            }
-            .disabled(visibleAccounts.count < 2)
-            
+
             Button {
                 withAnimation {
                     showInactiveAccounts.toggle()
@@ -346,26 +247,11 @@ struct BalanceView: View {
                 )
             }
             .disabled(!hasInactiveAccounts && !showInactiveAccounts)
-            
-            #if DEBUG
-            Divider()
-            if let firstAccount = visibleAccounts.first {
-                Button {
-                    accountViewModel.addSampleDataForTesting(to: firstAccount)
-                } label: {
-                    Label("Add Sample Data (Test)", systemImage: "chart.bar.doc.horizontal.fill")
-                }
-            }
-            Button(role: .destructive) {
-                accountViewModel.removeSampleDataForTesting()
-            } label: {
-                Label("Remove Sample Data", systemImage: "trash")
-            }
-            #endif
         } label: {
             Image(systemName: "ellipsis.circle")
                 .font(.title2)
         }
+        .accessibilityLabel("More")
     }
     
     // MARK: - Empty State
@@ -649,101 +535,6 @@ struct BalanceView: View {
             }
     }
 
-    private var statementImportSuccessMessage: Text {
-        guard let result = statementImportResult else {
-            return Text("Import complete.")
-        }
-        var parts: [String] = []
-        parts.append("Imported \(result.importedCount) transaction\(result.importedCount == 1 ? "" : "s")")
-        if result.skippedCount > 0 {
-            parts[0] += " and skipped \(result.skippedCount) duplicate\(result.skippedCount == 1 ? "" : "s")"
-        }
-        parts[0] += "."
-        if result.matchedCount > 0 {
-            parts.append("Marked \(result.matchedCount) matching bill\(result.matchedCount == 1 ? "" : "s") paid.")
-        }
-        if result.keptBalance && result.importedCount > 0 {
-            parts.append("Current balance is unchanged.")
-        }
-        return Text(parts.joined(separator: " "))
-    }
-
-    private func exportAccounts() {
-        do {
-            let url = try AccountExportService.writeExportFile(accounts: accountViewModel.accounts)
-            exportShareItem = ExportFileItem(url: url)
-        } catch {
-            exportErrorMessage = error.localizedDescription
-            showExportErrorAlert = true
-        }
-    }
-
-    private func isAccountBackup(_ data: Data) -> Bool {
-        guard let text = CSVSupport.string(from: data) else { return false }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("{") { return true }
-        let header = trimmed.split(whereSeparator: \.isNewline).first.map(String.init)?.lowercased() ?? ""
-        return header.contains("starting balance")
-    }
-
-    private func handleAccountImport(_ result: Result<[URL], Error>) {
-        switch result {
-        case .success(let urls):
-            guard let url = urls.first else { return }
-            let fileName = url.lastPathComponent
-            isImportParsing = true
-            Task {
-                do {
-                    guard url.startAccessingSecurityScopedResource() else {
-                        throw AccountExportError.decodeFailed
-                    }
-                    defer { url.stopAccessingSecurityScopedResource() }
-                    let data = try Data(contentsOf: url)
-                    if isAccountBackup(data) {
-                        let count = try accountViewModel.importAccounts(from: data)
-                        await MainActor.run {
-                            isImportParsing = false
-                            importedAccountCount = count
-                            showImportSuccessAlert = true
-                        }
-                    } else {
-                        let txs = try TransactionCSVParser.parse(data: data)
-                        await MainActor.run {
-                            isImportParsing = false
-                            statementImportFileName = fileName
-                            statementImportTransactions = txs
-                        }
-                        try await Task.sleep(nanoseconds: 350_000_000)
-                        await MainActor.run {
-                            showingStatementImportSheet = true
-                        }
-                    }
-                } catch {
-                    await MainActor.run {
-                        isImportParsing = false
-                        importErrorMessage = error.localizedDescription
-                        showImportErrorAlert = true
-                    }
-                }
-            }
-        case .failure(let error):
-            importErrorMessage = error.localizedDescription
-            showImportErrorAlert = true
-        }
-    }
-
-    private func handleStatementImport(account: Account, transactions: [ParsedStatementTransaction], keepCurrentBalance: Bool) {
-        let result = StatementImportRunner.importTransactions(
-            account: account,
-            transactions: transactions,
-            keepCurrentBalance: keepCurrentBalance,
-            accountViewModel: accountViewModel,
-            billViewModel: billViewModel
-        )
-        reportsViewModel.refresh()
-        statementImportResult = result
-        showStatementImportSuccessAlert = true
-    }
 }
 
 // MARK: - Chip Card Component

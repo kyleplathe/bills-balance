@@ -58,6 +58,7 @@ struct BillsAndBalanceApp: App {
     let persistenceController = PersistenceController.shared
     @StateObject private var bootstrap = AppBootstrap()
     @StateObject private var onboardingManager = OnboardingManager.shared
+    @StateObject private var appLockManager = AppLockManager.shared
     @State private var showSplash = true
 
     var body: some Scene {
@@ -78,9 +79,20 @@ struct BillsAndBalanceApp: App {
                         .environmentObject(bootstrap.bitcoinPriceService)
                         .environmentObject(bootstrap.reportsViewModel)
                         .environmentObject(ProjectionPreferences.shared)
+                        .environmentObject(appLockManager)
                         .preferredColorScheme(nil)
                         .onAppear {
                             bootstrap.billViewModel.updateAppBadge()
+                            SampleDataSeeder.seedIfNeeded(
+                                accountViewModel: bootstrap.accountViewModel,
+                                billViewModel: bootstrap.billViewModel
+                            )
+                        }
+                        .overlay {
+                            if appLockManager.requireFaceID && !appLockManager.isUnlocked {
+                                AppLockOverlay()
+                                    .environmentObject(appLockManager)
+                            }
                         }
                 } else {
                     ProgressView("Loading…")

@@ -11,7 +11,6 @@ struct CalendarTabView: View {
     @EnvironmentObject private var billViewModel: BillViewModel
     @EnvironmentObject private var paycheckViewModel: PaycheckViewModel
     @EnvironmentObject private var accountViewModel: AccountViewModel
-    @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -350,37 +349,49 @@ struct CalendarTabView: View {
     // MARK: - Living Means View
     @ViewBuilder
     private var livingMeansView: some View {
-        if let meansData = livingMeansPercentage {
-            Text(livingMeansText(for: meansData))
-                .font(.subheadline)
-                .foregroundColor(meansData.isBelow ? .green : .orange)
-                .frame(maxWidth: .infinity, alignment: .center)
+        if let insight = livingMeansInsight {
+            Text(insight.text)
+                .font(.caption)
+                .foregroundStyle(insight.color)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
         }
     }
     
-    private func livingMeansText(for meansData: (percentage: Decimal, isBelow: Bool)) -> String {
-        let percentage = abs(meansData.percentage)
+    private var livingMeansInsight: (text: String, color: Color)? {
+        guard let meansData = livingMeansPercentage else { return nil }
+        
+        var absPercentage = abs(meansData.percentage)
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &absPercentage, 1, .plain)
+        
+        if rounded == 0 {
+            return ("You're breaking even this month", .secondary)
+        }
+        
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         formatter.maximumFractionDigits = 1
         formatter.minimumFractionDigits = 0
+        let percentageString = formatter.string(from: NSDecimalNumber(decimal: rounded)) ?? "0"
         
-        let percentageString = formatter.string(from: NSDecimalNumber(decimal: percentage)) ?? "0"
-        return meansData.isBelow 
-            ? "You are living \(percentageString)% below your means"
-            : "You are living \(percentageString)% above your means"
+        if meansData.isBelow {
+            return ("This month you're living \(percentageString)% below your means", .green)
+        }
+        return ("This month you're living \(percentageString)% above your means", .orange)
     }
     
     private var insights: [CalendarInsight] {
-        let currentStats = monthStats(for: currentMonth)
+        let remainingBills = unpaidBills(for: currentMonth)
+        let upcomingBills = upcomingSevenDayBills
         return [
             CalendarInsight(title: "Remaining",
-                            subtitle: monthFormatter.string(from: currentMonth),
-                            amount: currentStats.remaining,
+                            billCount: remainingBills.count,
+                            amount: totalAmount(of: remainingBills),
                             tint: .accentColor),
             CalendarInsight(title: "Next 7 days",
-                            subtitle: "Projected outflow",
-                            amount: upcomingSevenDayOutflow,
+                            billCount: upcomingBills.count,
+                            amount: totalAmount(of: upcomingBills),
                             tint: .orange)
         ]
     }
@@ -459,14 +470,23 @@ struct CalendarTabView: View {
         return allOccurrences
     }
 
-    private var upcomingSevenDayOutflow: Decimal {
+    private func unpaidBills(for month: Date) -> [Bill] {
+        billViewModel.fetchAllBillsForMonth(month).filter { !$0.isPaid }
+    }
+    
+    private func totalAmount(of bills: [Bill]) -> Decimal {
+        bills.reduce(.zero) { $0 + ($1.amount?.decimalValue ?? .zero) }
+    }
+    
+    private func totalAmount(of occurrences: [BillOccurrence]) -> Decimal {
+        occurrences.reduce(.zero) { $0 + ($1.bill.amount?.decimalValue ?? .zero) }
+    }
+    
+    private var upcomingSevenDayBills: [BillOccurrence] {
         let start = calendar.startOfDay(for: Date())
-        guard let end = calendar.date(byAdding: .day, value: 7, to: start) else { return .zero }
+        guard let end = calendar.date(byAdding: .day, value: 7, to: start) else { return [] }
         let interval = DateInterval(start: start, end: end)
-        return occurrences(in: interval).reduce(Decimal.zero) { partial, occurrence in
-            if occurrence.bill.isPaid { return partial }
-            return partial + (occurrence.bill.amount?.decimalValue ?? .zero)
-        }
+        return occurrences(in: interval).filter { !$0.bill.isPaid }
     }
     
     // MARK: - Selection & Drawer

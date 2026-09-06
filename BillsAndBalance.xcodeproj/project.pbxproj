@@ -17,6 +17,8 @@
 		DE57A1042F08AA0002 /* StatementClearImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE57A1032F08AA0002 /* StatementClearImportSheet.swift */; };
 		DE57B0012F08BB0001 /* TransactionCSVParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE57B0022F08BB0001 /* TransactionCSVParser.swift */; };
 		DE57E0052F08EE0001 /* FeeParsing.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE57E0042F08EE0001 /* FeeParsing.swift */; };
+		DE71A2012FDC9912004756CF /* MoneyFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE71A1012FDC9911004756CF /* MoneyFormatting.swift */; };
+		DE71A2022FDC9914004756CF /* FormInputComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE71A1022FDC9913004756CF /* FormInputComponents.swift */; };
 		DE57F0012F09FF0001 /* LiveDateTimeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE57F0022F09FF0001 /* LiveDateTimeView.swift */; };
 		DE5E0D092FDC8C0A004756CF /* SupabaseSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5E0D082FDC8C0A004756CF /* SupabaseSupport.swift */; };
 		DE5E0D0B2FDC8C24004756CF /* CoreDataConvenience.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5E0D0A2FDC8C24004756CF /* CoreDataConvenience.swift */; };
@@ -37,6 +39,12 @@
 		DE61A20A2FDC910A004756CF /* LedgerTransactionRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61A10A2FDC910A004756CF /* LedgerTransactionRow.swift */; };
 		DE61A20B2FDC910B004756CF /* ActivityShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61A10B2FDC910B004756CF /* ActivityShareSheet.swift */; };
 		DE65A2012FDC9802004756CF /* UsdBtcShareCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE65A1012FDC9801004756CF /* UsdBtcShareCard.swift */; };
+		DE66A2012FDC9A02004756CF /* AppLockManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE66A1012FDC9A01004756CF /* AppLockManager.swift */; };
+		DE66A2022FDC9A04004756CF /* SampleDataSeeder.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE66A1022FDC9A03004756CF /* SampleDataSeeder.swift */; };
+		DE66A2032FDC9A06004756CF /* UsdBtcBacktestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE66A1032FDC9A05004756CF /* UsdBtcBacktestView.swift */; };
+		DE67A2012FDC9B02004756CF /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = DE67A1012FDC9B01004756CF /* PrivacyInfo.xcprivacy */; };
+		DE67A2022FDC9B04004756CF /* AppLegal.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE67A1022FDC9B03004756CF /* AppLegal.swift */; };
+		DE67A2032FDC9B06004756CF /* PrivacyPolicyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE67A1032FDC9B05004756CF /* PrivacyPolicyView.swift */; };
 		DE61B2022FDC9202004756CF /* MoneyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61B1022FDC9202004756CF /* MoneyLogicTests.swift */; };
 		DE7A5C6A2EC60BD700A67202 /* BitcoinPriceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7A5C692EC60BD700A67202 /* BitcoinPriceService.swift */; };
 		DE62C2012FDC9502004756CF /* FallingCurrencyAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE62C1012FDC9501004756CF /* FallingCurrencyAnimation.swift */; };
@@ -90,6 +98,8 @@
 		DE57A1032F08AA0002 /* StatementClearImportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatementClearImportSheet.swift; sourceTree = "<group>"; };
 		DE57B0022F08BB0001 /* TransactionCSVParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransactionCSVParser.swift; sourceTree = "<group>"; };
 		DE57E0042F08EE0001 /* FeeParsing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeeParsing.swift; sourceTree = "<group>"; };
+		DE71A1012FDC9911004756CF /* MoneyFormatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyFormatting.swift; sourceTree = "<group>"; };
+		DE71A1022FDC9913004756CF /* FormInputComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormInputComponents.swift; sourceTree = "<group>"; };
 		DE57F0022F09FF0001 /* LiveDateTimeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveDateTimeView.swift; sourceTree = "<group>"; };
 		DE5E0D082FDC8C0A004756CF /* SupabaseSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseSupport.swift; sourceTree = "<group>"; };
 		DE5E0D0A2FDC8C24004756CF /* CoreDataConvenience.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreDataConvenience.swift; sourceTree = "<group>"; };
@@ -110,6 +120,12 @@
 		DE61A10A2FDC910A004756CF /* LedgerTransactionRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerTransactionRow.swift; sourceTree = "<group>"; };
 		DE61A10B2FDC910B004756CF /* ActivityShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityShareSheet.swift; sourceTree = "<group>"; };
 		DE65A1012FDC9801004756CF /* UsdBtcShareCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsdBtcShareCard.swift; sourceTree = "<group>"; };
+		DE66A1012FDC9A01004756CF /* AppLockManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLockManager.swift; sourceTree = "<group>"; };
+		DE66A1022FDC9A03004756CF /* SampleDataSeeder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleDataSeeder.swift; sourceTree = "<group>"; };
+		DE66A1032FDC9A05004756CF /* UsdBtcBacktestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsdBtcBacktestView.swift; sourceTree = "<group>"; };
+		DE67A1012FDC9B01004756CF /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		DE67A1022FDC9B03004756CF /* AppLegal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLegal.swift; sourceTree = "<group>"; };
+		DE67A1032FDC9B05004756CF /* PrivacyPolicyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyPolicyView.swift; sourceTree = "<group>"; };
 		DE61A10C2FDC910C004756CF /* BillsAndBalance.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BillsAndBalance.entitlements; sourceTree = "<group>"; };
 		DE61B1012FDC9201004756CF /* BillsAndBalanceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BillsAndBalanceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		DE61B1022FDC9202004756CF /* MoneyLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyLogicTests.swift; sourceTree = "<group>"; };
@@ -178,6 +194,8 @@
 				DE546C2C2F04AEC00048E56 /* ReportsView.swift */,
 				DE546C2E2F04AEC00048E56 /* ReportsViewModel.swift */,
 				DE57E0042F08EE0001 /* FeeParsing.swift */,
+				DE71A1012FDC9911004756CF /* MoneyFormatting.swift */,
+				DE71A1022FDC9913004756CF /* FormInputComponents.swift */,
 				DE9A1B732ECA1C1400C38E04 /* ManageAccountsView.swift */,
 				DE9A1B712EC976AA00C38E04 /* ShakeDetector.swift */,
 				DE7A5C692EC60BD700A67202 /* BitcoinPriceService.swift */,
@@ -209,6 +227,11 @@
 				DE61A10A2FDC910A004756CF /* LedgerTransactionRow.swift */,
 				DE61A10B2FDC910B004756CF /* ActivityShareSheet.swift */,
 				DE65A1012FDC9801004756CF /* UsdBtcShareCard.swift */,
+				DE66A1012FDC9A01004756CF /* AppLockManager.swift */,
+				DE66A1022FDC9A03004756CF /* SampleDataSeeder.swift */,
+				DE66A1032FDC9A05004756CF /* UsdBtcBacktestView.swift */,
+				DE67A1022FDC9B03004756CF /* AppLegal.swift */,
+				DE67A1032FDC9B05004756CF /* PrivacyPolicyView.swift */,
 				DE61A10C2FDC910C004756CF /* BillsAndBalance.entitlements */,
 				DE61B10B2FDC920B004756CF /* BillsAndBalanceTests */,
 				DE5E0D082FDC8C0A004756CF /* SupabaseSupport.swift */,
@@ -287,6 +310,7 @@
 			children = (
 				DE7C839A2EBAF78000880E97 /* BillsAndBalance-Bridging-Header.h */,
 				DED0AAA82EBCC41000EF3BD6 /* Assets.xcassets */,
+				DE67A1012FDC9B01004756CF /* PrivacyInfo.xcprivacy */,
 			);
 			name = Resources;
 			sourceTree = "<group>";
@@ -404,6 +428,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				DED0AAA92EBCC41000EF3BD6 /* Assets.xcassets in Resources */,
+				DE67A2012FDC9B02004756CF /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -461,6 +486,8 @@
 				DE57A1042F08AA0002 /* StatementClearImportSheet.swift in Sources */,
 				DE57B0012F08BB0001 /* TransactionCSVParser.swift in Sources */,
 				DE57E0052F08EE0001 /* FeeParsing.swift in Sources */,
+				DE71A2012FDC9912004756CF /* MoneyFormatting.swift in Sources */,
+				DE71A2022FDC9914004756CF /* FormInputComponents.swift in Sources */,
 				DE61A2012FDC9101004756CF /* RecurrenceCalculator.swift in Sources */,
 				DE61A2022FDC9102004756CF /* DuplicateBillGuard.swift in Sources */,
 				DE61A2032FDC9103004756CF /* BalanceMath.swift in Sources */,
@@ -478,6 +505,11 @@
 				DE61A20A2FDC910A004756CF /* LedgerTransactionRow.swift in Sources */,
 				DE61A20B2FDC910B004756CF /* ActivityShareSheet.swift in Sources */,
 				DE65A2012FDC9802004756CF /* UsdBtcShareCard.swift in Sources */,
+				DE66A2012FDC9A02004756CF /* AppLockManager.swift in Sources */,
+				DE66A2022FDC9A04004756CF /* SampleDataSeeder.swift in Sources */,
+				DE66A2032FDC9A06004756CF /* UsdBtcBacktestView.swift in Sources */,
+				DE67A2022FDC9B04004756CF /* AppLegal.swift in Sources */,
+				DE67A2032FDC9B06004756CF /* PrivacyPolicyView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -638,7 +670,9 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Bills & Balance";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Lock Bills & Balance so only you can see your accounts and bills.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -673,7 +707,9 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Bills & Balance";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Lock Bills & Balance so only you can see your accounts and bills.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

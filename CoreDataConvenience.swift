@@ -77,6 +77,14 @@ extension Account {
         set { setValue(newValue, forKey: "currency") }
     }
 
+    var isDigitalWallet: Bool {
+        (type ?? "").lowercased() == "digital wallet"
+    }
+
+    var isBitcoinDigitalWallet: Bool {
+        isDigitalWallet && currencyCode == "BTC" && !isHiddenFlag
+    }
+
     var feePercentageDecimal: Decimal {
         get { (value(forKey: "feePercentage") as? NSDecimalNumber)?.decimalValue ?? 0 }
         set { setValue(NSDecimalNumber(decimal: newValue), forKey: "feePercentage") }
