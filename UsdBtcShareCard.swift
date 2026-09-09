@@ -60,8 +60,7 @@ struct UsdBtcShareCard: View {
                 .padding(.top, 18)
 
             HStack(spacing: 14) {
-                legendDot(color: .white.opacity(0.85), title: "USD")
-                legendDot(color: bitcoinOrange, title: "BTC today")
+                legendDot(color: bitcoinOrange, title: "Sats needed")
             }
             .padding(.top, 10)
 
@@ -72,18 +71,18 @@ struct UsdBtcShareCard: View {
                 let less = change.percentLess >= 0
                 Text("\(percent)%")
                     .font(.system(size: 44, weight: .bold, design: .rounded))
-                    .foregroundStyle(less ? bitcoinOrange : .white)
+                    .foregroundStyle(less ? .green : .white)
                     .monospacedDigit()
                 Text(less
-                     ? "less Bitcoin than \(change.years) years ago"
-                     : "more Bitcoin than \(change.years) years ago")
+                     ? "less Bitcoin to pay the same bill"
+                     : "more Bitcoin to pay the same bill")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(Color.white.opacity(0.72))
                     .padding(.top, 2)
             }
 
             if let change, change.percentLess > 0 {
-                Text("Same dollars. Fewer sats over time.")
+                Text("Deflation: Same dollars. Fewer sats over time.")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Color.white.opacity(0.38))
                     .padding(.top, 12)
@@ -136,8 +135,8 @@ struct UsdBtcComparisonChart: View {
     let months: [UsdBtcMonthPoint]
     var style: Style = .share
 
-    private var usdLineColor: Color {
-        style == .share ? Color.white.opacity(0.88) : Color.primary.opacity(0.82)
+    private var lineColor: Color {
+        bitcoinOrange
     }
 
     private var gridColor: Color {
@@ -148,53 +147,55 @@ struct UsdBtcComparisonChart: View {
         style == .share ? Color.white.opacity(0.4) : Color.secondary
     }
 
+    private func formatSats(_ sats: Double) -> String {
+        if sats >= 1_000_000 {
+            return String(format: "%.1fM", sats / 1_000_000)
+        } else if sats >= 1_000 {
+            return String(format: "%.0fK", sats / 1_000)
+        } else {
+            return String(format: "%.0f", sats)
+        }
+    }
+
     var body: some View {
         Canvas { context, size in
-            let usd = months.map { NSDecimalNumber(decimal: $0.usdExpenses).doubleValue }
-            let btcNow = months.map { NSDecimalNumber(decimal: $0.btcValueNow).doubleValue }
-            guard usd.count > 1, usd.count == btcNow.count else { return }
+            // Convert BTC amounts to sats (1 BTC = 100,000,000 sats)
+            let satsNeeded = months.map { NSDecimalNumber(decimal: $0.btcAtTime * 100_000_000).doubleValue }
+            guard satsNeeded.count > 1 else { return }
 
-            let maxV = max(usd.max() ?? 1, btcNow.max() ?? 1) * 1.08
+            let maxV = (satsNeeded.max() ?? 1) * 1.08
             let minV = 0.0
             let span = max(maxV - minV, 1)
             let leading: CGFloat = 4
-            let trailing: CGFloat = 4
+            let trailing: CGFloat = style == .inApp ? 42 : 4
             let top: CGFloat = 8
             let bottom: CGFloat = 22
             let plot = CGRect(x: leading, y: top, width: size.width - leading - trailing, height: size.height - top - bottom)
 
             func point(index: Int, value: Double) -> CGPoint {
-                let x = plot.minX + plot.width * CGFloat(index) / CGFloat(usd.count - 1)
+                let x = plot.minX + plot.width * CGFloat(index) / CGFloat(satsNeeded.count - 1)
                 let y = plot.maxY - plot.height * CGFloat((value - minV) / span)
                 return CGPoint(x: x, y: y)
             }
 
+            // Grid lines
             var grid = Path()
-            for step in 0...3 {
-                let y = plot.maxY - plot.height * CGFloat(step) / 3
+            let gridSteps = 4
+            for step in 0...gridSteps {
+                let y = plot.maxY - plot.height * CGFloat(step) / CGFloat(gridSteps)
                 grid.move(to: CGPoint(x: plot.minX, y: y))
                 grid.addLine(to: CGPoint(x: plot.maxX, y: y))
             }
             context.stroke(grid, with: .color(gridColor), lineWidth: 1)
 
-            let btcPoints = btcNow.enumerated().map { point(index: $0.offset, value: $0.element) }
-            let usdPoints = usd.enumerated().map { point(index: $0.offset, value: $0.element) }
+            let satsPoints = satsNeeded.enumerated().map { point(index: $0.offset, value: $0.element) }
 
-            if style == .inApp, usdPoints.count == btcPoints.count, usdPoints.count > 1 {
-                var gap = Path()
-                gap.move(to: usdPoints[0])
-                for p in usdPoints.dropFirst() { gap.addLine(to: p) }
-                for p in btcPoints.reversed() { gap.addLine(to: p) }
-                gap.closeSubpath()
-                let btcCheaper = (btcNow.last ?? 0) < (usd.last ?? 0)
-                context.fill(gap, with: .color((btcCheaper ? Color.green : bitcoinOrange).opacity(0.18)))
-            }
-
+            // Area fill under the line
             var area = Path()
-            if let first = btcPoints.first, let last = btcPoints.last {
+            if let first = satsPoints.first, let last = satsPoints.last {
                 area.move(to: CGPoint(x: first.x, y: plot.maxY))
                 area.addLine(to: first)
-                for p in btcPoints.dropFirst() { area.addLine(to: p) }
+                for p in satsPoints.dropFirst() { area.addLine(to: p) }
                 area.addLine(to: CGPoint(x: last.x, y: plot.maxY))
                 area.closeSubpath()
             }
@@ -207,25 +208,36 @@ struct UsdBtcComparisonChart: View {
                 )
             )
 
-            var btcLine = Path()
-            if let first = btcPoints.first {
-                btcLine.move(to: first)
-                for p in btcPoints.dropFirst() { btcLine.addLine(to: p) }
+            // Main line showing sats needed (decreasing over time)
+            var satsLine = Path()
+            if let first = satsPoints.first {
+                satsLine.move(to: first)
+                for p in satsPoints.dropFirst() { satsLine.addLine(to: p) }
             }
-            context.stroke(btcLine, with: .color(bitcoinOrange), style: StrokeStyle(lineWidth: 2.6, lineCap: .round, lineJoin: .round))
+            context.stroke(satsLine, with: .color(lineColor), style: StrokeStyle(lineWidth: 2.6, lineCap: .round, lineJoin: .round))
 
-            var usdLine = Path()
-            if let first = usdPoints.first {
-                usdLine.move(to: first)
-                for p in usdPoints.dropFirst() { usdLine.addLine(to: p) }
-            }
-            context.stroke(usdLine, with: .color(usdLineColor), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-
-            if let last = btcPoints.last {
+            // Endpoint dot
+            if let last = satsPoints.last {
                 let dot = Path(ellipseIn: CGRect(x: last.x - 3.5, y: last.y - 3.5, width: 7, height: 7))
                 context.fill(dot, with: .color(bitcoinOrange))
             }
 
+            // Y-axis labels (sats) on the right side for inApp style
+            if style == .inApp {
+                for step in 0...gridSteps {
+                    let value = minV + (maxV - minV) * Double(step) / Double(gridSteps)
+                    let y = plot.maxY - plot.height * CGFloat(step) / CGFloat(gridSteps)
+                    let text = formatSats(value)
+                    let resolved = context.resolve(
+                        Text(text)
+                            .font(.caption2)
+                            .foregroundColor(labelColor)
+                    )
+                    context.draw(resolved, at: CGPoint(x: size.width - 4, y: y), anchor: .trailing)
+                }
+            }
+
+            // X-axis labels (years)
             let labels = yearLabels()
             for (xRatio, text) in labels {
                 let resolved = context.resolve(
@@ -269,7 +281,7 @@ struct UsdBtcActivityCard: View {
     var body: some View {
         Button(action: onOpen) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("USD vs Bitcoin")
+                Text("Bitcoin Deflation")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 if let change {
@@ -284,8 +296,7 @@ struct UsdBtcActivityCard: View {
                         .opacity(appeared ? 1 : 0)
                 }
                 HStack(spacing: 14) {
-                    legendDot(Color.primary.opacity(0.82), title: "USD")
-                    legendDot(Color(red: 0.969, green: 0.576, blue: 0.102), title: "BTC today")
+                    legendDot(Color(red: 0.969, green: 0.576, blue: 0.102), title: "Sats needed")
                     Spacer()
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
