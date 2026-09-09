@@ -33,7 +33,7 @@ struct UsdBtcBacktestView: View {
                 .padding(16)
             }
             .background(Color(.systemGroupedBackground).ignoresSafeArea())
-            .navigationTitle("USD vs Bitcoin")
+            .navigationTitle("Bitcoin Deflation")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -129,23 +129,99 @@ struct UsdBtcBacktestView: View {
             Text(report.trackedBillNames.joined(separator: " · "))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            HStack {
-                backtestStat(title: "USD", value: currencyFormatter.string(from: report.totalUsd as NSDecimalNumber) ?? "$0")
-                Spacer()
-                backtestStat(title: "At payment", value: currencyFormatter.string(from: report.totalBtcAtTime as NSDecimalNumber) ?? "$0")
-                Spacer()
-                backtestStat(title: "BTC today", value: currencyFormatter.string(from: report.totalBtcValueNow as NSDecimalNumber) ?? "$0")
+            
+            let firstSats = report.months.first?.btcAtTime ?? 0
+            let lastSats = report.months.last?.btcAtTime ?? 0
+            let totalFirstSats = firstSats * 100_000_000
+            let totalLastSats = lastSats * 100_000_000
+            let reduction = firstSats > 0 ? ((firstSats - lastSats) / firstSats) * 100 : 0
+            
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    backtestStat(title: "Bill amount", value: currencyFormatter.string(from: report.totalUsd as NSDecimalNumber) ?? "$0")
+                    Spacer()
+                }
+                
+                HStack(alignment: .top, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Started")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        if let first = report.months.first {
+                            Text(formatSatsCompact(totalFirstSats))
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(Color(red: 0.969, green: 0.576, blue: 0.102))
+                                .monospacedDigit()
+                            Text(yearLabel(for: first.month))
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    
+                    Image(systemName: "arrow.right")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 18)
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Today")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        if let last = report.months.last {
+                            Text(formatSatsCompact(totalLastSats))
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(Color(red: 0.969, green: 0.576, blue: 0.102))
+                                .monospacedDigit()
+                            Text(yearLabel(for: last.month))
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    
+                    Spacer()
+                    
+                    if reduction > 0 {
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Text("Reduction")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text(String(format: "%.1f%%", (reduction as NSDecimalNumber).doubleValue))
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(.green)
+                                .monospacedDigit()
+                            Text("less sats")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
             }
         }
         .padding(16)
         .background(cardBackground)
     }
+    
+    private func formatSatsCompact(_ sats: Decimal) -> String {
+        let satsDouble = (sats as NSDecimalNumber).doubleValue
+        if satsDouble >= 1_000_000 {
+            return String(format: "%.2fM", satsDouble / 1_000_000)
+        } else if satsDouble >= 1_000 {
+            return String(format: "%.1fK", satsDouble / 1_000)
+        } else {
+            return String(format: "%.0f", satsDouble)
+        }
+    }
+    
+    private func yearLabel(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy"
+        return formatter.string(from: date)
+    }
 
     private func chartSection(_ report: UsdBtcReportData) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 14) {
-                chartLegendSwatch(color: Color.primary.opacity(0.82), title: "USD paid")
-                chartLegendSwatch(color: Color(red: 0.969, green: 0.576, blue: 0.102), title: "BTC today")
+                chartLegendSwatch(color: Color(red: 0.969, green: 0.576, blue: 0.102), title: "Sats needed to pay bill")
             }
             UsdBtcComparisonChart(months: report.months, style: .inApp)
                 .frame(height: 180)
@@ -167,7 +243,7 @@ struct UsdBtcBacktestView: View {
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Pay a dollar bill in Bitcoin (sats) to see a USD vs BTC history. Months without imported payments use the current amount and historical Bitcoin prices.")
+            Text("Pay a dollar bill in Bitcoin (sats) to see Bitcoin deflation over time. The chart shows how many fewer sats you need to pay the same bill as Bitcoin's purchasing power increases.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
