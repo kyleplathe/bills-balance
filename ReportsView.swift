@@ -189,14 +189,46 @@ struct ReportsView: View {
     }
 
     private var pageAnchors: [Date] {
-        var dates = [
-            reportsViewModel.adjacentAnchorDate(offset: -1),
-            reportsViewModel.currentAnchorDate()
-        ]
+        var dates: [Date] = []
+        let current = reportsViewModel.currentAnchorDate()
+        
+        // Add current period first
+        dates.append(current)
+        
+        // Go back in time until we find 3 consecutive periods with no data
+        var offset = -1
+        var consecutiveEmptyPeriods = 0
+        let maxConsecutiveEmpty = 3
+        
+        while consecutiveEmptyPeriods < maxConsecutiveEmpty && offset > -1000 {
+            let date = reportsViewModel.adjacentAnchorDate(offset: offset)
+            
+            // Stop if we've reached a date more than 10 years in the past
+            if let tenYearsAgo = Calendar.current.date(byAdding: .year, value: -10, to: Date()),
+               date < tenYearsAgo {
+                break
+            }
+            
+            let hasData = reportsViewModel.hasDataForPeriod(walletPeriod, date: date)
+            
+            if hasData {
+                dates.insert(date, at: 0)
+                consecutiveEmptyPeriods = 0
+            } else {
+                consecutiveEmptyPeriods += 1
+            }
+            
+            offset -= 1
+        }
+        
+        // Add next period if it's not in the future and has data
         let next = reportsViewModel.adjacentAnchorDate(offset: 1)
         if !reportsViewModel.isAnchorAfterPresentPeriod(next) {
-            dates.append(next)
+            if reportsViewModel.hasDataForPeriod(walletPeriod, date: next) {
+                dates.append(next)
+            }
         }
+        
         return dates
     }
 
