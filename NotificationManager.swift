@@ -124,7 +124,44 @@ class NotificationManager: ObservableObject {
 
     func cancelNotification(for bill: Bill) {
         guard let billId = bill.id else { return }
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [billId.uuidString])
+        let identifiers = [
+            billId.uuidString,
+            AutoPayShortfall.notificationIdentifier(billId: billId)
+        ]
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: identifiers)
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: identifiers)
+    }
+
+    func deliverShortfallNotification(for bill: Bill, accountName: String, reserve: Decimal) {
+        guard let billId = bill.id,
+              let billName = bill.name else { return }
+        let identifier = AutoPayShortfall.notificationIdentifier(billId: billId)
+
+        UNUserNotificationCenter.current().getPendingNotificationRequests { pending in
+            if pending.contains(where: { $0.identifier == identifier }) { return }
+            UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
+                if delivered.contains(where: { $0.request.identifier == identifier }) { return }
+
+                let content = UNMutableNotificationContent()
+                content.title = "Auto-Pay Held"
+                content.body = AutoPayShortfall.notificationBody(
+                    billName: billName,
+                    accountName: accountName,
+                    reserve: reserve
+                )
+                content.sound = .default
+
+                let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+                let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
+                UNUserNotificationCenter.current().add(request) { error in
+                    #if DEBUG
+                    if let error {
+                        print("Error delivering shortfall notification: \(error.localizedDescription)")
+                    }
+                    #endif
+                }
+            }
+        }
     }
 
     func deliverAutoPayNotification(for bill: Bill) {

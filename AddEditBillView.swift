@@ -131,10 +131,14 @@ struct AddEditBillView: View {
                             }
                         }
                     Toggle("Auto-Pay", isOn: $autoPay)
-                    if accountViewModel.hasActiveBitcoinDigitalWallet {
+                    if accountViewModel.hasActiveBitcoinDigitalWallet, !paysFromBitcoinWallet {
                         Toggle("Track in Bitcoin", isOn: $trackInBitcoin)
                     }
                     NotesField(text: $notes)
+                } footer: {
+                    if paysFromBitcoinWallet {
+                        Text("Tracked because this pays from your Bitcoin wallet.")
+                    }
                 }
             }
             .navigationTitle(bill == nil ? "Add Bill" : "Edit Bill")
@@ -205,7 +209,7 @@ struct AddEditBillView: View {
                 }
             }
             .sheet(isPresented: $showingAccountEditor) {
-                AccountEditorSheet(account: nil) { name, type, startingBalance, isHidden, currency, btcDisplayFormat, feePercentage, startingBalanceUSD, startingBalanceBTCPrice in
+                AccountEditorSheet(account: nil) { name, type, startingBalance, isHidden, currency, btcDisplayFormat, feePercentage, startingBalanceUSD, startingBalanceBTCPrice, reserveBalance in
                     accountViewModel.addAccount(name: name,
                                                 type: type,
                                                 startingBalance: startingBalance,
@@ -214,7 +218,8 @@ struct AddEditBillView: View {
                                                 btcDisplayFormat: btcDisplayFormat,
                                                 feePercentage: feePercentage,
                                                 startingBalanceUSD: startingBalanceUSD,
-                                                startingBalanceBTCPrice: startingBalanceBTCPrice)
+                                                startingBalanceBTCPrice: startingBalanceBTCPrice,
+                                                reserveBalance: reserveBalance)
                     accountViewModel.fetchAccounts()
                     if let created = accountViewModel.accounts.first(where: { $0.name == name }), let id = created.id {
                         paymentMethod = .debtAccount(id)
@@ -295,6 +300,10 @@ struct AddEditBillView: View {
             showingAccountEditor = true
         default:
             paymentMethodBeforeAdd = newValue
+            if case .debtAccount(let accountId) = newValue,
+               accountViewModel.account(with: accountId)?.isBitcoinDigitalWallet == true {
+                trackInBitcoin = true
+            }
         }
     }
 
@@ -374,11 +383,22 @@ struct AddEditBillView: View {
                 paymentCard: cardName,
                 account: account,
                 category: category.isEmpty ? nil : category,
-                trackInBitcoin: trackInBitcoin
+                trackInBitcoin: resolvedTrackInBitcoin
             )
             HapticManager.shared.buttonTapped()
             dismiss()
         }
+    }
+
+    private var paysFromBitcoinWallet: Bool {
+        if case .debtAccount(let accountId) = paymentMethod {
+            return accountViewModel.account(with: accountId)?.isBitcoinDigitalWallet == true
+        }
+        return false
+    }
+
+    private var resolvedTrackInBitcoin: Bool {
+        paysFromBitcoinWallet || trackInBitcoin
     }
 
     private func extractPaymentMethod() -> (cardName: String?, account: Account?) {
@@ -439,7 +459,7 @@ struct AddEditBillView: View {
             account: account,
             applyToSeries: applyToSeries,
             category: category.isEmpty ? nil : category,
-            trackInBitcoin: trackInBitcoin
+            trackInBitcoin: resolvedTrackInBitcoin
         )
 
         pendingAmount = nil

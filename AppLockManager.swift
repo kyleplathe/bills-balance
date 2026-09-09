@@ -75,22 +75,22 @@ struct AppLockOverlay: View {
                 .fill(.ultraThinMaterial)
                 .ignoresSafeArea()
 
-            VStack(spacing: 20) {
-                Image(systemName: "lock.fill")
-                    .font(.system(size: 44, weight: .semibold))
-                    .foregroundStyle(.primary)
-                Text("Bills & Balance is Locked")
-                    .font(.title3.weight(.semibold))
+            VStack(spacing: 22) {
+                BrandLockup(markSize: 84, nameSize: 24)
+                Text("Locked")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
                 Button {
                     Task { await appLockManager.unlock() }
                 } label: {
                     Label("Unlock", systemImage: "faceid")
-                        .font(.headline)
                         .frame(maxWidth: 220)
-                        .frame(height: 48)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(Brand.action)
             }
+            .padding(.horizontal, 32)
         }
         .task {
             await appLockManager.unlock()

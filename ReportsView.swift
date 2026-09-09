@@ -23,6 +23,7 @@ struct ReportsView: View {
     @State private var expandedCategories: Set<String> = []
     @State private var selectedTransaction: LedgerEntry?
     @State private var showCategorizeReview = false
+    @State private var showingUsdBtcBacktest = false
     @State private var selectedAnchor: Date?
     @State private var isRecenteringPager = false
 
@@ -80,6 +81,13 @@ struct ReportsView: View {
                             Label("Review Uncategorized (\(uncatCount))", systemImage: "tag")
                         }
                     }
+                    if reportsViewModel.showsUsdBtcEasterEgg {
+                        Button {
+                            showingUsdBtcBacktest = true
+                        } label: {
+                            Label("USD vs Bitcoin", systemImage: "chart.line.uptrend.xyaxis")
+                        }
+                    }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                         .font(.title2)
@@ -117,6 +125,16 @@ struct ReportsView: View {
             CategorizeImportsView()
                 .environmentObject(accountViewModel)
                 .environmentObject(categoryManager)
+        }
+        .sheet(isPresented: $showingUsdBtcBacktest) {
+            UsdBtcBacktestView()
+                .environmentObject(reportsViewModel)
+                .environmentObject(bitcoinPriceService)
+        }
+        .task {
+            if reportsViewModel.hasActiveBitcoinDigitalWallet {
+                await reportsViewModel.loadUsdBtcReport()
+            }
         }
         .onAppear(perform: handleAppear)
         .onChange(of: selectedAnchor) { _, newValue in
@@ -263,6 +281,11 @@ struct ReportsView: View {
             isCurrentPeriodInProgress: snapshot.isCurrentPeriodInProgress,
             anchorDate: snapshot.anchorDate
         )
+        if snapshot.period == .year, reportsViewModel.showsUsdBtcEasterEgg {
+            UsdBtcActivityCard(appeared: appeared) {
+                showingUsdBtcBacktest = true
+            }
+        }
         WalletIncomeFeesRows(
             income: snapshot.income,
             creditCardSpending: snapshot.creditCardSpending,

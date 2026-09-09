@@ -445,6 +445,29 @@ final class RecurrenceCoreDataTests: XCTestCase {
         XCTAssertEqual(all.filter { !$0.isPaid }.count, 1, "Paid recurring bills without a seriesId must still grow a next occurrence")
         XCTAssertNotNil(bill.seriesId)
     }
+
+    func testBillPayMatchesUniqueAmountWhenPayeeNameDiffers() {
+        let due = Calendar.current.startOfDay(for: Date())
+        guard let bill = billViewModel.addBill(name: "Mortgage", amount: 2150, dueDate: due, recurrenceType: "monthly", recurrenceInterval: 1) else {
+            return XCTFail("Expected bill")
+        }
+        let matched = BillPayMatcher.match(payee: "Kyle Plathe", amount: 2150, on: due, among: [bill])
+        XCTAssertEqual(matched?.objectID, bill.objectID)
+    }
+
+    func testBillPayDoesNotGuessWhenTwoBillsShareAmount() {
+        let due = Calendar.current.startOfDay(for: Date())
+        guard let mortgage = billViewModel.addBill(name: "Mortgage", amount: 2150, dueDate: due, recurrenceType: "monthly", recurrenceInterval: 1),
+              let hoa = billViewModel.addBill(name: "HOA", amount: 2150, dueDate: due, recurrenceType: "monthly", recurrenceInterval: 1) else {
+            return XCTFail("Expected bills")
+        }
+        XCTAssertNil(BillPayMatcher.match(
+            payee: "Kyle Plathe",
+            amount: 2150,
+            on: due,
+            among: [mortgage, hoa]
+        ))
+    }
 }
 
 final class StrikeCSVParserTests: XCTestCase {
@@ -656,6 +679,129 @@ final class StatementImportMatchingTests: XCTestCase {
         tx.sourceReference = "abc-123"
         XCTAssertEqual(StatementImportMatching.matchingIndex(for: tx, in: existing, used: [], calendar: calendar), 0)
     }
+
+    func testTransferMatchOppositeSignWithinThreeDays() {
+        let counterparts = [
+            StatementImportMatching.TransferCounterpart(
+                uri: "x",
+                accountName: "Checking",
+                date: date(2026, 4, 10),
+                amount: Decimal(string: "500.00")!,
+                btcAmount: nil,
+                isCredit: false,
+                alreadyPaired: false
+            )
+        ]
+        XCTAssertEqual(
+            StatementImportMatching.transferMatchIndex(
+                usdAmount: Decimal(string: "500.00")!,
+                btcAmount: Decimal(string: "0.005")!,
+                isCredit: true,
+                date: date(2026, 4, 12),
+                in: counterparts,
+                used: [],
+                calendar: calendar
+            ),
+            0
+        )
+    }
+
+    func testTransferMatchIgnoresSameSignAndPaired() {
+        let counterparts = [
+            StatementImportMatching.TransferCounterpart(
+                uri: "a",
+                accountName: "Wallet",
+                date: date(2026, 4, 10),
+                amount: 200,
+                btcAmount: Decimal(string: "0.002"),
+                isCredit: true,
+                alreadyPaired: false
+            ),
+            StatementImportMatching.TransferCounterpart(
+                uri: "b",
+                accountName: "Checking",
+                date: date(2026, 4, 10),
+                amount: 200,
+                btcAmount: nil,
+                isCredit: false,
+                alreadyPaired: true
+            )
+        ]
+        XCTAssertNil(
+            StatementImportMatching.transferMatchIndex(
+                usdAmount: 200,
+                btcAmount: nil,
+                isCredit: true,
+                date: date(2026, 4, 10),
+                in: counterparts,
+                used: [],
+                calendar: calendar
+            )
+        )
+    }
+
+    func testTransferMatchPrefersBitcoinAmount() {
+        let counterparts = [
+            StatementImportMatching.TransferCounterpart(
+                uri: "usd-only",
+                accountName: "Checking",
+                date: date(2026, 4, 10),
+                amount: 100,
+                btcAmount: nil,
+                isCredit: false,
+                alreadyPaired: false
+            ),
+            StatementImportMatching.TransferCounterpart(
+                uri: "btc",
+                accountName: "Cold",
+                date: date(2026, 4, 10),
+                amount: 100,
+                btcAmount: Decimal(string: "0.001"),
+                isCredit: false,
+                alreadyPaired: false
+            )
+        ]
+        XCTAssertEqual(
+            StatementImportMatching.transferMatchIndex(
+                usdAmount: 100,
+                btcAmount: Decimal(string: "0.001")!,
+                isCredit: true,
+                date: date(2026, 4, 10),
+                in: counterparts,
+                used: [],
+                calendar: calendar
+            ),
+            1
+        )
+    }
+
+    func testSimilarTransactionsMatchTitleOrAmountAndKind() {
+        let mortgage = ParsedStatementTransaction(date: date(2026, 1, 1), title: "Kyle Plathe", amount: 2150, isCredit: false, kind: .billPay)
+        let bankName = ParsedStatementTransaction(date: date(2026, 2, 1), title: "Wells Fargo", amount: 2150, isCredit: false, kind: .billPay)
+        let coffee = ParsedStatementTransaction(date: date(2026, 1, 2), title: "Starbucks", amount: 6, isCredit: false, kind: .generic)
+        let ids = StatementImportMatching.similarTransactionIds(
+            to: mortgage,
+            originalTitle: "Kyle Plathe",
+            in: [mortgage, bankName, coffee],
+            originalTitles: [mortgage.id: "Kyle Plathe", bankName.id: "Wells Fargo", coffee.id: "Starbucks"]
+        )
+        XCTAssertEqual(ids, [bankName.id])
+    }
+
+    func testTitleRewritePersistsByNormalizedOriginal() {
+        let defaults = UserDefaults(suiteName: "ImportTitleRewriteTests")!
+        defaults.removePersistentDomain(forName: "ImportTitleRewriteTests")
+        ImportTitleRewriteStore.save(
+            originalTitle: "Kyle Plathe",
+            preferredTitle: "Mortgage",
+            category: "Housing",
+            defaults: defaults
+        )
+        let rewrite = ImportTitleRewriteStore.rewrite(for: "kyle  plathe", defaults: defaults)
+        XCTAssertEqual(rewrite?.preferredTitle, "Mortgage")
+        XCTAssertEqual(rewrite?.category, "Housing")
+        defaults.removePersistentDomain(forName: "ImportTitleRewriteTests")
+    }
 }
 
 final class ActivityLedgerRulesTests: XCTestCase {
@@ -834,6 +980,7 @@ final class BillBtcBacktestTests: XCTestCase {
         let change = BillBtcBacktest.bitcoinSpendChange(btcAmounts: early + late, monthCount: 48)
         XCTAssertEqual(change?.percentLess, Decimal(string: "0.75"))
         XCTAssertEqual(change?.years, 4)
+        XCTAssertEqual(BillBtcBacktest.changeSentence(change!), "Paid 75% less Bitcoin than 4 years ago")
     }
 
     func testMatchesByNameInMonth() {
@@ -1059,6 +1206,214 @@ final class NotificationScheduleTests: XCTestCase {
         let now = date(2026, 9, 6)
         XCTAssertNil(NotificationSchedule.reminderDate(dueDate: due, autoPay: false, now: now, calendar: calendar))
         XCTAssertNil(NotificationSchedule.reminderDate(dueDate: due, autoPay: true, now: now, calendar: calendar))
+    }
+}
+
+final class LivingMeansInsightTests: XCTestCase {
+    func testQuoteIsStableForAGivenDay() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let day = calendar.date(from: DateComponents(year: 2026, month: 3, day: 10))!
+        XCTAssertEqual(LivingMeansInsight.quote(on: day, calendar: calendar), LivingMeansInsight.quote(on: day, calendar: calendar))
+        let next = calendar.date(byAdding: .day, value: 1, to: day)!
+        XCTAssertNotEqual(LivingMeansInsight.quote(on: day, calendar: calendar), LivingMeansInsight.quote(on: next, calendar: calendar))
+    }
+
+    func testPaycheckIncomeTakesPriority() {
+        let means = LivingMeansInsight.means(
+            paycheckIncome: 4000,
+            trailingDeposits: [1000, 1000],
+            expenses: 3000
+        )
+        XCTAssertEqual(means?.source, .paycheck)
+        XCTAssertEqual(means?.isBelow, true)
+        XCTAssertEqual(means?.percentage, 25)
+        XCTAssertTrue(LivingMeansInsight.meansLine(means!).contains("below your means"))
+    }
+
+    func testTrailingDepositsWhenPaychecksAreZero() {
+        let means = LivingMeansInsight.means(
+            paycheckIncome: 0,
+            trailingDeposits: [3000, 3000, 3000],
+            expenses: 2000
+        )
+        XCTAssertEqual(means?.source, .trailingDeposits)
+        XCTAssertEqual(means?.isBelow, true)
+        XCTAssertTrue(LivingMeansInsight.meansLine(means!).contains("typical income"))
+    }
+
+    func testTooFewDepositsYieldsNoMeans() {
+        let means = LivingMeansInsight.means(
+            paycheckIncome: 0,
+            trailingDeposits: [5000],
+            expenses: 1000
+        )
+        XCTAssertNil(means)
+    }
+
+    func testTypicalMonthlyIncomeAveragesThreeMonths() {
+        let typical = LivingMeansInsight.typicalMonthlyIncome(from: [3000, 3000, 3000])
+        XCTAssertEqual(typical, 3000)
+    }
+}
+
+final class AutoPayShortfallTests: XCTestCase {
+    func testDebitIncludesWalletFee() {
+        let debit = AutoPayShortfall.debitAmount(billAmount: 100, feePercentage: 1.5)
+        XCTAssertEqual(debit, Decimal(string: "101.5"))
+    }
+
+    func testHoldWhenBelowReserve() {
+        let hold = AutoPayShortfall.wouldHold(
+            autoPay: true,
+            isPaid: false,
+            currencyCode: "USD",
+            currentBalance: 600,
+            billAmount: 200,
+            feePercentage: 0,
+            reserve: 500
+        )
+        XCTAssertTrue(hold)
+    }
+
+    func testProceedWhenReserveIsMet() {
+        let hold = AutoPayShortfall.wouldHold(
+            autoPay: true,
+            isPaid: false,
+            currencyCode: "USD",
+            currentBalance: 800,
+            billAmount: 200,
+            feePercentage: 0,
+            reserve: 500
+        )
+        XCTAssertFalse(hold)
+    }
+
+    func testHoldWhenBalanceWouldGoNegativeWithZeroReserve() {
+        let hold = AutoPayShortfall.wouldHold(
+            autoPay: true,
+            isPaid: false,
+            currencyCode: "USD",
+            currentBalance: 50,
+            billAmount: 80,
+            feePercentage: 0,
+            reserve: 0
+        )
+        XCTAssertTrue(hold)
+    }
+
+    func testSkipsNonUSDAndPaidBills() {
+        XCTAssertFalse(AutoPayShortfall.wouldHold(
+            autoPay: true,
+            isPaid: false,
+            currencyCode: "BTC",
+            currentBalance: 0,
+            billAmount: 100,
+            feePercentage: 0,
+            reserve: 0
+        ))
+        XCTAssertFalse(AutoPayShortfall.wouldHold(
+            autoPay: true,
+            isPaid: true,
+            currencyCode: "USD",
+            currentBalance: 10,
+            billAmount: 100,
+            feePercentage: 0,
+            reserve: 0
+        ))
+        XCTAssertFalse(AutoPayShortfall.wouldHold(
+            autoPay: false,
+            isPaid: false,
+            currencyCode: "USD",
+            currentBalance: 10,
+            billAmount: 100,
+            feePercentage: 0,
+            reserve: 0
+        ))
+    }
+
+    func testNotificationIdentifierIsStableAndDistinctFromBillId() {
+        let id = UUID()
+        XCTAssertEqual(AutoPayShortfall.notificationIdentifier(billId: id), "shortfall-\(id.uuidString)")
+        XCTAssertNotEqual(AutoPayShortfall.notificationIdentifier(billId: id), id.uuidString)
+    }
+
+    func testNotificationBodyMentionsReserve() {
+        let body = AutoPayShortfall.notificationBody(billName: "Rent", accountName: "Checking", reserve: 500)
+        XCTAssertTrue(body.contains("Rent"))
+        XCTAssertTrue(body.contains("Checking"))
+        XCTAssertTrue(body.contains("$500.00"))
+    }
+}
+
+@MainActor
+final class TransactionSuggestionTests: XCTestCase {
+    var persistence: PersistenceController!
+    var viewModel: AccountViewModel!
+
+    override func setUp() async throws {
+        persistence = PersistenceController(inMemory: true)
+        viewModel = AccountViewModel(context: persistence.container.viewContext)
+    }
+
+    private func makeAccount(_ name: String = "Checking") -> Account {
+        viewModel.addAccount(name: name, type: "checking", startingBalance: 1000)
+    }
+
+    @discardableResult
+    private func addEntry(
+        to account: Account,
+        title: String,
+        category: String?,
+        amount: Decimal = -12,
+        date: Date = Date()
+    ) -> LedgerEntry {
+        viewModel.addManualEntry(
+            to: account,
+            title: title,
+            btcAmount: nil,
+            usdAmount: amount,
+            btcPriceAtTransaction: nil,
+            date: date,
+            notes: nil,
+            isReconciled: true,
+            category: category,
+            isCreditOverride: amount >= 0
+        )
+    }
+
+    func testSuggestedTitlesMatchPrefixMostRecentFirstAndDedupeCase() {
+        let account = makeAccount()
+        addEntry(to: account, title: "Starbucks", category: "Food & Dining", date: Date().addingTimeInterval(-86_400))
+        addEntry(to: account, title: "starbucks", category: "Food & Dining", date: Date().addingTimeInterval(-3_600))
+        addEntry(to: account, title: "Strike", category: "Investments")
+
+        let suggestions = viewModel.suggestedTitles(prefix: "St")
+        XCTAssertEqual(suggestions.first, "Strike")
+        XCTAssertEqual(suggestions.filter { $0.lowercased() == "starbucks" }.count, 1)
+    }
+
+    func testSuggestedCategoryUsesLatestExactTitleAndIgnoresAmount() {
+        let account = makeAccount()
+        addEntry(to: account, title: "Starbucks", category: "Shopping", amount: -8, date: Date().addingTimeInterval(-86_400))
+        addEntry(to: account, title: "Starbucks", category: "Food & Dining", amount: -14)
+
+        XCTAssertEqual(viewModel.suggestedCategory(forTitle: "Starbucks"), "Food & Dining")
+        XCTAssertEqual(viewModel.suggestedCategory(forTitle: "Star"), "Food & Dining")
+        XCTAssertEqual(
+            CategorySuggester.suggest(for: "Starbucks", priorCategory: viewModel.suggestedCategory(forTitle: "Starbucks")),
+            "Food & Dining"
+        )
+    }
+
+    func testSuggestedTitlesAreSharedAcrossAccounts() {
+        let checking = makeAccount("Checking")
+        let card = viewModel.addAccount(name: "Card", type: "credit", startingBalance: 0)
+        addEntry(to: checking, title: "Netflix", category: "Subscriptions")
+
+        XCTAssertEqual(viewModel.suggestedTitles(prefix: "Net", account: card), [])
+        XCTAssertEqual(viewModel.suggestedTitles(prefix: "Net"), ["Netflix"])
+        XCTAssertEqual(viewModel.suggestedCategory(forTitle: "Netflix"), "Subscriptions")
     }
 }
 

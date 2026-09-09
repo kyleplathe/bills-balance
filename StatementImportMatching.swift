@@ -136,4 +136,108 @@ enum StatementImportMatching {
         }
         return best?.index
     }
+
+    struct TransferCounterpart: Equatable {
+        var uri: String
+        var accountName: String
+        var date: Date
+        var amount: Decimal
+        var btcAmount: Decimal?
+        var isCredit: Bool
+        var alreadyPaired: Bool
+    }
+
+    /// Opposite-sign, same USD or BTC amount, within `maxDayDelta` days. Titles are ignored.
+    static func transferMatchIndex(
+        usdAmount: Decimal,
+        btcAmount: Decimal?,
+        isCredit: Bool,
+        date: Date,
+        in counterparts: [TransferCounterpart],
+        used: Set<Int>,
+        calendar: Calendar = .current,
+        maxDayDelta: Int = 3
+    ) -> Int? {
+        let txDay = calendar.startOfDay(for: date)
+        var best: (index: Int, dayDelta: Int, btcMatch: Bool)?
+
+        for (idx, entry) in counterparts.enumerated() {
+            guard !used.contains(idx), !entry.alreadyPaired else { continue }
+            guard entry.isCredit != isCredit else { continue }
+
+            let btcMatch: Bool = {
+                guard let lhs = btcAmount, lhs > 0, let rhs = entry.btcAmount, rhs > 0 else { return false }
+                return amountsMatch(lhs, rhs)
+            }()
+            let usdMatch = amountsMatch(entry.amount, usdAmount)
+            guard btcMatch || usdMatch else { continue }
+
+            let days = abs(calendar.dateComponents([.day], from: txDay, to: calendar.startOfDay(for: entry.date)).day ?? 99)
+            guard days <= maxDayDelta else { continue }
+
+            if let current = best {
+                if days < current.dayDelta || (days == current.dayDelta && btcMatch && !current.btcMatch) {
+                    best = (idx, days, btcMatch)
+                }
+            } else {
+                best = (idx, days, btcMatch)
+            }
+        }
+        return best?.index
+    }
+
+    static func similarTransactionIds(
+        to tx: ParsedStatementTransaction,
+        originalTitle: String,
+        in transactions: [ParsedStatementTransaction],
+        originalTitles: [UUID: String]
+    ) -> [UUID] {
+        let norm = normalizeTitle(originalTitle)
+        return transactions.compactMap { other in
+            guard other.id != tx.id else { return nil }
+            let otherOriginal = originalTitles[other.id] ?? other.title
+            if !norm.isEmpty, normalizeTitle(otherOriginal) == norm {
+                return other.id
+            }
+            if amountsMatch(other.amount, tx.amount), other.kind == tx.kind {
+                return other.id
+            }
+            return nil
+        }
+    }
+}
+
+enum ImportTitleRewriteStore {
+    private static let key = "ImportTitleRewrites"
+
+    struct Rewrite: Codable, Equatable {
+        var preferredTitle: String
+        var category: String?
+    }
+
+    static func rewrite(for originalTitle: String, defaults: UserDefaults = .standard) -> Rewrite? {
+        let norm = StatementImportMatching.normalizeTitle(originalTitle)
+        guard !norm.isEmpty else { return nil }
+        return all(defaults: defaults)[norm]
+    }
+
+    static func save(
+        originalTitle: String,
+        preferredTitle: String,
+        category: String?,
+        defaults: UserDefaults = .standard
+    ) {
+        let norm = StatementImportMatching.normalizeTitle(originalTitle)
+        guard !norm.isEmpty else { return }
+        var dict = all(defaults: defaults)
+        dict[norm] = Rewrite(preferredTitle: preferredTitle, category: category)
+        if let data = try? JSONEncoder().encode(dict) {
+            defaults.set(data, forKey: key)
+        }
+    }
+
+    static func all(defaults: UserDefaults = .standard) -> [String: Rewrite] {
+        guard let data = defaults.data(forKey: key) else { return [:] }
+        return (try? JSONDecoder().decode([String: Rewrite].self, from: data)) ?? [:]
+    }
 }

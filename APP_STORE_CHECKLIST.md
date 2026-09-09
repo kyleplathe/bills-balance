@@ -13,45 +13,44 @@ Print this page. Check boxes as you go. Copy-paste text lives in `APP_STORE_LIST
 
 ## 1. Apple account
 
-- [ ] Apple Developer Program is active and paid
-- [ ] Signed into Xcode with the same Apple ID as that team
-- [ ] App ID `com.kyle.billsandbalance` exists
-- [ ] Do **not** turn on iCloud / CloudKit for this release
-- [ ] App Store Connect app exists (name **Bills & Balance**, SKU e.g. `billsandbalance`)
+- [x] Apple Developer Program is active and paid
+- [x] Signed into Xcode with the same Apple ID as that team
+- [x] App ID `com.kyle.billsandbalance` exists
+- [x] Do **not** turn on iCloud / CloudKit for this release
+- [x] App Store Connect app exists (name **Bills & Balance**, SKU e.g. `billsandbalance`)
 
 ---
 
 ## 2. Privacy URL (required — reviewer must open it with no login)
 
-- [ ] `PRIVACY.md` is on a **public** page
-- [ ] If GitHub is private, host it on GitHub Pages or any public site first
-- [ ] Open the URL in a private/incognito window and confirm it loads
+- [x] `PRIVACY.md` is on a **public** page
+- [x] If GitHub is private, host it on GitHub Pages or any public site first
+- [x] Open the URL in a private/incognito window and confirm it loads
 
-**Privacy URL to paste:**  
-https://github.com/kyleplathe/bills-balance/blob/main/PRIVACY.md  
-(or your public page: ________________________________)
+**Privacy URL (paste into App Store Connect → App Information → Privacy Policy URL):**  
+https://github.com/kyleplathe/bills-balance/blob/main/PRIVACY.md
 
-**Support URL to paste:**  
+**Support URL (paste into the iOS version page → Support URL):**  
 https://github.com/kyleplathe/bills-balance/issues
 
 ---
 
 ## 3. App Store Connect listing
 
-Paste from `APP_STORE_LISTING.md`.
+Copy from `APP_STORE_LISTING.md` into **App Store Connect → Apps → Bills & Balance → the iOS 1.0 version** (English (U.S.)). These fields do not fill themselves.
 
-- [ ] Name: Bills & Balance
-- [ ] Subtitle: Local checkbook for bills
-- [ ] Category: Finance
-- [ ] Age rating: 4+
-- [ ] Description pasted
-- [ ] Keywords pasted (`bills,budget,checkbook,ledger,finance,recurring,calendar,accounts,balance,local`)
-- [ ] What’s New pasted
-- [ ] Privacy Policy URL
-- [ ] Support URL
-- [ ] Copyright: _______________________________
-- [ ] App Privacy: data collected = **none**; tracking = **No**
-- [ ] If asked about CoinGecko: public Bitcoin prices only, not linked to the user
+- [x] Name: Bills & Balance
+- [x] Subtitle: Local checkbook for bills
+- [x] Category: Finance
+- [x] Age rating: 4+
+- [x] Copyright: Instakyle Tech Solutions LLC (c) 2026
+- [x] App Privacy: data collected = **none**; tracking = **No**
+- [ ] Description — version page, **Description** box (text in `APP_STORE_LISTING.md`)
+- [ ] Keywords — version page, **Keywords** (`bills,budget,checkbook,ledger,finance,recurring,calendar,accounts,balance,local`)
+- [ ] What’s New — version page, **What’s New in This Version**
+- [ ] Privacy Policy URL — **App Information** (left sidebar), not the version page
+- [ ] Support URL — version page, **Support URL**
+- [ ] If App Privacy asked about CoinGecko: public Bitcoin prices only, not linked to the user
 
 ---
 

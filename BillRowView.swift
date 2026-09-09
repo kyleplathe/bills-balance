@@ -57,7 +57,6 @@ struct BillRowView: View {
                             .foregroundColor(.white)
                             .opacity(bill.isPaid ? 1 : 0)
                     )
-                    .padding(.vertical, compact ? 0 : 4)
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
@@ -71,12 +70,12 @@ struct BillRowView: View {
                 .layoutPriority(1)
                 .animation(.spring(response: 0.3, dampingFraction: 0.8), value: bitcoinPriceService.showInBitcoin)
         }
-        .padding(.vertical, compact ? 0 : 4)
+        .padding(.vertical, compact ? 0 : 2)
     }
     
     private var billInfoColumn: some View {
         VStack(alignment: .leading, spacing: compact ? 2 : 4) {
-            HStack(spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(bill.name ?? "Unknown")
                     .font(compact ? .subheadline.weight(.medium) : .body.weight(.medium))
                     .strikethrough(bill.isPaid)
@@ -90,7 +89,7 @@ struct BillRowView: View {
                 }
                 
                 if bill.isPaid {
-                    statusBadge("PAID", color: .green)
+                    paidBadge
                 }
             }
             
@@ -101,7 +100,12 @@ struct BillRowView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
     
+    private var isAutoPayShort: Bool {
+        billViewModel.wouldHoldAutoPay(bill)
+    }
+
     private var hasMetaContent: Bool {
+        if isAutoPayShort { return true }
         if let accountName = bill.account?.name, !accountName.isEmpty { return true }
         if let paymentCard = bill.paymentCard, !paymentCard.isEmpty { return true }
         if bill.recurrenceType != "none", bill.recurrenceType != nil { return true }
@@ -130,22 +134,25 @@ struct BillRowView: View {
                     .font(compact ? .caption2 : .caption)
                     .foregroundColor(.secondary)
             }
+
+            if isAutoPayShort {
+                Text("• Balance short")
+                    .font(compact ? .caption2 : .caption)
+                    .foregroundStyle(.orange)
+            }
         }
         .lineLimit(1)
         .minimumScaleFactor(0.7)
     }
     
-    private func statusBadge(_ title: String, color: Color) -> some View {
-        Text(title)
-            .font(.caption2.weight(.bold))
-            .foregroundColor(.white)
-            .padding(.horizontal, compact ? 5 : 6)
-            .padding(.vertical, compact ? 1 : 2)
-            .background(color)
-            .cornerRadius(compact ? 3 : 4)
-            .lineLimit(1)
-            .minimumScaleFactor(0.5)
-            .fixedSize(horizontal: false, vertical: true)
+    private var paidBadge: some View {
+        Text("Paid")
+            .font(.system(size: compact ? 8 : 9, weight: .bold))
+            .foregroundStyle(.green)
+            .padding(.horizontal, compact ? 4 : 5)
+            .padding(.vertical, 1)
+            .background(Color.green.opacity(0.15), in: Capsule())
+            .fixedSize()
     }
     
     @ViewBuilder

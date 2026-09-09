@@ -46,5 +46,28 @@ class HapticManager: ObservableObject {
         // Play system sound for success
         AudioServicesPlaySystemSound(1057) // System sound for success
     }
+
+    /// Extra flourish when every bill for the month is paid.
+    func allBillsPaid() {
+        AudioServicesPlaySystemSound(1057)
+
+        let heavy = UIImpactFeedbackGenerator(style: .heavy)
+        let medium = UIImpactFeedbackGenerator(style: .medium)
+        let light = UIImpactFeedbackGenerator(style: .light)
+        heavy.prepare()
+        medium.prepare()
+        light.prepare()
+
+        heavy.impactOccurred(intensity: 1.0)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.11) {
+            medium.impactOccurred(intensity: 0.92)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+            light.impactOccurred(intensity: 0.7)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) {
+            light.impactOccurred(intensity: 0.4)
+        }
+    }
 }
 

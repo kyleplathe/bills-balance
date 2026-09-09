@@ -10,34 +10,36 @@
 		DE14BD592EBAFC88008476B5 /* BillsAndBalance.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = DE14BD572EBAFC87008476B5 /* BillsAndBalance.xcdatamodeld */; };
 		DE546C282F04AEAE004F8E56 /* CategoryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE546C272F04AEAE004F8E56 /* CategoryManager.swift */; };
 		DE546C292F04AEB00048E56 /* CategorySuggester.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE546C2A2F04AEB00048E56 /* CategorySuggester.swift */; };
-		DE64A2012FDC9702004756CF /* CategoryStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE64A1012FDC9701004756CF /* CategoryStyle.swift */; };
 		DE546C2B2F04AEC00048E56 /* ReportsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE546C2C2F04AEC00048E56 /* ReportsView.swift */; };
 		DE546C2D2F04AEC00048E56 /* ReportsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE546C2E2F04AEC00048E56 /* ReportsViewModel.swift */; };
 		DE57A0042F08AA0001 /* StatementImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE57A0032F08AA0001 /* StatementImportSheet.swift */; };
 		DE57A1042F08AA0002 /* StatementClearImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE57A1032F08AA0002 /* StatementClearImportSheet.swift */; };
 		DE57B0012F08BB0001 /* TransactionCSVParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE57B0022F08BB0001 /* TransactionCSVParser.swift */; };
 		DE57E0052F08EE0001 /* FeeParsing.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE57E0042F08EE0001 /* FeeParsing.swift */; };
-		DE71A2012FDC9912004756CF /* MoneyFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE71A1012FDC9911004756CF /* MoneyFormatting.swift */; };
-		DE71A2022FDC9914004756CF /* FormInputComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE71A1022FDC9913004756CF /* FormInputComponents.swift */; };
 		DE57F0012F09FF0001 /* LiveDateTimeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE57F0022F09FF0001 /* LiveDateTimeView.swift */; };
 		DE5E0D092FDC8C0A004756CF /* SupabaseSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5E0D082FDC8C0A004756CF /* SupabaseSupport.swift */; };
 		DE5E0D0B2FDC8C24004756CF /* CoreDataConvenience.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5E0D0A2FDC8C24004756CF /* CoreDataConvenience.swift */; };
 		DE61A2012FDC9101004756CF /* RecurrenceCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61A1012FDC9101004756CF /* RecurrenceCalculator.swift */; };
 		DE61A2022FDC9102004756CF /* DuplicateBillGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61A1022FDC9102004756CF /* DuplicateBillGuard.swift */; };
 		DE61A2032FDC9103004756CF /* BalanceMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61A1032FDC9103004756CF /* BalanceMath.swift */; };
-		DE63A2012FDC9601004756CF /* StatementImportMatching.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE63A1012FDC9601004756CF /* StatementImportMatching.swift */; };
-		DE63A2022FDC9602004756CF /* ActivityLedgerRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE63A1022FDC9602004756CF /* ActivityLedgerRules.swift */; };
-		DE63A2032FDC9603004756CF /* BillBtcBacktest.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE63A1032FDC9603004756CF /* BillBtcBacktest.swift */; };
+		DE69A2012FDC9F02004756CF /* LivingMeansInsight.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE69A1012FDC9F01004756CF /* LivingMeansInsight.swift */; };
+		DE69A2022FDC9F04004756CF /* AutoPayShortfall.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE69A1022FDC9F03004756CF /* AutoPayShortfall.swift */; };
 		DE61A2042FDC9104004756CF /* RelativeDateFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61A1042FDC9104004756CF /* RelativeDateFormatter.swift */; };
 		DE61A2052FDC9105004756CF /* AccountExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61A1052FDC9105004756CF /* AccountExport.swift */; };
-		DE61C2012FDC9302004756CF /* CSVSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61C1012FDC9301004756CF /* CSVSupport.swift */; };
-		DE61D2012FDC9401004756CF /* StrikeCSVParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61D1012FDC9401004756CF /* StrikeCSVParser.swift */; };
 		DE61A2062FDC9106004756CF /* ProjectionPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61A1062FDC9106004756CF /* ProjectionPreferences.swift */; };
 		DE61A2072FDC9107004756CF /* BillRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61A1072FDC9107004756CF /* BillRowView.swift */; };
 		DE61A2082FDC9108004756CF /* CalendarDayDrawer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61A1082FDC9108004756CF /* CalendarDayDrawer.swift */; };
 		DE61A2092FDC9109004756CF /* ReportsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61A1092FDC9109004756CF /* ReportsComponents.swift */; };
 		DE61A20A2FDC910A004756CF /* LedgerTransactionRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61A10A2FDC910A004756CF /* LedgerTransactionRow.swift */; };
 		DE61A20B2FDC910B004756CF /* ActivityShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61A10B2FDC910B004756CF /* ActivityShareSheet.swift */; };
+		DE61B2022FDC9202004756CF /* MoneyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61B1022FDC9202004756CF /* MoneyLogicTests.swift */; };
+		DE61C2012FDC9302004756CF /* CSVSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61C1012FDC9301004756CF /* CSVSupport.swift */; };
+		DE61D2012FDC9401004756CF /* StrikeCSVParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61D1012FDC9401004756CF /* StrikeCSVParser.swift */; };
+		DE62C2012FDC9502004756CF /* FallingCurrencyAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE62C1012FDC9501004756CF /* FallingCurrencyAnimation.swift */; };
+		DE63A2012FDC9601004756CF /* StatementImportMatching.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE63A1012FDC9601004756CF /* StatementImportMatching.swift */; };
+		DE63A2022FDC9602004756CF /* ActivityLedgerRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE63A1022FDC9602004756CF /* ActivityLedgerRules.swift */; };
+		DE63A2032FDC9603004756CF /* BillBtcBacktest.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE63A1032FDC9603004756CF /* BillBtcBacktest.swift */; };
+		DE64A2012FDC9702004756CF /* CategoryStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE64A1012FDC9701004756CF /* CategoryStyle.swift */; };
 		DE65A2012FDC9802004756CF /* UsdBtcShareCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE65A1012FDC9801004756CF /* UsdBtcShareCard.swift */; };
 		DE66A2012FDC9A02004756CF /* AppLockManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE66A1012FDC9A01004756CF /* AppLockManager.swift */; };
 		DE66A2022FDC9A04004756CF /* SampleDataSeeder.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE66A1022FDC9A03004756CF /* SampleDataSeeder.swift */; };
@@ -45,9 +47,10 @@
 		DE67A2012FDC9B02004756CF /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = DE67A1012FDC9B01004756CF /* PrivacyInfo.xcprivacy */; };
 		DE67A2022FDC9B04004756CF /* AppLegal.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE67A1022FDC9B03004756CF /* AppLegal.swift */; };
 		DE67A2032FDC9B06004756CF /* PrivacyPolicyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE67A1032FDC9B05004756CF /* PrivacyPolicyView.swift */; };
-		DE61B2022FDC9202004756CF /* MoneyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE61B1022FDC9202004756CF /* MoneyLogicTests.swift */; };
+		DE68A2012FDC9E02004756CF /* Brand.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE68A1012FDC9E01004756CF /* Brand.swift */; };
+		DE71A2012FDC9912004756CF /* MoneyFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE71A1012FDC9911004756CF /* MoneyFormatting.swift */; };
+		DE71A2022FDC9914004756CF /* FormInputComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE71A1022FDC9913004756CF /* FormInputComponents.swift */; };
 		DE7A5C6A2EC60BD700A67202 /* BitcoinPriceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7A5C692EC60BD700A67202 /* BitcoinPriceService.swift */; };
-		DE62C2012FDC9502004756CF /* FallingCurrencyAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE62C1012FDC9501004756CF /* FallingCurrencyAnimation.swift */; };
 		DE7C83972EBAF76A00880E97 /* BillsAndBalanceApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7C83942EBAF76A00880E97 /* BillsAndBalanceApp.swift */; };
 		DE7C83992EBAF76A00880E97 /* PersistenceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7C83962EBAF76A00880E97 /* PersistenceController.swift */; };
 		DE7C83A32EBAFA4E00880E97 /* BillListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7C839C2EBAFA4E00880E97 /* BillListView.swift */; };
@@ -91,34 +94,38 @@
 		DE14BD582EBAFC87008476B5 /* BillsAndBalance.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = BillsAndBalance.xcdatamodel; sourceTree = "<group>"; };
 		DE546C272F04AEAE004F8E56 /* CategoryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryManager.swift; sourceTree = "<group>"; };
 		DE546C2A2F04AEB00048E56 /* CategorySuggester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategorySuggester.swift; sourceTree = "<group>"; };
-		DE64A1012FDC9701004756CF /* CategoryStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryStyle.swift; sourceTree = "<group>"; };
 		DE546C2C2F04AEC00048E56 /* ReportsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportsView.swift; sourceTree = "<group>"; };
 		DE546C2E2F04AEC00048E56 /* ReportsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportsViewModel.swift; sourceTree = "<group>"; };
 		DE57A0032F08AA0001 /* StatementImportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatementImportSheet.swift; sourceTree = "<group>"; };
 		DE57A1032F08AA0002 /* StatementClearImportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatementClearImportSheet.swift; sourceTree = "<group>"; };
 		DE57B0022F08BB0001 /* TransactionCSVParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransactionCSVParser.swift; sourceTree = "<group>"; };
 		DE57E0042F08EE0001 /* FeeParsing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeeParsing.swift; sourceTree = "<group>"; };
-		DE71A1012FDC9911004756CF /* MoneyFormatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyFormatting.swift; sourceTree = "<group>"; };
-		DE71A1022FDC9913004756CF /* FormInputComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormInputComponents.swift; sourceTree = "<group>"; };
 		DE57F0022F09FF0001 /* LiveDateTimeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveDateTimeView.swift; sourceTree = "<group>"; };
 		DE5E0D082FDC8C0A004756CF /* SupabaseSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseSupport.swift; sourceTree = "<group>"; };
 		DE5E0D0A2FDC8C24004756CF /* CoreDataConvenience.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreDataConvenience.swift; sourceTree = "<group>"; };
 		DE61A1012FDC9101004756CF /* RecurrenceCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecurrenceCalculator.swift; sourceTree = "<group>"; };
 		DE61A1022FDC9102004756CF /* DuplicateBillGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicateBillGuard.swift; sourceTree = "<group>"; };
 		DE61A1032FDC9103004756CF /* BalanceMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BalanceMath.swift; sourceTree = "<group>"; };
-		DE63A1012FDC9601004756CF /* StatementImportMatching.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatementImportMatching.swift; sourceTree = "<group>"; };
-		DE63A1022FDC9602004756CF /* ActivityLedgerRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityLedgerRules.swift; sourceTree = "<group>"; };
-		DE63A1032FDC9603004756CF /* BillBtcBacktest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillBtcBacktest.swift; sourceTree = "<group>"; };
+		DE69A1012FDC9F01004756CF /* LivingMeansInsight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivingMeansInsight.swift; sourceTree = "<group>"; };
+		DE69A1022FDC9F03004756CF /* AutoPayShortfall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoPayShortfall.swift; sourceTree = "<group>"; };
 		DE61A1042FDC9104004756CF /* RelativeDateFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelativeDateFormatter.swift; sourceTree = "<group>"; };
 		DE61A1052FDC9105004756CF /* AccountExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountExport.swift; sourceTree = "<group>"; };
-		DE61C1012FDC9301004756CF /* CSVSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CSVSupport.swift; sourceTree = "<group>"; };
-		DE61D1012FDC9401004756CF /* StrikeCSVParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrikeCSVParser.swift; sourceTree = "<group>"; };
 		DE61A1062FDC9106004756CF /* ProjectionPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectionPreferences.swift; sourceTree = "<group>"; };
 		DE61A1072FDC9107004756CF /* BillRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillRowView.swift; sourceTree = "<group>"; };
 		DE61A1082FDC9108004756CF /* CalendarDayDrawer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarDayDrawer.swift; sourceTree = "<group>"; };
 		DE61A1092FDC9109004756CF /* ReportsComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportsComponents.swift; sourceTree = "<group>"; };
 		DE61A10A2FDC910A004756CF /* LedgerTransactionRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerTransactionRow.swift; sourceTree = "<group>"; };
 		DE61A10B2FDC910B004756CF /* ActivityShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityShareSheet.swift; sourceTree = "<group>"; };
+		DE61A10C2FDC910C004756CF /* BillsAndBalance.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BillsAndBalance.entitlements; sourceTree = "<group>"; };
+		DE61B1012FDC9201004756CF /* BillsAndBalanceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BillsAndBalanceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		DE61B1022FDC9202004756CF /* MoneyLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyLogicTests.swift; sourceTree = "<group>"; };
+		DE61C1012FDC9301004756CF /* CSVSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CSVSupport.swift; sourceTree = "<group>"; };
+		DE61D1012FDC9401004756CF /* StrikeCSVParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrikeCSVParser.swift; sourceTree = "<group>"; };
+		DE62C1012FDC9501004756CF /* FallingCurrencyAnimation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FallingCurrencyAnimation.swift; sourceTree = "<group>"; };
+		DE63A1012FDC9601004756CF /* StatementImportMatching.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatementImportMatching.swift; sourceTree = "<group>"; };
+		DE63A1022FDC9602004756CF /* ActivityLedgerRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityLedgerRules.swift; sourceTree = "<group>"; };
+		DE63A1032FDC9603004756CF /* BillBtcBacktest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillBtcBacktest.swift; sourceTree = "<group>"; };
+		DE64A1012FDC9701004756CF /* CategoryStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryStyle.swift; sourceTree = "<group>"; };
 		DE65A1012FDC9801004756CF /* UsdBtcShareCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsdBtcShareCard.swift; sourceTree = "<group>"; };
 		DE66A1012FDC9A01004756CF /* AppLockManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLockManager.swift; sourceTree = "<group>"; };
 		DE66A1022FDC9A03004756CF /* SampleDataSeeder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleDataSeeder.swift; sourceTree = "<group>"; };
@@ -126,11 +133,10 @@
 		DE67A1012FDC9B01004756CF /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		DE67A1022FDC9B03004756CF /* AppLegal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLegal.swift; sourceTree = "<group>"; };
 		DE67A1032FDC9B05004756CF /* PrivacyPolicyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyPolicyView.swift; sourceTree = "<group>"; };
-		DE61A10C2FDC910C004756CF /* BillsAndBalance.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BillsAndBalance.entitlements; sourceTree = "<group>"; };
-		DE61B1012FDC9201004756CF /* BillsAndBalanceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BillsAndBalanceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		DE61B1022FDC9202004756CF /* MoneyLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyLogicTests.swift; sourceTree = "<group>"; };
+		DE68A1012FDC9E01004756CF /* Brand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Brand.swift; sourceTree = "<group>"; };
+		DE71A1012FDC9911004756CF /* MoneyFormatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyFormatting.swift; sourceTree = "<group>"; };
+		DE71A1022FDC9913004756CF /* FormInputComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormInputComponents.swift; sourceTree = "<group>"; };
 		DE7A5C692EC60BD700A67202 /* BitcoinPriceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BitcoinPriceService.swift; sourceTree = "<group>"; };
-		DE62C1012FDC9501004756CF /* FallingCurrencyAnimation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FallingCurrencyAnimation.swift; sourceTree = "<group>"; };
 		DE7C83942EBAF76A00880E97 /* BillsAndBalanceApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillsAndBalanceApp.swift; sourceTree = "<group>"; };
 		DE7C83962EBAF76A00880E97 /* PersistenceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceController.swift; sourceTree = "<group>"; };
 		DE7C839A2EBAF78000880E97 /* BillsAndBalance-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "BillsAndBalance-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -213,6 +219,8 @@
 				DE61A1012FDC9101004756CF /* RecurrenceCalculator.swift */,
 				DE61A1022FDC9102004756CF /* DuplicateBillGuard.swift */,
 				DE61A1032FDC9103004756CF /* BalanceMath.swift */,
+				DE69A1012FDC9F01004756CF /* LivingMeansInsight.swift */,
+				DE69A1022FDC9F03004756CF /* AutoPayShortfall.swift */,
 				DE63A1012FDC9601004756CF /* StatementImportMatching.swift */,
 				DE63A1022FDC9602004756CF /* ActivityLedgerRules.swift */,
 				DE63A1032FDC9603004756CF /* BillBtcBacktest.swift */,
@@ -251,6 +259,7 @@
 		AA0000000000000000000001 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				DE68A1012FDC9E01004756CF /* Brand.swift */,
 				DE7C83942EBAF76A00880E97 /* BillsAndBalanceApp.swift */,
 				DE7C83962EBAF76A00880E97 /* PersistenceController.swift */,
 			);
@@ -491,6 +500,8 @@
 				DE61A2012FDC9101004756CF /* RecurrenceCalculator.swift in Sources */,
 				DE61A2022FDC9102004756CF /* DuplicateBillGuard.swift in Sources */,
 				DE61A2032FDC9103004756CF /* BalanceMath.swift in Sources */,
+				DE69A2012FDC9F02004756CF /* LivingMeansInsight.swift in Sources */,
+				DE69A2022FDC9F04004756CF /* AutoPayShortfall.swift in Sources */,
 				DE63A2012FDC9601004756CF /* StatementImportMatching.swift in Sources */,
 				DE63A2022FDC9602004756CF /* ActivityLedgerRules.swift in Sources */,
 				DE63A2032FDC9603004756CF /* BillBtcBacktest.swift in Sources */,
@@ -510,6 +521,7 @@
 				DE66A2032FDC9A06004756CF /* UsdBtcBacktestView.swift in Sources */,
 				DE67A2022FDC9B04004756CF /* AppLegal.swift in Sources */,
 				DE67A2032FDC9B06004756CF /* PrivacyPolicyView.swift in Sources */,
+				DE68A2012FDC9E02004756CF /* Brand.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -669,13 +681,13 @@
 				DEVELOPMENT_TEAM = 3GG234YCUT;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LaunchInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Bills & Balance";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Lock Bills & Balance so only you can see your accounts and bills.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -706,13 +718,13 @@
 				DEVELOPMENT_TEAM = 3GG234YCUT;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LaunchInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Bills & Balance";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Lock Bills & Balance so only you can see your accounts and bills.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (

@@ -54,7 +54,7 @@ struct UsdBtcShareCard: View {
                 .foregroundStyle(Color.white.opacity(0.5))
                 .padding(.top, 8)
 
-            UsdBtcShareChart(months: months)
+            UsdBtcComparisonChart(months: months, style: .share)
                 .frame(maxWidth: .infinity)
                 .frame(height: 168)
                 .padding(.top, 18)
@@ -127,8 +127,26 @@ struct UsdBtcShareCard: View {
     }
 }
 
-private struct UsdBtcShareChart: View {
+struct UsdBtcComparisonChart: View {
+    enum Style {
+        case share
+        case inApp
+    }
+
     let months: [UsdBtcMonthPoint]
+    var style: Style = .share
+
+    private var usdLineColor: Color {
+        style == .share ? Color.white.opacity(0.88) : Color.primary.opacity(0.82)
+    }
+
+    private var gridColor: Color {
+        style == .share ? Color.white.opacity(0.08) : Color.secondary.opacity(0.22)
+    }
+
+    private var labelColor: Color {
+        style == .share ? Color.white.opacity(0.4) : Color.secondary
+    }
 
     var body: some View {
         Canvas { context, size in
@@ -157,10 +175,20 @@ private struct UsdBtcShareChart: View {
                 grid.move(to: CGPoint(x: plot.minX, y: y))
                 grid.addLine(to: CGPoint(x: plot.maxX, y: y))
             }
-            context.stroke(grid, with: .color(.white.opacity(0.08)), lineWidth: 1)
+            context.stroke(grid, with: .color(gridColor), lineWidth: 1)
 
             let btcPoints = btcNow.enumerated().map { point(index: $0.offset, value: $0.element) }
             let usdPoints = usd.enumerated().map { point(index: $0.offset, value: $0.element) }
+
+            if style == .inApp, usdPoints.count == btcPoints.count, usdPoints.count > 1 {
+                var gap = Path()
+                gap.move(to: usdPoints[0])
+                for p in usdPoints.dropFirst() { gap.addLine(to: p) }
+                for p in btcPoints.reversed() { gap.addLine(to: p) }
+                gap.closeSubpath()
+                let btcCheaper = (btcNow.last ?? 0) < (usd.last ?? 0)
+                context.fill(gap, with: .color((btcCheaper ? Color.green : bitcoinOrange).opacity(0.18)))
+            }
 
             var area = Path()
             if let first = btcPoints.first, let last = btcPoints.last {
@@ -173,7 +201,7 @@ private struct UsdBtcShareChart: View {
             context.fill(
                 area,
                 with: .linearGradient(
-                    Gradient(colors: [bitcoinOrange.opacity(0.42), bitcoinOrange.opacity(0.02)]),
+                    Gradient(colors: [bitcoinOrange.opacity(style == .share ? 0.42 : 0.28), bitcoinOrange.opacity(0.02)]),
                     startPoint: CGPoint(x: plot.midX, y: plot.minY),
                     endPoint: CGPoint(x: plot.midX, y: plot.maxY)
                 )
@@ -191,7 +219,7 @@ private struct UsdBtcShareChart: View {
                 usdLine.move(to: first)
                 for p in usdPoints.dropFirst() { usdLine.addLine(to: p) }
             }
-            context.stroke(usdLine, with: .color(.white.opacity(0.88)), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            context.stroke(usdLine, with: .color(usdLineColor), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
 
             if let last = btcPoints.last {
                 let dot = Path(ellipseIn: CGRect(x: last.x - 3.5, y: last.y - 3.5, width: 7, height: 7))
@@ -203,7 +231,7 @@ private struct UsdBtcShareChart: View {
                 let resolved = context.resolve(
                     Text(text)
                         .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundColor(Color.white.opacity(0.4))
+                        .foregroundColor(labelColor)
                 )
                 let x = plot.minX + plot.width * xRatio
                 let anchor: UnitPoint = xRatio < 0.5 ? .bottomLeading : .bottomTrailing
@@ -221,5 +249,81 @@ private struct UsdBtcShareChart: View {
             return [(0, String(startYear)), (1, String(endYear))]
         }
         return [(0, String(startYear)), (1, String(endYear))]
+    }
+}
+
+struct UsdBtcActivityCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var reportsViewModel: ReportsViewModel
+    let appeared: Bool
+    let onOpen: () -> Void
+
+    private var change: BillBtcBacktest.BitcoinSpendChange? {
+        guard let report = reportsViewModel.usdBtcReport else { return nil }
+        return BillBtcBacktest.bitcoinSpendChange(
+            btcAmounts: report.months.map(\.btcAmount),
+            monthCount: max(report.months.count, report.monthsBack)
+        )
+    }
+
+    var body: some View {
+        Button(action: onOpen) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("USD vs Bitcoin")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                if let change {
+                    Text(BillBtcBacktest.changeSentence(change))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let months = reportsViewModel.usdBtcReport?.months, months.count > 1 {
+                    UsdBtcComparisonChart(months: months, style: .inApp)
+                        .frame(height: 120)
+                        .opacity(appeared ? 1 : 0)
+                }
+                HStack(spacing: 14) {
+                    legendDot(Color.primary.opacity(0.82), title: "USD")
+                    legendDot(Color(red: 0.969, green: 0.576, blue: 0.102), title: "BTC today")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.vertical, 20)
+            .padding(.horizontal, 18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(activitySnapshotChrome)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens the USD versus Bitcoin comparison")
+    }
+
+    private func legendDot(_ color: Color, title: String) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var activitySnapshotChrome: some View {
+        let backgroundColor: Color = colorScheme == .dark
+            ? Color.black.opacity(0.82)
+            : Color(.secondarySystemBackground)
+        let borderColor: Color = colorScheme == .dark
+            ? Color.white.opacity(0.08)
+            : Color.black.opacity(0.06)
+        return RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .fill(backgroundColor)
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(borderColor)
+            )
     }
 }

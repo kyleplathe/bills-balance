@@ -77,7 +77,7 @@ struct ManageAccountsView: View {
             accountViewModel: accountViewModel
         ))
         .sheet(isPresented: $showingAccountEditor) {
-            AccountEditorSheet(account: accountToEdit) { name, type, startingBalance, isHidden, currency, btcDisplayFormat, feePercentage, startingBalanceUSD, startingBalanceBTCPrice in
+            AccountEditorSheet(account: accountToEdit) { name, type, startingBalance, isHidden, currency, btcDisplayFormat, feePercentage, startingBalanceUSD, startingBalanceBTCPrice, reserveBalance in
                 if let account = accountToEdit {
                     accountViewModel.updateAccount(account,
                                                    name: name,
@@ -88,7 +88,8 @@ struct ManageAccountsView: View {
                                                    btcDisplayFormat: btcDisplayFormat,
                                                    feePercentage: feePercentage,
                                                    startingBalanceUSD: startingBalanceUSD,
-                                                   startingBalanceBTCPrice: startingBalanceBTCPrice)
+                                                   startingBalanceBTCPrice: startingBalanceBTCPrice,
+                                                   reserveBalance: reserveBalance)
                 } else {
                     accountViewModel.addAccount(name: name,
                                                 type: type,
@@ -98,7 +99,8 @@ struct ManageAccountsView: View {
                                                 btcDisplayFormat: btcDisplayFormat,
                                                 feePercentage: feePercentage,
                                                 startingBalanceUSD: startingBalanceUSD,
-                                                startingBalanceBTCPrice: startingBalanceBTCPrice)
+                                                startingBalanceBTCPrice: startingBalanceBTCPrice,
+                                                reserveBalance: reserveBalance)
                 }
                 accountViewModel.fetchAccounts()
             }

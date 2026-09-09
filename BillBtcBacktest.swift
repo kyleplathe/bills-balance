@@ -213,4 +213,12 @@ enum BillBtcBacktest {
             monthCount: monthCount
         )
     }
+
+    static func changeSentence(_ change: BitcoinSpendChange) -> String {
+        let percent = abs((change.percentLess * 100 as NSDecimalNumber).intValue)
+        if change.percentLess >= 0 {
+            return "Paid \(percent)% less Bitcoin than \(change.years) years ago"
+        }
+        return "Paid \(percent)% more Bitcoin than \(change.years) years ago"
+    }
 }

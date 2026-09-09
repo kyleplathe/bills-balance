@@ -1,136 +1,104 @@
-//
-//  OnboardingView.swift
-//  BillsAndBalance
-//
-//  Created on 11/6/24.
-//
-
 import SwiftUI
 
 struct OnboardingView: View {
     @StateObject private var onboardingManager = OnboardingManager.shared
     @EnvironmentObject private var notificationManager: NotificationManager
     @State private var currentPage = 0
-    @Environment(\.dismiss) private var dismiss
-    
-    let pages: [OnboardingPage] = [
+
+    private let pages: [OnboardingPage] = [
         OnboardingPage(
-            icon: "calendar.badge.clock",
-            title: "Never Miss a Bill",
-            description: "Keep track of all your bills in one place. Get reminders before they're due.",
-            color: .blue
+            systemImage: nil,
+            title: "Bills & Balance",
+            description: "A local-first checkbook. Track bills, accounts, and what you can actually spend — without creating an account."
         ),
         OnboardingPage(
-            icon: "bell.badge.fill",
-            title: "Smart Notifications",
-            description: "Receive timely reminders so you never miss a payment deadline.",
-            color: .orange
+            systemImage: "calendar.badge.clock",
+            title: "Never miss a bill",
+            description: "See what’s due and get reminders before payment day."
         ),
         OnboardingPage(
-            icon: "repeat.circle.fill",
-            title: "Recurring Bills",
-            description: "Set up recurring bills once and let the app handle the rest automatically.",
-            color: .green
+            systemImage: "repeat",
+            title: "Set it once",
+            description: "Recurring bills and income stay on the calendar automatically."
         ),
         OnboardingPage(
-            icon: "chart.line.uptrend.xyaxis",
-            title: "Track Your Spending",
-            description: "See your monthly bills at a glance and stay on top of your finances.",
-            color: .purple
+            systemImage: "building.columns",
+            title: "Know what’s left",
+            description: "Cleared and available balance across every account, in one place."
         )
     ]
-    
-    var body: some View {
-        ZStack {
-            // Background gradient
-            LinearGradient(
-                gradient: Gradient(colors: [
-                    pages[currentPage].color.opacity(0.3),
-                    pages[currentPage].color.opacity(0.1)
-                ]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-            .animation(.easeInOut(duration: 0.5), value: currentPage)
-            
-            VStack(spacing: 0) {
-                // Skip button
-                HStack {
-                    Spacer()
-                    if currentPage < pages.count - 1 {
-                        Button(action: {
-                            completeOnboarding(loadSampleData: false, requestNotifications: false)
-                        }) {
-                            Text("Skip")
-                                .font(.body)
-                                .foregroundColor(.secondary)
-                                .padding()
-                        }
-                    }
-                }
-                
-                Spacer()
-                
-                // Content
-                TabView(selection: $currentPage) {
-                    ForEach(0..<pages.count, id: \.self) { index in
-                        OnboardingPageView(page: pages[index])
-                            .tag(index)
-                    }
-                }
-                .tabViewStyle(.page(indexDisplayMode: .always))
-                .indexViewStyle(.page(backgroundDisplayMode: .always))
-                
-                Spacer()
-                
-                // Bottom buttons
-                VStack(spacing: 16) {
-                    if currentPage == pages.count - 1 {
-                        Button(action: {
-                            completeOnboarding(loadSampleData: false, requestNotifications: true)
-                        }) {
-                            Text("Start Empty")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 56)
-                                .background(pages[currentPage].color)
-                                .cornerRadius(16)
-                        }
-                        .padding(.horizontal, 32)
 
-                        Button(action: {
-                            completeOnboarding(loadSampleData: true, requestNotifications: true)
-                        }) {
-                            Text("Try Sample Data")
-                                .font(.body.weight(.semibold))
-                                .foregroundColor(pages[currentPage].color)
-                        }
-                    } else {
-                        // On other pages - show Next button
-                        Button(action: {
-                            withAnimation {
-                                currentPage += 1
-                            }
-                            HapticManager.shared.buttonTapped()
-                        }) {
-                            Text("Next")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 56)
-                                .background(pages[currentPage].color)
-                                .cornerRadius(16)
-                        }
-                        .padding(.horizontal, 32)
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                if currentPage < pages.count - 1 {
+                    Button("Skip") {
+                        completeOnboarding(loadSampleData: false, requestNotifications: false)
                     }
+                    .font(.body)
+                    .foregroundStyle(Brand.wordmark.opacity(0.7))
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
                 }
-                .padding(.bottom, 40)
             }
+            .frame(height: 52)
+
+            TabView(selection: $currentPage) {
+                ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
+                    OnboardingPageView(page: page, showsBrandMark: index == 0)
+                        .tag(index)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .always))
+            .indexViewStyle(.page(backgroundDisplayMode: .always))
+
+            VStack(spacing: 12) {
+                if currentPage == pages.count - 1 {
+                    Button {
+                        completeOnboarding(loadSampleData: false, requestNotifications: true)
+                    } label: {
+                        Text("Start Empty")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tint(Brand.action)
+
+                    Button {
+                        completeOnboarding(loadSampleData: true, requestNotifications: true)
+                    } label: {
+                        Text("Try Sample Data")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .tint(Brand.action)
+                } else {
+                    Button {
+                        withAnimation {
+                            currentPage += 1
+                        }
+                        HapticManager.shared.buttonTapped()
+                    } label: {
+                        Text("Continue")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tint(Brand.action)
+                }
+            }
+            .padding(.horizontal, 28)
+            .padding(.bottom, 28)
+            .padding(.top, 8)
+        }
+        .background {
+            Brand.splashBackground
+                .ignoresSafeArea()
         }
     }
-    
+
     private func completeOnboarding(loadSampleData: Bool, requestNotifications: Bool) {
         if requestNotifications {
             notificationManager.requestAuthorization()
@@ -142,55 +110,46 @@ struct OnboardingView: View {
     }
 }
 
-// MARK: - Onboarding Page Model
-struct OnboardingPage {
-    let icon: String
+private struct OnboardingPage {
+    let systemImage: String?
     let title: String
     let description: String
-    let color: Color
 }
 
-// MARK: - Onboarding Page View
-struct OnboardingPageView: View {
+private struct OnboardingPageView: View {
     let page: OnboardingPage
-    @State private var isAnimating = false
-    
+    var showsBrandMark: Bool
+
     var body: some View {
-        VStack(spacing: 30) {
-            // Icon
-            ZStack {
-                Circle()
-                    .fill(page.color.opacity(0.2))
-                    .frame(width: 160, height: 160)
-                    .scaleEffect(isAnimating ? 1.1 : 1.0)
-                    .opacity(isAnimating ? 0.5 : 1.0)
-                
-                Image(systemName: page.icon)
-                    .font(.system(size: 70))
-                    .foregroundColor(page.color)
-                    .scaleEffect(isAnimating ? 1.0 : 0.9)
-            }
-            
-            // Title
-            Text(page.title)
-                .font(.system(size: 28, weight: .bold))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-            
-            // Description
-            Text(page.description)
-                .font(.body)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-                .lineSpacing(4)
-        }
-        .padding()
-        .onAppear {
-            withAnimation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true)) {
-                isAnimating = true
+        VStack(spacing: 28) {
+            if showsBrandMark {
+                BrandLockup(markSize: 112, nameSize: 30, subtitle: page.description)
+                    .padding(.horizontal, 32)
+            } else {
+                if let systemImage = page.systemImage {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 40, weight: .medium))
+                        .foregroundStyle(Brand.navy)
+                        .frame(width: 96, height: 96)
+                        .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+                }
+
+                VStack(spacing: 10) {
+                    Text(page.title)
+                        .font(.title2.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(Brand.wordmark)
+
+                    Text(page.description)
+                        .font(.body)
+                        .foregroundStyle(Brand.wordmark.opacity(0.72))
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+                }
+                .padding(.horizontal, 32)
             }
         }
+        .padding(.bottom, 24)
     }
 }
 
@@ -198,4 +157,3 @@ struct OnboardingPageView: View {
     OnboardingView()
         .environmentObject(NotificationManager())
 }
-

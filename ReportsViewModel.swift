@@ -179,6 +179,7 @@ final class ReportsViewModel: ObservableObject {
     private static let lastCreditCardViewModeKey = "ReportsLastCreditCardViewMode"
     private static let categorySortDescendingKey = "ReportsCategorySortDescending"
     private static let usdBtcMonthsBackKey = "ReportsUsdBtcMonthsBack"
+    private static let usdBtcExcludedBillsKey = "ReportsUsdBtcExcludedBills"
 
     @Published var monthlyReport: MonthlyReportData?
     @Published var yearWrapReport: YearWrapData?
@@ -196,6 +197,9 @@ final class ReportsViewModel: ObservableObject {
     @Published var usdBtcBacktestEnabled: Bool = false
     /// Number of months to include in USD vs BTC report (e.g. 48 = 4 years).
     @Published var usdBtcMonthsBack: Int = 48
+    @Published var usdBtcExcludedBillNames: Set<String> = []
+    @Published var usdBtcAvailableBillNames: [String] = []
+    @Published var usdBtcEasterEggEligible: Bool = false
     @Published var isLoading = false
     @Published var errorMessage: String?
 
@@ -228,6 +232,9 @@ final class ReportsViewModel: ObservableObject {
         if storedMonths >= 12 {
             usdBtcMonthsBack = min(48, storedMonths)
         }
+        if let storedBills = UserDefaults.standard.array(forKey: Self.usdBtcExcludedBillsKey) as? [String] {
+            usdBtcExcludedBillNames = Set(storedBills)
+        }
     }
 
     var hasActiveBitcoinDigitalWallet: Bool {
@@ -243,12 +250,30 @@ final class ReportsViewModel: ObservableObject {
         UserDefaults.standard.set(descending, forKey: Self.categorySortDescendingKey)
     }
 
+    var showsUsdBtcEasterEgg: Bool {
+        hasActiveBitcoinDigitalWallet && usdBtcEasterEggEligible
+    }
+
     func setUsdBtcMonthsBack(_ months: Int) {
         let clamped = min(48, max(12, months))
         guard clamped != usdBtcMonthsBack else { return }
         usdBtcMonthsBack = clamped
         UserDefaults.standard.set(clamped, forKey: Self.usdBtcMonthsBackKey)
         Task { await loadUsdBtcReport() }
+    }
+
+    func toggleUsdBtcBill(_ name: String) {
+        if usdBtcExcludedBillNames.contains(name) {
+            usdBtcExcludedBillNames.remove(name)
+        } else {
+            usdBtcExcludedBillNames.insert(name)
+        }
+        UserDefaults.standard.set(Array(usdBtcExcludedBillNames), forKey: Self.usdBtcExcludedBillsKey)
+        Task { await loadUsdBtcReport() }
+    }
+
+    func isUsdBtcBillIncluded(_ name: String) -> Bool {
+        !usdBtcExcludedBillNames.contains(name)
     }
 
     func setUsdBtcBacktestEnabled(_ enabled: Bool) {
@@ -809,6 +834,8 @@ final class ReportsViewModel: ObservableObject {
     func loadUsdBtcReport() async {
         guard hasActiveBitcoinDigitalWallet else {
             usdBtcReport = nil
+            usdBtcAvailableBillNames = []
+            usdBtcEasterEggEligible = false
             return
         }
         errorMessage = nil
@@ -820,6 +847,8 @@ final class ReportsViewModel: ObservableObject {
         let currentPrice = bitcoinPriceService.btcToUsdRate
 
         guard !templates.isEmpty else {
+            usdBtcAvailableBillNames = []
+            usdBtcEasterEggEligible = false
             usdBtcReport = UsdBtcReportData(
                 months: [],
                 bills: [],
@@ -970,7 +999,13 @@ final class ReportsViewModel: ObservableObject {
             )
         }
 
-        usdBtcReport = UsdBtcReportData(
+        usdBtcAvailableBillNames = templates.map(\.name)
+        usdBtcEasterEggEligible = BillBtcBacktest.bitcoinSpendChange(
+            btcAmounts: months.map(\.btcAmount),
+            monthCount: months.count
+        ) != nil
+
+        let full = UsdBtcReportData(
             months: months,
             bills: bills,
             totalUsd: totalUsd,
@@ -980,6 +1015,54 @@ final class ReportsViewModel: ObservableObject {
             trackedBillNames: templates.map(\.name),
             estimatedMonths: estimatedMonths,
             actualMonths: actualMonths
+        )
+        usdBtcReport = filteredUsdBtcReport(full)
+    }
+
+    private func filteredUsdBtcReport(_ full: UsdBtcReportData) -> UsdBtcReportData {
+        guard !usdBtcExcludedBillNames.isEmpty else { return full }
+        let includedBills = full.bills.filter { !usdBtcExcludedBillNames.contains($0.name) }
+        guard includedBills.count != full.bills.count else { return full }
+        if includedBills.isEmpty {
+            return UsdBtcReportData(
+                months: [],
+                bills: [],
+                totalUsd: 0,
+                totalBtcAtTime: 0,
+                totalBtcValueNow: 0,
+                monthsBack: full.monthsBack,
+                trackedBillNames: [],
+                estimatedMonths: 0,
+                actualMonths: 0
+            )
+        }
+
+        var combined: [Date: UsdBtcMonthPoint] = [:]
+        for bill in includedBills {
+            for point in bill.months {
+                if var existing = combined[point.month] {
+                    existing.usdExpenses += point.usdExpenses
+                    existing.btcAtTime += point.btcAtTime
+                    existing.btcValueNow += point.btcValueNow
+                    existing.btcAmount += point.btcAmount
+                    existing.isEstimate = existing.isEstimate || point.isEstimate
+                    combined[point.month] = existing
+                } else {
+                    combined[point.month] = point
+                }
+            }
+        }
+        let months = combined.keys.sorted().compactMap { combined[$0] }
+        return UsdBtcReportData(
+            months: months,
+            bills: includedBills,
+            totalUsd: includedBills.reduce(0) { $0 + $1.totalUsd },
+            totalBtcAtTime: includedBills.reduce(0) { $0 + $1.totalBtcAtTime },
+            totalBtcValueNow: includedBills.reduce(0) { $0 + $1.totalBtcValueNow },
+            monthsBack: full.monthsBack,
+            trackedBillNames: includedBills.map(\.name),
+            estimatedMonths: months.filter(\.isEstimate).count,
+            actualMonths: months.filter { !$0.isEstimate && $0.usdExpenses > 0 }.count
         )
     }
 

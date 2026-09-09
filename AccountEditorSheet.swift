@@ -12,7 +12,7 @@ struct AccountEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let account: Account?
-    let onSave: (String, String, Decimal, Bool, String, String, Decimal, Decimal?, Decimal?) -> Void
+    let onSave: (String, String, Decimal, Bool, String, String, Decimal, Decimal?, Decimal?, Decimal) -> Void
 
     @State private var name: String
     @State private var type: String
@@ -21,6 +21,7 @@ struct AccountEditorSheet: View {
     @State private var currency: String
     @State private var btcDisplayFormat: String
     @State private var feePercentage: String
+    @State private var reserveBalance: String
     @State private var balanceInputFormat: String = "sats"
     @FocusState private var isBalanceFocused: Bool
 
@@ -49,8 +50,14 @@ struct AccountEditorSheet: View {
         return MoneyFormatting.parse(feePercentage, kind: .percent)
     }
 
+    private var parsedReserve: Decimal? {
+        if isBTCWallet { return 0 }
+        if reserveBalance.trimmingCharacters(in: .whitespaces).isEmpty { return 0 }
+        return MoneyFormatting.parse(reserveBalance, kind: .usd)
+    }
+
     private var canSave: Bool {
-        guard !name.trimmingCharacters(in: .whitespaces).isEmpty, parsedBalance != nil, let fee = parsedFee else {
+        guard !name.trimmingCharacters(in: .whitespaces).isEmpty, parsedBalance != nil, let fee = parsedFee, parsedReserve != nil else {
             return false
         }
         return fee >= 0 && fee <= 100
@@ -76,7 +83,7 @@ struct AccountEditorSheet: View {
         return nil
     }
 
-    init(account: Account?, onSave: @escaping (String, String, Decimal, Bool, String, String, Decimal, Decimal?, Decimal?) -> Void) {
+    init(account: Account?, onSave: @escaping (String, String, Decimal, Bool, String, String, Decimal, Decimal?, Decimal?, Decimal) -> Void) {
         self.account = account
         self.onSave = onSave
 
@@ -91,6 +98,8 @@ struct AccountEditorSheet: View {
             }
             let fee = account.feePercentageDecimal
             _feePercentage = State(initialValue: fee == 0 ? "" : MoneyFormatting.format(fee, kind: .percent))
+            let reserve = account.reserveBalanceDecimal
+            _reserveBalance = State(initialValue: reserve == 0 ? "" : MoneyFormatting.format(reserve, kind: .usd))
 
             if let balance = account.startingBalance, balance.decimalValue != 0 {
                 let value = balance.decimalValue
@@ -110,6 +119,7 @@ struct AccountEditorSheet: View {
             _currency = State(initialValue: "USD")
             _btcDisplayFormat = State(initialValue: "sats")
             _feePercentage = State(initialValue: "")
+            _reserveBalance = State(initialValue: "")
             _balanceInputFormat = State(initialValue: "sats")
         }
     }
@@ -203,6 +213,31 @@ struct AccountEditorSheet: View {
                         Text(balanceFooter)
                     }
                 }
+
+                if !isBTCWallet {
+                    Section {
+                        HStack {
+                            Text("Keep at least")
+                            Spacer(minLength: 12)
+                            MoneyTextField(
+                                text: $reserveBalance,
+                                kind: .usd,
+                                placeholder: "0.00",
+                                accessibilityLabel: "Keep at least",
+                                textAlignment: .trailing
+                            )
+                            .frame(maxWidth: 160)
+                        }
+                    } header: {
+                        Text("Reserve")
+                    } footer: {
+                        if parsedReserve == nil {
+                            Text("Enter a valid reserve amount")
+                        } else {
+                            Text("Auto-pay waits if paying a bill would leave this account below this amount.")
+                        }
+                    }
+                }
             }
             .navigationTitle(account == nil ? "New Account" : "Edit Account")
             .navigationBarTitleDisplayMode(.inline)
@@ -248,7 +283,7 @@ struct AccountEditorSheet: View {
             balanceDecimal = MoneyFormatting.btc(fromSats: balanceDecimal)
         }
         let feeDecimal = parsedFee ?? 0
-        onSave(trimmedName, type, balanceDecimal, isHidden, currency, btcDisplayFormat, feeDecimal, nil, nil)
+        onSave(trimmedName, type, balanceDecimal, isHidden, currency, btcDisplayFormat, feeDecimal, nil, nil, parsedReserve ?? 0)
         dismiss()
     }
 }

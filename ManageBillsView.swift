@@ -141,7 +141,7 @@ struct ManageBillsView: View {
         } header: {
             Text("Notifications")
         } footer: {
-            Text("Get a reminder the day before a bill is due, or the morning of auto-pay. You can also allow this the first time you add a bill.")
+            Text("Get a reminder the day before a bill is due, or the morning of auto-pay. Auto-pay waits and you’ll get a warning if paying would leave the linked account below its reserve.")
                 .font(.footnote)
         }
         .onAppear {

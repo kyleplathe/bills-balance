@@ -621,6 +621,7 @@ struct MonthBillList: View {
 
 // MARK: - Bill Row
 struct BillDueRow: View {
+    @EnvironmentObject private var billViewModel: BillViewModel
     let occurrence: BillOccurrence
     let currencyCode: String
     var compact: Bool = false
@@ -641,6 +642,11 @@ struct BillDueRow: View {
                     Text(accountName)
                         .font(.caption)
                         .foregroundColor(.secondary)
+                }
+                if billViewModel.wouldHoldAutoPay(bill) {
+                    Text("Auto-pay held — balance is short")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
                 }
                 if !compact, let paymentCard = bill.paymentCard, !paymentCard.isEmpty {
                     Label(paymentCard, systemImage: "creditcard.fill")

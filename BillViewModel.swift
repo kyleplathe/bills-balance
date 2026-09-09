@@ -142,6 +142,7 @@ class BillViewModel: ObservableObject {
             let fetched = try context.fetch(request)
             ensureUpcomingOccurrences(from: fetched)
             let afterEnsure = try context.fetch(request)
+            backfillBitcoinTracking(in: afterEnsure)
             let visible = filterVisibleBills(from: afterEnsure)
             bills = visible
             
@@ -154,6 +155,21 @@ class BillViewModel: ObservableObject {
             updateAppBadge()
         } catch {
             print("Error fetching bills: \(error)")
+        }
+    }
+
+    private func backfillBitcoinTracking(in bills: [Bill]) {
+        var didChange = false
+        for bill in bills {
+            guard let account = bill.account, account.isBitcoinDigitalWallet, !bill.trackInBitcoinFlag else { continue }
+            bill.trackInBitcoinFlag = true
+            didChange = true
+        }
+        guard didChange else { return }
+        do {
+            try context.save()
+        } catch {
+            print("Error backfilling Bitcoin tracking: \(error)")
         }
     }
     
@@ -254,7 +270,7 @@ class BillViewModel: ObservableObject {
         newBill.paymentCard = paymentCard
         newBill.account = account
         newBill.category = category
-        newBill.trackInBitcoinFlag = trackInBitcoin
+        newBill.trackInBitcoinFlag = trackInBitcoin || (account?.isBitcoinDigitalWallet == true)
         
         notificationManager.scheduleNotification(for: newBill)
         
@@ -317,7 +333,9 @@ class BillViewModel: ObservableObject {
         bill.account = account
         bill.category = category
         if let trackInBitcoin {
-            bill.trackInBitcoinFlag = trackInBitcoin
+            bill.trackInBitcoinFlag = trackInBitcoin || (account?.isBitcoinDigitalWallet == true)
+        } else if account?.isBitcoinDigitalWallet == true {
+            bill.trackInBitcoinFlag = true
         }
         
         // If bill is now credit card only (has paymentCard but no account), remove any ledger entries
@@ -1152,6 +1170,15 @@ class BillViewModel: ObservableObject {
             if billsBeingToggled.contains(bill.objectID) {
                 continue
             }
+            if wouldHoldAutoPay(bill) {
+                let account = bill.account
+                notificationManager.deliverShortfallNotification(
+                    for: bill,
+                    accountName: account?.name ?? "this account",
+                    reserve: account?.reserveBalanceDecimal ?? 0
+                )
+                continue
+            }
             notificationManager.cancelNotification(for: bill)
             notificationManager.deliverAutoPayNotification(for: bill)
             
@@ -1168,6 +1195,19 @@ class BillViewModel: ObservableObject {
         #endif
     }
     
+    func wouldHoldAutoPay(_ bill: Bill) -> Bool {
+        guard let account = bill.account, let accountViewModel else { return false }
+        return AutoPayShortfall.wouldHold(
+            autoPay: bill.autoPay,
+            isPaid: bill.isPaid,
+            currencyCode: account.currencyCode,
+            currentBalance: accountViewModel.totalBalance(for: account),
+            billAmount: bill.amountDecimal,
+            feePercentage: account.feePercentageDecimal,
+            reserve: account.reserveBalanceDecimal
+        )
+    }
+
     private func saveContext() {
         do {
             try context.save()

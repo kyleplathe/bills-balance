@@ -37,6 +37,30 @@ struct StatementImportSheet: View {
     @State private var keepCurrentBalance = true
     @State private var categoryOverrides: [UUID: String] = [:]
     @State private var editingCategoryTxId: UUID?
+    @State private var workingTransactions: [ParsedStatementTransaction] = []
+    @State private var originalTitles: [UUID: String] = [:]
+    @State private var expandedTxId: UUID?
+    @State private var applySimilarPrompt: ApplySimilarPrompt?
+    @State private var dismissedTransferIds: Set<UUID> = []
+
+    private struct ApplySimilarPrompt: Identifiable {
+        let id = UUID()
+        let txId: UUID
+        let similarCount: Int
+        let title: String
+        let category: String?
+    }
+
+    private struct PossibleTransferSuggestion: Identifiable {
+        var id: UUID { txId }
+        var txId: UUID
+        var counterpartURI: String
+        var counterpartAccountName: String
+        var counterpartDate: Date
+        var amount: Decimal
+        var importTitle: String
+        var isCredit: Bool
+    }
 
     private let dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -53,8 +77,12 @@ struct StatementImportSheet: View {
         return f
     }()
 
+    private var displayTransactions: [ParsedStatementTransaction] {
+        workingTransactions.isEmpty ? transactions : workingTransactions
+    }
+
     private var selectedTransactions: [ParsedStatementTransaction] {
-        transactions.filter { includedIds.contains($0.id) }
+        displayTransactions.filter { includedIds.contains($0.id) }
     }
 
     private var skipCount: Int {
@@ -107,33 +135,21 @@ struct StatementImportSheet: View {
                     }
                 }
 
-                Section(header: Text("Transactions (\(transactions.count))")) {
-                    ForEach(transactions) { tx in
-                        HStack(spacing: 12) {
-                            Toggle("", isOn: Binding(
-                                get: { includedIds.contains(tx.id) },
-                                set: { on in
-                                    var next = includedIds
-                                    if on { next.insert(tx.id) } else { next.remove(tx.id) }
-                                    includedIds = next
-                                }
-                            ))
-                            .labelsHidden()
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(tx.title)
-                                    .lineLimit(2)
-                                Text(subtitle(for: tx))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                importCategoryChip(for: tx)
-                            }
-
-                            Spacer()
-
-                            Text(currencyFormatter.string(from: (tx.amount as NSDecimalNumber)) ?? "$0")
-                                .foregroundStyle(tx.isCredit ? .green : .primary)
+                if !possibleTransfers.isEmpty {
+                    Section {
+                        ForEach(possibleTransfers) { suggestion in
+                            possibleTransferRow(suggestion)
                         }
+                    } header: {
+                        Text("Possible transfers")
+                    } footer: {
+                        Text("Matching amounts on another account within 3 days. Confirm to label both sides as a transfer instead of income or spending.")
+                    }
+                }
+
+                Section(header: Text("Transactions (\(displayTransactions.count))")) {
+                    ForEach(displayTransactions) { tx in
+                        importTransactionRow(tx)
                     }
                 }
             }
@@ -154,8 +170,11 @@ struct StatementImportSheet: View {
                 }
             }
             .onAppear {
+                if workingTransactions.isEmpty {
+                    prepareWorkingTransactions()
+                }
                 if includedIds.isEmpty {
-                    includedIds = Set(transactions.filter(defaultIncluded).map(\.id))
+                    includedIds = Set(displayTransactions.filter(defaultIncluded).map(\.id))
                 }
                 if selectedAccount == nil {
                     selectedAccount = preferredAccount()
@@ -165,6 +184,20 @@ struct StatementImportSheet: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text("Choose an account to import into.")
+            }
+            .alert("Apply to similar?", isPresented: Binding(
+                get: { applySimilarPrompt != nil },
+                set: { if !$0 { applySimilarPrompt = nil } }
+            ), presenting: applySimilarPrompt) { prompt in
+                Button("This item only", role: .cancel) {
+                    persistRewrite(for: prompt.txId)
+                    applySimilarPrompt = nil
+                }
+                Button("Apply to \(prompt.similarCount + 1)") {
+                    applyToSimilar(prompt)
+                }
+            } message: { prompt in
+                Text("Update \(prompt.similarCount) other row\(prompt.similarCount == 1 ? "" : "s") that match this amount or description.")
             }
         }
     }
@@ -254,6 +287,243 @@ struct StatementImportSheet: View {
         return parts.joined(separator: " · ")
     }
 
+    private var possibleTransfers: [PossibleTransferSuggestion] {
+        guard let account = selectedAccount else { return [] }
+        let counterparts = accountViewModel.transferCounterparts(excluding: account)
+        var used = Set<Int>()
+        var suggestions: [PossibleTransferSuggestion] = []
+        let bitcoinAccount = account.currencyCode == "BTC"
+        for tx in displayTransactions {
+            guard !dismissedTransferIds.contains(tx.id) else { continue }
+            guard tx.transferCounterpartURI == nil else { continue }
+            let isCredit = StatementImportRunner.credit(for: tx, bitcoinAccount: bitcoinAccount)
+            if let idx = StatementImportMatching.transferMatchIndex(
+                usdAmount: tx.amount,
+                btcAmount: tx.btcAmount,
+                isCredit: isCredit,
+                date: tx.date,
+                in: counterparts,
+                used: used
+            ) {
+                used.insert(idx)
+                let match = counterparts[idx]
+                suggestions.append(PossibleTransferSuggestion(
+                    txId: tx.id,
+                    counterpartURI: match.uri,
+                    counterpartAccountName: match.accountName,
+                    counterpartDate: match.date,
+                    amount: tx.amount,
+                    importTitle: tx.title,
+                    isCredit: isCredit
+                ))
+            }
+        }
+        return suggestions
+    }
+
+    private func prepareWorkingTransactions() {
+        var prepared = transactions
+        var originals: [UUID: String] = [:]
+        for i in prepared.indices {
+            originals[prepared[i].id] = prepared[i].title
+            if let rewrite = ImportTitleRewriteStore.rewrite(for: prepared[i].title) {
+                prepared[i].title = rewrite.preferredTitle
+                if let cat = rewrite.category, !cat.isEmpty {
+                    prepared[i].category = cat
+                    categoryOverrides[prepared[i].id] = cat
+                }
+            }
+        }
+        originalTitles = originals
+        workingTransactions = prepared
+    }
+
+    @ViewBuilder
+    private func possibleTransferRow(_ suggestion: PossibleTransferSuggestion) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "arrow.left.arrow.right")
+                    .foregroundStyle(.teal)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(suggestion.importTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Text("\(suggestion.counterpartAccountName) · \(dateFormatter.string(from: suggestion.counterpartDate))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(currencyFormatter.string(from: suggestion.amount as NSDecimalNumber) ?? "$0")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.teal)
+            }
+            HStack {
+                Button("Not a transfer") {
+                    dismissedTransferIds.insert(suggestion.txId)
+                }
+                .buttonStyle(.bordered)
+                Spacer()
+                Button("Confirm") {
+                    confirmTransfer(suggestion)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func confirmTransfer(_ suggestion: PossibleTransferSuggestion) {
+        guard let idx = workingTransactions.firstIndex(where: { $0.id == suggestion.txId }) else { return }
+        workingTransactions[idx].transferCounterpartURI = suggestion.counterpartURI
+        workingTransactions[idx].category = LedgerTransfer.category
+        categoryOverrides[suggestion.txId] = LedgerTransfer.category
+        if suggestion.isCredit {
+            workingTransactions[idx].title = LedgerTransfer.creditTitle(
+                fromAccountName: suggestion.counterpartAccountName,
+                fromIsCreditAccount: false
+            )
+        } else {
+            workingTransactions[idx].title = LedgerTransfer.debitTitle(
+                toAccountName: suggestion.counterpartAccountName,
+                toIsCreditAccount: false
+            )
+        }
+        includedIds.insert(suggestion.txId)
+    }
+
+    @ViewBuilder
+    private func importTransactionRow(_ tx: ParsedStatementTransaction) -> some View {
+        let isExpanded = expandedTxId == tx.id
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                Toggle("", isOn: Binding(
+                    get: { includedIds.contains(tx.id) },
+                    set: { on in
+                        var next = includedIds
+                        if on { next.insert(tx.id) } else { next.remove(tx.id) }
+                        includedIds = next
+                    }
+                ))
+                .labelsHidden()
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        expandedTxId = isExpanded ? nil : tx.id
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(tx.title)
+                            .lineLimit(isExpanded ? 4 : 2)
+                            .foregroundStyle(.primary)
+                            .multilineTextAlignment(.leading)
+                        Text(subtitle(for: tx))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if !isExpanded {
+                            importCategoryChip(for: tx)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+
+                Text(currencyFormatter.string(from: (tx.amount as NSDecimalNumber)) ?? "$0")
+                    .foregroundStyle(tx.isCredit ? .green : .primary)
+            }
+
+            if isExpanded {
+                TextField("Description", text: titleBinding(for: tx.id))
+                    .textFieldStyle(.roundedBorder)
+                TextField("Notes (optional)", text: notesBinding(for: tx.id), axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(2...4)
+                importCategoryChip(for: tx)
+                let similarCount = similarIds(for: tx).count
+                if similarCount > 0 {
+                    Button {
+                        promptApplySimilar(tx)
+                    } label: {
+                        Label("Apply to \(similarCount) similar", systemImage: "rectangle.stack")
+                    }
+                    .font(.caption)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func titleBinding(for id: UUID) -> Binding<String> {
+        Binding(
+            get: { workingTransactions.first(where: { $0.id == id })?.title ?? "" },
+            set: { newValue in
+                if let i = workingTransactions.firstIndex(where: { $0.id == id }) {
+                    workingTransactions[i].title = newValue
+                }
+            }
+        )
+    }
+
+    private func notesBinding(for id: UUID) -> Binding<String> {
+        Binding(
+            get: { workingTransactions.first(where: { $0.id == id })?.notes ?? "" },
+            set: { newValue in
+                if let i = workingTransactions.firstIndex(where: { $0.id == id }) {
+                    workingTransactions[i].notes = newValue.isEmpty ? nil : newValue
+                }
+            }
+        )
+    }
+
+    private func similarIds(for tx: ParsedStatementTransaction) -> [UUID] {
+        let original = originalTitles[tx.id] ?? tx.title
+        return StatementImportMatching.similarTransactionIds(
+            to: tx,
+            originalTitle: original,
+            in: displayTransactions,
+            originalTitles: originalTitles
+        )
+    }
+
+    private func promptApplySimilar(_ tx: ParsedStatementTransaction) {
+        let similar = similarIds(for: tx)
+        persistRewrite(for: tx.id)
+        guard !similar.isEmpty else { return }
+        applySimilarPrompt = ApplySimilarPrompt(
+            txId: tx.id,
+            similarCount: similar.count,
+            title: tx.title,
+            category: resolvedCategory(for: tx)
+        )
+    }
+
+    private func applyToSimilar(_ prompt: ApplySimilarPrompt) {
+        persistRewrite(for: prompt.txId)
+        let source = displayTransactions.first(where: { $0.id == prompt.txId })
+        let similar = source.map { similarIds(for: $0) } ?? []
+        for id in similar {
+            if let i = workingTransactions.firstIndex(where: { $0.id == id }) {
+                workingTransactions[i].title = prompt.title
+                if let cat = prompt.category {
+                    workingTransactions[i].category = cat
+                    categoryOverrides[id] = cat
+                }
+            }
+        }
+        applySimilarPrompt = nil
+    }
+
+    private func persistRewrite(for txId: UUID) {
+        guard let original = originalTitles[txId],
+              let tx = workingTransactions.first(where: { $0.id == txId })
+        else { return }
+        let cat = resolvedCategory(for: tx)
+        ImportTitleRewriteStore.save(
+            originalTitle: original,
+            preferredTitle: tx.title,
+            category: cat.isEmpty ? nil : cat
+        )
+    }
+
     // MARK: - Category suggestion helpers
 
     private func resolvedCategory(for tx: ParsedStatementTransaction) -> String {
@@ -302,12 +572,16 @@ struct StatementImportSheet: View {
                 usage: accountViewModel.categoryUsage(),
                 onSelect: { chosen in
                     categoryOverrides[tx.id] = chosen
-                    // Also apply to all transactions with the same title
-                    let normalizedTitle = tx.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-                    for other in transactions where other.id != tx.id {
-                        if other.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) == normalizedTitle {
-                            if categoryOverrides[other.id] == nil || categoryOverrides[other.id]?.isEmpty == true {
-                                categoryOverrides[other.id] = chosen
+                    if let i = workingTransactions.firstIndex(where: { $0.id == tx.id }) {
+                        workingTransactions[i].category = chosen.isEmpty ? nil : chosen
+                    }
+                    persistRewrite(for: tx.id)
+                    let similar = similarIds(for: tx)
+                    for otherId in similar {
+                        if categoryOverrides[otherId] == nil || categoryOverrides[otherId]?.isEmpty == true {
+                            categoryOverrides[otherId] = chosen
+                            if let i = workingTransactions.firstIndex(where: { $0.id == otherId }) {
+                                workingTransactions[i].category = chosen.isEmpty ? nil : chosen
                             }
                         }
                     }
@@ -323,7 +597,6 @@ struct StatementImportSheet: View {
             showNoAccountAlert = true
             return
         }
-        // Apply category overrides + auto-suggestions to transactions before import
         var toImport = selectedTransactions
         for i in toImport.indices {
             let cat = resolvedCategory(for: toImport[i])
@@ -449,6 +722,13 @@ enum StatementImportRunner {
             }
 
             let notes: String = {
+                if let custom = tx.notes?.trimmingCharacters(in: .whitespacesAndNewlines), !custom.isEmpty {
+                    var lines = [custom]
+                    if let ref = tx.sourceReference, !ref.isEmpty, !custom.contains(StrikeCSVParser.referenceNotePrefix) {
+                        lines.append("\(StrikeCSVParser.referenceNotePrefix) \(ref)")
+                    }
+                    return lines.joined(separator: "\n")
+                }
                 if tx.kind == .billPay {
                     return StrikeCSVParser.notes(payee: tx.title, feeUSD: tx.feeUSD, reference: tx.sourceReference)
                 }
@@ -462,7 +742,8 @@ enum StatementImportRunner {
                 return lines.joined(separator: "\n")
             }()
 
-            if tx.kind == .billPay,
+            if tx.transferCounterpartURI == nil,
+               tx.kind == .billPay,
                let matched = BillPayMatcher.match(payee: tx.title, amount: tx.amount, on: tx.date, among: billViewModel.allBills()) {
                 billViewModel.applyImportedPayment(
                     to: matched,
@@ -488,7 +769,7 @@ enum StatementImportRunner {
             }()
 
             let category = tx.category?.trimmingCharacters(in: .whitespacesAndNewlines)
-            accountViewModel.addManualEntry(
+            let created = accountViewModel.addManualEntry(
                 to: account,
                 title: tx.title,
                 btcAmount: signedBTC,
@@ -499,8 +780,12 @@ enum StatementImportRunner {
                 isReconciled: true,
                 category: (category?.isEmpty == false) ? category : nil,
                 feeAmount: tx.feeUSD,
-                isCreditOverride: isCredit
+                isCreditOverride: isCredit,
+                save: false
             )
+            if let uri = tx.transferCounterpartURI, !uri.isEmpty {
+                accountViewModel.pairImportedTransfer(created, counterpartURI: uri)
+            }
             importedCount += 1
             importedForBalance.append(tx)
             rememberImported(tx, isBTC: isBTC, batch: &batchFingerprints)

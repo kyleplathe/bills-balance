@@ -97,6 +97,11 @@ extension Account {
     var startingBalanceBTCPriceDecimal: Decimal {
         (value(forKey: "startingBalanceBTCPrice") as? NSDecimalNumber)?.decimalValue ?? .zero
     }
+
+    var reserveBalanceDecimal: Decimal {
+        get { (value(forKey: "reserveBalance") as? NSDecimalNumber)?.decimalValue ?? .zero }
+        set { setValue(NSDecimalNumber(decimal: newValue), forKey: "reserveBalance") }
+    }
 }
 
 extension Bill {

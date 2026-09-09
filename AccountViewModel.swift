@@ -100,7 +100,7 @@ class AccountViewModel: ObservableObject {
     
     // MARK: - Accounts
     @discardableResult
-    func addAccount(name: String, type: String, startingBalance: Decimal, isHidden: Bool = false, currency: String = "USD", btcDisplayFormat: String = "sats", feePercentage: Decimal = 0, startingBalanceUSD: Decimal? = nil, startingBalanceBTCPrice: Decimal? = nil) -> Account {
+    func addAccount(name: String, type: String, startingBalance: Decimal, isHidden: Bool = false, currency: String = "USD", btcDisplayFormat: String = "sats", feePercentage: Decimal = 0, startingBalanceUSD: Decimal? = nil, startingBalanceBTCPrice: Decimal? = nil, reserveBalance: Decimal = 0) -> Account {
         let account = Account(context: context)
         account.id = UUID()
         account.name = name
@@ -126,6 +126,7 @@ class AccountViewModel: ObservableObject {
         if let btcPrice = startingBalanceBTCPrice {
             account.startingBalanceBTCPrice = NSDecimalNumber(decimal: btcPrice)
         }
+        account.reserveBalanceDecimal = currency == "USD" ? reserveBalance : 0
         
         saveContext()
         fetchAccounts()
@@ -134,7 +135,7 @@ class AccountViewModel: ObservableObject {
         return account
     }
     
-    func updateAccount(_ account: Account, name: String, type: String, startingBalance: Decimal, isHidden: Bool = false, currency: String = "USD", btcDisplayFormat: String = "sats", feePercentage: Decimal = 0, startingBalanceUSD: Decimal? = nil, startingBalanceBTCPrice: Decimal? = nil) {
+    func updateAccount(_ account: Account, name: String, type: String, startingBalance: Decimal, isHidden: Bool = false, currency: String = "USD", btcDisplayFormat: String = "sats", feePercentage: Decimal = 0, startingBalanceUSD: Decimal? = nil, startingBalanceBTCPrice: Decimal? = nil, reserveBalance: Decimal = 0) {
         account.name = name
         account.type = type
         account.startingBalance = NSDecimalNumber(decimal: startingBalance)
@@ -155,6 +156,7 @@ class AccountViewModel: ObservableObject {
         } else {
             account.startingBalanceBTCPrice = nil
         }
+        account.reserveBalanceDecimal = currency == "USD" ? reserveBalance : 0
         
         saveContext()
         fetchAccounts()
@@ -429,6 +431,26 @@ class AccountViewModel: ObservableObject {
         }
     }
 
+    func trailingIncomeDepositAmounts(days: Int = 90, now: Date = Date(), calendar: Calendar = .current) -> [Decimal] {
+        let startOfToday = calendar.startOfDay(for: now)
+        guard let start = calendar.date(byAdding: .day, value: -days, to: startOfToday) else { return [] }
+        let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
+        request.predicate = NSPredicate(
+            format: "isCredit == YES AND category == %@ AND date >= %@ AND date < %@",
+            "Income",
+            start as NSDate,
+            now as NSDate
+        )
+        request.fetchBatchSize = 50
+        let entries = (try? context.fetch(request)) ?? []
+        return entries.compactMap { entry in
+            guard let account = entry.account, !account.isHiddenFlag, account.currencyCode == "USD" else { return nil }
+            let usd = entry.usdAmountDecimal != 0 ? entry.usdAmountDecimal : entry.amountDecimal
+            guard usd > 0 else { return nil }
+            return usd
+        }
+    }
+
     func existingStrikeReferences() -> Set<String> {
         let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
         request.fetchBatchSize = 50
@@ -453,6 +475,67 @@ class AccountViewModel: ObservableObject {
                 title: entry.title ?? "",
                 isCredit: entry.isCredit,
                 sourceReference: StrikeCSVParser.reference(from: entry.notes)
+            )
+        }
+    }
+
+    func transferCounterparts(excluding account: Account) -> [StatementImportMatching.TransferCounterpart] {
+        let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
+        request.predicate = NSPredicate(format: "account != nil AND account != %@", account)
+        request.fetchBatchSize = 50
+        let entries = (try? context.fetch(request)) ?? []
+        return entries.compactMap { entry in
+            guard let date = entry.date, let other = entry.account, !other.isHiddenFlag else { return nil }
+            let amount: Decimal = {
+                if entry.usdAmountDecimal != 0 { return entry.usdAmountDecimal.magnitude }
+                return entry.amountDecimal.magnitude
+            }()
+            let btc: Decimal? = entry.btcAmountDecimal > 0 ? entry.btcAmountDecimal.magnitude : nil
+            let title = entry.title ?? ""
+            return StatementImportMatching.TransferCounterpart(
+                uri: entry.objectID.uriRepresentation().absoluteString,
+                accountName: other.name ?? "Account",
+                date: date,
+                amount: amount,
+                btcAmount: btc,
+                isCredit: entry.isCredit,
+                alreadyPaired: LedgerTransfer.pairId(from: entry.notes) != nil
+                    || LedgerTransfer.isTransfer(category: entry.category, title: title)
+            )
+        }
+    }
+
+    func pairImportedTransfer(_ entry: LedgerEntry, counterpartURI: String) {
+        guard let url = URL(string: counterpartURI),
+              let objectID = context.persistentStoreCoordinator?.managedObjectID(forURIRepresentation: url),
+              let counterpart = try? context.existingObject(with: objectID) as? LedgerEntry,
+              let thisAccount = entry.account,
+              let otherAccount = counterpart.account
+        else { return }
+
+        let pairId = LedgerTransfer.pairId(from: counterpart.notes) ?? UUID()
+        entry.notes = LedgerTransfer.appendingPairId(to: entry.notes, pairId: pairId)
+        counterpart.notes = LedgerTransfer.appendingPairId(to: counterpart.notes, pairId: pairId)
+        entry.category = LedgerTransfer.category
+        counterpart.category = LedgerTransfer.category
+
+        if entry.isCredit {
+            entry.title = LedgerTransfer.creditTitle(
+                fromAccountName: otherAccount.name ?? "Account",
+                fromIsCreditAccount: LedgerTransfer.isCreditAccount(otherAccount.type)
+            )
+            counterpart.title = LedgerTransfer.debitTitle(
+                toAccountName: thisAccount.name ?? "Account",
+                toIsCreditAccount: LedgerTransfer.isCreditAccount(thisAccount.type)
+            )
+        } else {
+            entry.title = LedgerTransfer.debitTitle(
+                toAccountName: otherAccount.name ?? "Account",
+                toIsCreditAccount: LedgerTransfer.isCreditAccount(otherAccount.type)
+            )
+            counterpart.title = LedgerTransfer.creditTitle(
+                fromAccountName: thisAccount.name ?? "Account",
+                fromIsCreditAccount: LedgerTransfer.isCreditAccount(thisAccount.type)
             )
         }
     }
@@ -1329,7 +1412,9 @@ class AccountViewModel: ObservableObject {
             var seen = Set<String>()
             var out: [String] = []
             for e in entries {
-                guard let t = e.title, !t.isEmpty, seen.insert(t).inserted else { continue }
+                guard let t = e.title?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { continue }
+                let key = t.lowercased()
+                guard seen.insert(key).inserted else { continue }
                 out.append(t)
                 if out.count >= limit { break }
             }

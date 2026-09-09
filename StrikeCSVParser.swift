@@ -344,7 +344,7 @@ enum BillPayMatcher {
         let unpaid = bills.filter { !$0.isPaid }
         guard !unpaid.isEmpty else { return nil }
 
-        let scored: [(Bill, Int)] = unpaid.compactMap { bill in
+        let windowed: [(bill: Bill, amountOK: Bool, nameScore: Int, score: Int)] = unpaid.compactMap { bill in
             guard let due = bill.dueDate else { return nil }
             let days = abs(calendar.dateComponents([.day], from: calendar.startOfDay(for: due), to: calendar.startOfDay(for: date)).day ?? 999)
             guard days <= 16 else { return nil }
@@ -357,15 +357,21 @@ enum BillPayMatcher {
             score += max(0, 16 - days)
             if score < 50 { return nil }
             if !amountOK && nameScore < 80 { return nil }
-            return (bill, score)
+            return (bill, amountOK, nameScore, score)
         }
-        .sorted { $0.1 > $1.1 }
+        .sorted { $0.score > $1.score }
 
-        guard let best = scored.first else { return nil }
-        if scored.count > 1, scored[1].1 == best.1, nameScore(payee: payee, billName: best.0.name ?? "") == 0 {
-            return nil
+        let named = windowed.filter { $0.nameScore > 0 }
+        if let bestNamed = named.first {
+            if named.count > 1, named[1].score == bestNamed.score {
+                return nil
+            }
+            return bestNamed.bill
         }
-        return best.0
+
+        let amountOnly = windowed.filter { $0.amountOK }
+        guard amountOnly.count == 1 else { return nil }
+        return amountOnly[0].bill
     }
 
     static func nameScore(payee: String, billName: String) -> Int {

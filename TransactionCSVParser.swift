@@ -33,6 +33,9 @@ struct ParsedStatementTransaction: Identifiable, Equatable {
     var sourceReference: String? = nil
     var kind: Kind = .generic
     var category: String? = nil
+    var notes: String? = nil
+    /// Object-ID URI of a confirmed counterpart ledger row on another account.
+    var transferCounterpartURI: String? = nil
 }
 
 enum TransactionCSVParseError: LocalizedError {

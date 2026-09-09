@@ -43,6 +43,10 @@ struct BillListView: View {
     @State private var completionPulseScale: Double = 1.0
     @State private var completionShimmerOffset: Double = -1.0
     @State private var completionGlowRadius: Double = 8.0
+    @State private var progressBarBounce: CGFloat = 1.0
+    @State private var completionFlashOpacity: Double = 0
+    @State private var celebrateCompletion = false
+    @State private var celebrationToken = 0
     @State private var showingManageBills = false
     
     struct CoinAnimation: Identifiable {
@@ -78,7 +82,7 @@ struct BillListView: View {
     private var billRowInsets: EdgeInsets {
         useCompactRows
             ? EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12)
-            : EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16)
+            : EdgeInsets(top: 7, leading: 16, bottom: 7, trailing: 16)
     }
 
     @ViewBuilder
@@ -103,7 +107,17 @@ struct BillListView: View {
                 ForEach(dollarAnimations) { dollar in
                     FallingDollarBillView(spec: dollar.spec)
                 }
-                
+            }
+            .overlayPreferenceValue(PaidBarAnchorKey.self) { anchor in
+                GeometryReader { proxy in
+                    if let anchor, celebrateCompletion {
+                        PaidProgressBurst(accent: bitcoinPriceService.showInBitcoin ? .orange : Brand.mint)
+                            .id(celebrationToken)
+                            .frame(width: 176, height: 96)
+                            .position(x: proxy[anchor].midX, y: proxy[anchor].midY)
+                    }
+                }
+                .allowsHitTesting(false)
             }
             .onAppear {
                 // Store geometry size for animation positioning
@@ -444,92 +458,99 @@ struct BillListView: View {
                 Spacer()
                 if currentMonthBillCount > 0 {
                     VStack(alignment: .trailing, spacing: 8) {
-                        ZStack(alignment: .trailing) {
-                            // Neon glow progress bar
-                            ZStack {
-                                ProgressView(value: Double(currentMonthPaidCount),
-                                             total: Double(currentMonthBillCount))
-                                    .progressViewStyle(.linear)
-                                    .tint(isBitcoinMode ? .orange : .green)
-                                    .frame(width: 120)
-                                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isBitcoinMode)
-                                    .shadow(color: isBitcoinMode ? Color.orange.opacity(0.8) : Color.green.opacity(0.8), radius: 4)
-                                    .shadow(color: isBitcoinMode ? Color.orange.opacity(0.6) : Color.green.opacity(0.6), radius: 8)
-                                    .shadow(color: isBitcoinMode ? Color.orange.opacity(0.4) : Color.green.opacity(0.4), radius: 12)
-                                    .overlay(
-                                        // Inner glow effect with pulse
-                                        GeometryReader { geometry in
-                                            let progress = currentMonthBillCount > 0 ? CGFloat(currentMonthPaidCount) / CGFloat(currentMonthBillCount) : 0
-                                            ZStack {
-                                                // Base inner glow - soft capsule shape to avoid rectangle edges
-                                                Capsule()
-                                                    .fill(
-                                                        LinearGradient(
-                                                            colors: [
-                                                                (isBitcoinMode ? Color.orange : Color.green).opacity(0.3),
-                                                                (isBitcoinMode ? Color.orange : Color.green).opacity(0.1),
-                                                                (isBitcoinMode ? Color.orange : Color.green).opacity(0.3)
-                                                            ],
-                                                            startPoint: .leading,
-                                                            endPoint: .trailing
-                                                        )
+                        ProgressView(value: Double(currentMonthPaidCount),
+                                     total: Double(currentMonthBillCount))
+                            .progressViewStyle(.linear)
+                            .tint(isBitcoinMode ? .orange : .green)
+                            .frame(width: 120)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isBitcoinMode)
+                            .shadow(color: (isBitcoinMode ? Color.orange : Color.green).opacity(0.8), radius: isComplete ? max(4, completionGlowRadius * 0.28) : 4)
+                            .shadow(color: (isBitcoinMode ? Color.orange : Color.green).opacity(0.6), radius: isComplete ? max(8, completionGlowRadius * 0.5) : 8)
+                            .shadow(color: (isBitcoinMode ? Color.orange : Color.green).opacity(0.4), radius: isComplete ? max(12, completionGlowRadius * 0.72) : 12)
+                            .overlay {
+                                GeometryReader { geometry in
+                                    let progress = currentMonthBillCount > 0 ? CGFloat(currentMonthPaidCount) / CGFloat(currentMonthBillCount) : 0
+                                    ZStack(alignment: .leading) {
+                                        Capsule()
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: [
+                                                        (isBitcoinMode ? Color.orange : Color.green).opacity(0.3),
+                                                        (isBitcoinMode ? Color.orange : Color.green).opacity(0.1),
+                                                        (isBitcoinMode ? Color.orange : Color.green).opacity(0.3)
+                                                    ],
+                                                    startPoint: .leading,
+                                                    endPoint: .trailing
+                                                )
+                                            )
+                                            .frame(width: geometry.size.width * progress, height: geometry.size.height)
+                                            .blur(radius: 3)
+                                            .opacity(neonGlowIntensity)
+                                            .scaleEffect(x: isComplete ? min(completionPulseScale, 1.04) : 1.0, y: 1.0, anchor: .leading)
+
+                                        if isComplete && progress >= 1.0 {
+                                            Capsule()
+                                                .fill(
+                                                    LinearGradient(
+                                                        colors: [
+                                                            Color.white.opacity(0),
+                                                            Color.white.opacity(0.7),
+                                                            Color.white.opacity(0)
+                                                        ],
+                                                        startPoint: UnitPoint(x: completionShimmerOffset, y: 0),
+                                                        endPoint: UnitPoint(x: completionShimmerOffset + 0.28, y: 0)
                                                     )
-                                                    .frame(width: geometry.size.width * progress, height: geometry.size.height)
-                                                    .blur(radius: 3)
-                                                    .opacity(neonGlowIntensity)
-                                                    // Subtle pulse - only slight scale when complete
-                                                    .scaleEffect(x: isComplete ? min(completionPulseScale, 1.03) : 1.0, y: 1.0, anchor: .leading)
-                                                
-                                                // Completion shimmer effect
-                                                if isComplete && progress >= 1.0 {
-                                                    Capsule()
-                                                        .fill(
-                                                            LinearGradient(
-                                                                colors: [
-                                                                    Color.white.opacity(0),
-                                                                    Color.white.opacity(0.6),
-                                                                    Color.white.opacity(0)
-                                                                ],
-                                                                startPoint: UnitPoint(x: completionShimmerOffset, y: 0),
-                                                                endPoint: UnitPoint(x: completionShimmerOffset + 0.3, y: 0)
-                                                            )
-                                                        )
-                                                        .frame(width: geometry.size.width * progress, height: geometry.size.height)
-                                                        .blur(radius: 1)
-                                                }
-                                            }
+                                                )
+                                                .frame(width: geometry.size.width, height: geometry.size.height)
+                                                .blur(radius: 0.8)
+
+                                            Capsule()
+                                                .fill(Color.white.opacity(completionFlashOpacity))
+                                                .blendMode(.plusLighter)
                                         }
-                                    )
-                            }
-                        }
-                        .onAppear {
-                            // Check if already complete on appear
-                            let nowComplete = currentMonthBillCount > 0 && currentMonthPaidCount == currentMonthBillCount
-                            self.isComplete = nowComplete
-                            
-                            if nowComplete {
-                                // Start completion animation if already complete
-                                startCompletionAnimation()
-                            } else {
-                                // Start continuous neon glow animation
-                                withAnimation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true)) {
-                                    neonGlowIntensity = 1.0
+                                    }
                                 }
+                                .allowsHitTesting(false)
                             }
-                            
-                            // Update last state
-                            lastProgressState = (currentMonthPaidCount, currentMonthBillCount)
+                            .scaleEffect(progressBarBounce)
+                            .anchorPreference(key: PaidBarAnchorKey.self, value: .bounds) { $0 }
+                            .onAppear {
+                                let nowComplete = currentMonthBillCount > 0 && currentMonthPaidCount == currentMonthBillCount
+                                self.isComplete = nowComplete
+
+                                if nowComplete {
+                                    startCompletionAnimation(celebrating: false)
+                                } else {
+                                    withAnimation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true)) {
+                                        neonGlowIntensity = 1.0
+                                    }
+                                }
+
+                                lastProgressState = (currentMonthPaidCount, currentMonthBillCount)
+                            }
+                            .onChange(of: currentMonthPaidCount) { oldValue, newValue in
+                                checkProgressCompletion(oldPaid: oldValue, newPaid: newValue)
+                            }
+                            .onChange(of: currentMonthBillCount) { oldValue, newValue in
+                                checkProgressCompletion(oldPaid: currentMonthPaidCount, newPaid: currentMonthPaidCount)
+                            }
+
+                        HStack(spacing: 4) {
+                            if isComplete {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(isBitcoinMode ? Color.orange : Brand.mint)
+                                    .symbolEffect(.bounce, options: .nonRepeating, value: celebrationToken)
+                                Text("All paid")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(isBitcoinMode ? Color.orange : Brand.mint)
+                            } else {
+                                Text("\(currentMonthPaidCount) of \(currentMonthBillCount) paid")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
-                        .onChange(of: currentMonthPaidCount) { oldValue, newValue in
-                            checkProgressCompletion(oldPaid: oldValue, newPaid: newValue)
-                        }
-                        .onChange(of: currentMonthBillCount) { oldValue, newValue in
-                            checkProgressCompletion(oldPaid: currentMonthPaidCount, newPaid: currentMonthPaidCount)
-                        }
-                        
-                        Text("\(currentMonthPaidCount) of \(currentMonthBillCount) paid")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        .animation(.spring(response: 0.4, dampingFraction: 0.68), value: isComplete)
                     }
                 }
             }
@@ -940,24 +961,34 @@ struct BillListView: View {
         // Update last state
         lastProgressState = (currentMonthPaidCount, currentMonthBillCount)
         
-        // Only trigger haptic feedback if we just reached completion
+        // Only celebrate if we just reached completion
         if nowComplete && !wasComplete {
             self.isComplete = true
-            HapticManager.shared.success()
-            
-            // Start completion animation sequence
-            startCompletionAnimation()
+            celebrationToken += 1
+            celebrateCompletion = true
+            HapticManager.shared.allBillsPaid()
+            startCompletionAnimation(celebrating: true)
+
+            let token = celebrationToken
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.15) {
+                if self.celebrationToken == token {
+                    self.celebrateCompletion = false
+                }
+            }
         } else if !nowComplete {
             // Stop all animations when progress becomes incomplete
             if wasComplete {
                 // Transitioning from complete to incomplete - stop all animations immediately
                 self.isComplete = false
+                self.celebrateCompletion = false
                 
                 // Reset all animation values immediately (without animation) to stop ongoing animations
                 // This will override any ongoing animations
                 completionPulseScale = 1.0
                 completionShimmerOffset = -1.0
                 completionGlowRadius = 8.0
+                progressBarBounce = 1.0
+                completionFlashOpacity = 0
                 
                 // Reset glow intensity smoothly
                 withAnimation(.easeOut(duration: 0.2)) {
@@ -983,47 +1014,61 @@ struct BillListView: View {
         }
     }
     
-    private func startCompletionAnimation() {
-        // Reset shimmer offset first
+    private func startSettledCompleteGlow() {
+        withAnimation(.easeInOut(duration: 2.2).repeatForever(autoreverses: true)) {
+            neonGlowIntensity = 1.18
+            completionGlowRadius = 14.0
+        }
+    }
+
+    private func startCompletionAnimation(celebrating: Bool) {
         completionShimmerOffset = -1.0
-        
-        // Initial flash and expand
-        withAnimation(.easeOut(duration: 0.2)) {
-            neonGlowIntensity = 1.5
-            completionGlowRadius = 20.0
-            completionPulseScale = 1.02
+
+        guard celebrating else {
+            startSettledCompleteGlow()
+            withAnimation(.easeInOut(duration: 0.9)) {
+                completionShimmerOffset = 1.35
+            }
+            return
         }
-        
-        // Shimmer animation - start after initial flash
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            // Check completion state before starting animation
+
+        progressBarBounce = 1.0
+        completionFlashOpacity = 0
+        completionPulseScale = 1.0
+
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.46)) {
+            neonGlowIntensity = 1.7
+            completionGlowRadius = 24.0
+            completionPulseScale = 1.05
+            progressBarBounce = 1.12
+            completionFlashOpacity = 0.55
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
             guard self.isComplete else { return }
-            withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
-                self.completionShimmerOffset = 1.3
+            withAnimation(.easeOut(duration: 0.65)) {
+                self.completionShimmerOffset = 1.35
             }
         }
-        
-        // Pulsing glow effect - subtle pulse
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            // Check completion state before starting animation
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
             guard self.isComplete else { return }
-            withAnimation(.easeInOut(duration: 0.6).repeatCount(3, autoreverses: true)) {
-                self.completionPulseScale = 1.03
-                self.completionGlowRadius = 25.0
+            withAnimation(.easeOut(duration: 0.25)) {
+                self.completionFlashOpacity = 0
             }
         }
-        
-        // Settle into continuous glow
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            // Check completion state before starting animation
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) {
             guard self.isComplete else { return }
-            withAnimation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true)) {
-                self.neonGlowIntensity = 1.2
-                self.completionGlowRadius = 12.0
+            withAnimation(.spring(response: 0.48, dampingFraction: 0.76)) {
+                self.progressBarBounce = 1.0
+                self.completionPulseScale = 1.0
             }
-            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
-                self.completionPulseScale = 1.01
-            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.95) {
+            guard self.isComplete else { return }
+            self.startSettledCompleteGlow()
         }
     }
 
@@ -1208,6 +1253,13 @@ struct BillListView: View {
 
 // MARK: - Bill List extras
 
+private struct PaidBarAnchorKey: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>?
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
+    }
+}
+
 private struct SummaryPill: View {
     let title: String
     let subtitle: String
@@ -1230,6 +1282,108 @@ private struct SummaryPill: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(tint.opacity(0.12))
         )
+    }
+}
+
+private struct PaidProgressBurst: View {
+    let accent: Color
+
+    private struct Spark: Identifiable {
+        let id: Int
+        let angle: Double
+        let distance: CGFloat
+        let size: CGFloat
+        let delay: Double
+        let symbol: String
+        let color: Color
+        let spin: Double
+    }
+
+    private var sparks: [Spark] {
+        let gold = Color(red: 1, green: 0.84, blue: 0.32)
+        return [
+            Spark(id: 0, angle: -88, distance: 30, size: 11, delay: 0.00, symbol: "sparkle", color: gold, spin: 28),
+            Spark(id: 1, angle: -118, distance: 26, size: 8, delay: 0.03, symbol: "star.fill", color: accent, spin: -36),
+            Spark(id: 2, angle: -52, distance: 24, size: 7, delay: 0.05, symbol: "sparkle", color: .white, spin: 18),
+            Spark(id: 3, angle: -148, distance: 32, size: 9, delay: 0.02, symbol: "sparkle", color: Brand.mint, spin: -22),
+            Spark(id: 4, angle: -28, distance: 22, size: 6, delay: 0.07, symbol: "circle.fill", color: gold.opacity(0.9), spin: 12),
+            Spark(id: 5, angle: -168, distance: 28, size: 8, delay: 0.04, symbol: "star.fill", color: .white, spin: 40),
+            Spark(id: 6, angle: 155, distance: 23, size: 6, delay: 0.08, symbol: "sparkle", color: accent, spin: -16),
+            Spark(id: 7, angle: 198, distance: 27, size: 10, delay: 0.01, symbol: "sparkle", color: gold, spin: 32),
+            Spark(id: 8, angle: -72, distance: 18, size: 5, delay: 0.06, symbol: "circle.fill", color: .white, spin: 8),
+            Spark(id: 9, angle: -102, distance: 34, size: 7, delay: 0.09, symbol: "star.fill", color: Brand.mint, spin: -44),
+            Spark(id: 10, angle: 12, distance: 20, size: 6, delay: 0.05, symbol: "sparkle", color: accent, spin: 24),
+            Spark(id: 11, angle: -200, distance: 25, size: 8, delay: 0.03, symbol: "sparkle", color: .white, spin: -20),
+            Spark(id: 12, angle: 130, distance: 21, size: 5, delay: 0.10, symbol: "circle.fill", color: gold, spin: 14),
+            Spark(id: 13, angle: -40, distance: 29, size: 9, delay: 0.02, symbol: "star.fill", color: gold, spin: -30)
+        ]
+    }
+
+    @State private var exploded = false
+
+    private var confetti: [(id: Int, angle: Double, distance: CGFloat, delay: Double, rotation: Double, color: Color)] {
+        [
+            (0, -96, 31, 0.00, 48, accent),
+            (1, -64, 27, 0.04, -56, Color(red: 1, green: 0.84, blue: 0.32)),
+            (2, -132, 29, 0.02, 38, .white),
+            (3, 168, 24, 0.07, -42, Brand.mint),
+            (4, -20, 22, 0.06, 64, accent.opacity(0.9)),
+            (5, 210, 26, 0.03, -28, Color(red: 1, green: 0.84, blue: 0.32))
+        ]
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(accent.opacity(exploded ? 0 : 0.8), lineWidth: exploded ? 0.4 : 2.4)
+                .frame(width: exploded ? 70 : 6, height: exploded ? 70 : 6)
+                .animation(.easeOut(duration: 0.55), value: exploded)
+
+            Circle()
+                .stroke(Color.white.opacity(exploded ? 0 : 0.55), lineWidth: exploded ? 0.3 : 1.4)
+                .frame(width: exploded ? 42 : 4, height: exploded ? 42 : 4)
+                .animation(.easeOut(duration: 0.4), value: exploded)
+
+            ForEach(confetti, id: \.id) { bit in
+                Capsule()
+                    .fill(bit.color)
+                    .frame(width: 7, height: 3)
+                    .offset(
+                        x: exploded ? cos(bit.angle * .pi / 180) * bit.distance : 0,
+                        y: exploded ? sin(bit.angle * .pi / 180) * bit.distance : 0
+                    )
+                    .rotationEffect(.degrees(exploded ? bit.rotation : 0))
+                    .opacity(exploded ? 0 : 1)
+                    .animation(
+                        .spring(response: 0.6, dampingFraction: 0.7).delay(bit.delay),
+                        value: exploded
+                    )
+            }
+
+            ForEach(sparks) { spark in
+                Image(systemName: spark.symbol)
+                    .font(.system(size: spark.size, weight: .bold))
+                    .foregroundStyle(spark.color)
+                    .offset(
+                        x: exploded ? cos(spark.angle * .pi / 180) * spark.distance : 0,
+                        y: exploded ? sin(spark.angle * .pi / 180) * spark.distance : 0
+                    )
+                    .rotationEffect(.degrees(exploded ? spark.spin : 0))
+                    .scaleEffect(exploded ? 0.12 : 0.9)
+                    .opacity(exploded ? 0 : 1)
+                    .animation(
+                        .spring(response: 0.58, dampingFraction: 0.72).delay(spark.delay),
+                        value: exploded
+                    )
+            }
+        }
+        .onAppear {
+            exploded = false
+            DispatchQueue.main.async {
+                exploded = true
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 

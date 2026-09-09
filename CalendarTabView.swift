@@ -349,36 +349,29 @@ struct CalendarTabView: View {
     // MARK: - Living Means View
     @ViewBuilder
     private var livingMeansView: some View {
-        if let insight = livingMeansInsight {
-            Text(insight.text)
+        let quote = LivingMeansInsight.quote(on: Date())
+        VStack(spacing: 4) {
+            if let insight = livingMeansInsight {
+                Text(insight.text)
+                    .font(.caption)
+                    .foregroundStyle(insight.color)
+            }
+            Text(quote)
                 .font(.caption)
-                .foregroundStyle(insight.color)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
+                .foregroundStyle(.secondary)
         }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 4)
     }
-    
+
     private var livingMeansInsight: (text: String, color: Color)? {
-        guard let meansData = livingMeansPercentage else { return nil }
-        
-        var absPercentage = abs(meansData.percentage)
-        var rounded = Decimal()
-        NSDecimalRound(&rounded, &absPercentage, 1, .plain)
-        
-        if rounded == 0 {
-            return ("You're breaking even this month", .secondary)
-        }
-        
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.maximumFractionDigits = 1
-        formatter.minimumFractionDigits = 0
-        let percentageString = formatter.string(from: NSDecimalNumber(decimal: rounded)) ?? "0"
-        
-        if meansData.isBelow {
-            return ("This month you're living \(percentageString)% below your means", .green)
-        }
-        return ("This month you're living \(percentageString)% above your means", .orange)
+        guard let means = livingMeans else { return nil }
+        let color: Color = {
+            if abs(means.percentage) < 0.05 { return .secondary }
+            return means.isBelow ? .green : .orange
+        }()
+        return (LivingMeansInsight.meansLine(means), color)
     }
     
     private var insights: [CalendarInsight] {
@@ -643,17 +636,14 @@ struct CalendarTabView: View {
         }
     }
     
-    private var livingMeansPercentage: (percentage: Decimal, isBelow: Bool)? {
-        let income = incomeStats(for: currentMonth)
+    private var livingMeans: LivingMeansInsight.Means? {
         let stats = monthStats(for: currentMonth)
         let expenses = stats.unpaidTotal + stats.paidTotal + stats.projectedTotal
-        
-        guard income > 0 else { return nil }
-        
-        let difference = income - expenses
-        let percentage = (difference / income) * 100
-        
-        return (percentage, difference >= 0)
+        return LivingMeansInsight.means(
+            paycheckIncome: incomeStats(for: currentMonth),
+            trailingDeposits: accountViewModel.trailingIncomeDepositAmounts(),
+            expenses: expenses
+        )
     }
     
     private var monthFormatter: DateFormatter {
@@ -790,6 +780,7 @@ struct CalendarTabView: View {
                                       colorScheme: colorScheme) { date in
                         selectDate(date)
                     }
+                    livingMeansView
                 }
                 .padding(.top, 4) // Minimal top padding for landscape
                 .padding(.bottom, 4) // Match top padding

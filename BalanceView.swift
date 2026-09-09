@@ -135,7 +135,7 @@ struct BalanceView: View {
                 .environmentObject(appLockManager)
         }
         .sheet(isPresented: $showingAddAccount) {
-            AccountEditorSheet(account: nil) { name, type, startingBalance, isHidden, currency, btcDisplayFormat, feePercentage, startingBalanceUSD, startingBalanceBTCPrice in
+            AccountEditorSheet(account: nil) { name, type, startingBalance, isHidden, currency, btcDisplayFormat, feePercentage, startingBalanceUSD, startingBalanceBTCPrice, reserveBalance in
                 _ = accountViewModel.addAccount(name: name,
                                             type: type,
                                             startingBalance: startingBalance,
@@ -144,7 +144,8 @@ struct BalanceView: View {
                                             btcDisplayFormat: btcDisplayFormat,
                                             feePercentage: feePercentage,
                                             startingBalanceUSD: startingBalanceUSD,
-                                            startingBalanceBTCPrice: startingBalanceBTCPrice)
+                                            startingBalanceBTCPrice: startingBalanceBTCPrice,
+                                            reserveBalance: reserveBalance)
                 // Ensure view refreshes - fetchAccounts is already called in addAccount
                 // but we'll refresh again to be sure
                 accountViewModel.fetchAccounts()

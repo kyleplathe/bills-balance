@@ -65,8 +65,10 @@ struct BillsAndBalanceApp: App {
         WindowGroup {
             ZStack {
                 if !onboardingManager.hasCompletedOnboarding {
-                    OnboardingView()
-                        .environmentObject(bootstrap.notificationManager)
+                    if !showSplash {
+                        OnboardingView()
+                            .environmentObject(bootstrap.notificationManager)
+                    }
                 } else if bootstrap.isReady {
                     MainTabView()
                         .environment(\.managedObjectContext, persistenceController.container.viewContext)
@@ -94,19 +96,26 @@ struct BillsAndBalanceApp: App {
                                     .environmentObject(appLockManager)
                             }
                         }
-                } else {
-                    ProgressView("Loading…")
                 }
 
-                if showSplash && onboardingManager.hasCompletedOnboarding && bootstrap.isReady {
-                    SplashScreenView(isActive: $showSplash)
+                if showSplash || (onboardingManager.hasCompletedOnboarding && !bootstrap.isReady) {
+                    SplashScreenView()
                         .transition(.opacity)
                         .zIndex(1)
                 }
             }
             .task {
                 _ = ShakeDetection.install
+                let started = ContinuousClock.now
                 await bootstrap.prepareIfNeeded()
+                let minimum: Duration = .milliseconds(900)
+                let elapsed = started.duration(to: .now)
+                if elapsed < minimum {
+                    try? await Task.sleep(for: minimum - elapsed)
+                }
+                withAnimation(.easeOut(duration: 0.32)) {
+                    showSplash = false
+                }
             }
         }
     }

@@ -32,7 +32,10 @@ struct TransactionEditorSheet: View {
     @State private var isCleared: Bool
     @State private var showBulkCategoryAlert = false
     @State private var bulkCategoryCount = 0
+    @State private var showMissingCategorySheet = false
+    @State private var promptCategoryName = ""
     @FocusState private var isAmountFocused: Bool
+    @FocusState private var isTitleFocused: Bool
 
     init(account: Account) {
         mode = .create(account)
@@ -137,6 +140,14 @@ struct TransactionEditorSheet: View {
         return nil
     }
 
+    /// Previous payee names matching what the user has typed. Amount is never copied.
+    private var titleSuggestions: [String] {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 1 else { return [] }
+        return accountViewModel.suggestedTitles(prefix: trimmed, limit: 5)
+            .filter { $0.caseInsensitiveCompare(trimmed) != .orderedSame }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -187,15 +198,27 @@ struct TransactionEditorSheet: View {
 
                 Section {
                     TextField("Description", text: $title)
+                        .textInputAutocapitalization(.words)
+                        .focused($isTitleFocused)
                         .onChange(of: title) { _, newValue in
-                            if category.isEmpty && !newValue.isEmpty {
-                                let suggested = CategorySuggester.suggest(
-                                    for: newValue,
-                                    priorCategory: accountViewModel.suggestedCategory(forTitle: newValue, account: account)
-                                )
-                                if !suggested.isEmpty { category = suggested }
-                            }
+                            applyRememberedCategory(for: newValue, overwrite: false)
                         }
+                    if isTitleFocused, !titleSuggestions.isEmpty {
+                        ForEach(titleSuggestions, id: \.self) { suggestion in
+                            Button {
+                                applyTitleSuggestion(suggestion)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "clock.arrow.circlepath")
+                                        .foregroundStyle(.secondary)
+                                    Text(suggestion)
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                }
+                            }
+                            .accessibilityLabel("Use previous description \(suggestion)")
+                        }
+                    }
                     DatePicker("Date", selection: $date, displayedComponents: .date)
                     CategoryPicker(selection: $category, usage: accountViewModel.categoryUsage())
                         .environmentObject(categoryManager)
@@ -246,7 +269,7 @@ struct TransactionEditorSheet: View {
                 FormSheetToolbar(
                     canSave: canSave,
                     onClose: { dismiss() },
-                    onSave: saveTransaction
+                    onSave: { saveTransaction() }
                 )
             }
             .interactiveDismissDisabled(isEditing)
@@ -254,6 +277,27 @@ struct TransactionEditorSheet: View {
                 if !isEditing {
                     isAmountFocused = true
                 }
+            }
+            .sheet(isPresented: $showMissingCategorySheet) {
+                TransactionCategoryPromptSheet(
+                    categoryName: $promptCategoryName,
+                    usage: accountViewModel.categoryUsage(),
+                    onAdd: { name in
+                        category = categoryManager.addCategory(name) ?? name
+                        proceedWithSave(allowEmptyCategory: false)
+                    },
+                    onPick: { name in
+                        category = name
+                        proceedWithSave(allowEmptyCategory: false)
+                    },
+                    onSkip: {
+                        proceedWithSave(allowEmptyCategory: true)
+                    },
+                    onCancel: {
+                        showMissingCategorySheet = false
+                    }
+                )
+                .environmentObject(categoryManager)
             }
             .alert("Apply to All?", isPresented: $showBulkCategoryAlert) {
                 Button("Just This One") {
@@ -301,8 +345,36 @@ struct TransactionEditorSheet: View {
         return Decimal(rounded)
     }
 
-    private func saveTransaction() {
+    private func applyRememberedCategory(for text: String, overwrite: Bool) {
+        guard overwrite || category.isEmpty else { return }
+        let suggested = CategorySuggester.suggest(
+            for: text,
+            priorCategory: accountViewModel.suggestedCategory(forTitle: text)
+        )
+        if !suggested.isEmpty { category = suggested }
+    }
+
+    private func applyTitleSuggestion(_ suggestion: String) {
+        title = suggestion
+        applyRememberedCategory(for: suggestion, overwrite: true)
+        isTitleFocused = false
+        HapticManager.shared.buttonTapped()
+    }
+
+    private func proceedWithSave(allowEmptyCategory: Bool) {
+        showMissingCategorySheet = false
+        DispatchQueue.main.async {
+            saveTransaction(allowEmptyCategory: allowEmptyCategory)
+        }
+    }
+
+    private func saveTransaction(allowEmptyCategory: Bool = false) {
         guard canSave, let amount = parsedAmount else { return }
+        if !allowEmptyCategory, category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            promptCategoryName = ""
+            showMissingCategorySheet = true
+            return
+        }
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalCategory = category.isEmpty ? nil : category
         let signedPrincipal = isCredit ? amount : -amount
@@ -412,6 +484,96 @@ struct TransactionEditorSheet: View {
             NotificationCenter.default.post(name: NSManagedObjectContext.didSaveObjectsNotification, object: nil)
         }
         dismiss()
+    }
+}
+
+/// Shown when saving a transaction with no category. Add one, pick an existing, or skip.
+private struct TransactionCategoryPromptSheet: View {
+    @Binding var categoryName: String
+    let usage: [String: CategoryUsage]
+    let onAdd: (String) -> Void
+    let onPick: (String) -> Void
+    let onSkip: () -> Void
+    let onCancel: () -> Void
+    @EnvironmentObject private var categoryManager: CategoryManager
+    @FocusState private var isNameFocused: Bool
+
+    private var trimmedName: String {
+        categoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var filteredCategories: [String] {
+        let all = categoryManager.displayCategories(usage: usage)
+        guard !trimmedName.isEmpty else { return all }
+        return all.filter { $0.localizedCaseInsensitiveContains(trimmedName) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Category name", text: $categoryName)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+                        .focused($isNameFocused)
+                        .submitLabel(.done)
+                        .onSubmit {
+                            if !trimmedName.isEmpty { onAdd(trimmedName) }
+                        }
+                } footer: {
+                    Text("Add a category so this shows up clearly in Activity, or save without one.")
+                }
+
+                if !filteredCategories.isEmpty {
+                    Section("Your Categories") {
+                        ForEach(filteredCategories, id: \.self) { cat in
+                            Button {
+                                onPick(cat)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: CategoryStyle.icon(for: cat))
+                                        .foregroundStyle(CategoryStyle.color(for: cat))
+                                        .frame(width: 24)
+                                    Text(cat)
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Section {
+                    Button("Save Without Category", action: onSkip)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Add a Category?")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(action: onCancel) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.primary)
+                    }
+                    .accessibilityLabel("Close")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        onAdd(trimmedName)
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(trimmedName.isEmpty)
+                }
+            }
+            .onAppear {
+                isNameFocused = true
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .formEntryChrome()
     }
 }
 

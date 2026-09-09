@@ -1,5 +1,4 @@
 import SwiftUI
-import Charts
 
 struct UsdBtcBacktestView: View {
     @Environment(\.dismiss) private var dismiss
@@ -20,6 +19,7 @@ struct UsdBtcBacktestView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     lookbackSection
+                    expensePickerSection
                     if let report = reportsViewModel.usdBtcReport, !report.trackedBillNames.isEmpty {
                         statsSection(report)
                         chartSection(report)
@@ -88,6 +88,36 @@ struct UsdBtcBacktestView: View {
         .background(cardBackground)
     }
 
+    private var expensePickerSection: some View {
+        let names = reportsViewModel.usdBtcAvailableBillNames
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Expenses")
+                .font(.headline)
+            if names.isEmpty {
+                Text("No tracked bills yet.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(names, id: \.self) { name in
+                    Button {
+                        reportsViewModel.toggleUsdBtcBill(name)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: reportsViewModel.isUsdBtcBillIncluded(name) ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(reportsViewModel.isUsdBtcBillIncluded(name) ? Color(red: 0.969, green: 0.576, blue: 0.102) : .secondary)
+                            Text(name)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(16)
+        .background(cardBackground)
+    }
+
     private var lookbackLabel: String {
         let years = Int(monthsBack) / 12
         if years == 1 { return "1 year" }
@@ -112,24 +142,27 @@ struct UsdBtcBacktestView: View {
     }
 
     private func chartSection(_ report: UsdBtcReportData) -> some View {
-        Chart(report.months, id: \.month) { row in
-            LineMark(
-                x: .value("Month", row.month),
-                y: .value("USD", NSDecimalNumber(decimal: row.usdExpenses).doubleValue),
-                series: .value("Series", "USD")
-            )
-            .foregroundStyle(.blue)
-            LineMark(
-                x: .value("Month", row.month),
-                y: .value("Today", NSDecimalNumber(decimal: row.btcValueNow).doubleValue),
-                series: .value("Series", "Today")
-            )
-            .foregroundStyle(Color(red: 0.969, green: 0.576, blue: 0.102))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 14) {
+                chartLegendSwatch(color: Color.primary.opacity(0.82), title: "USD paid")
+                chartLegendSwatch(color: Color(red: 0.969, green: 0.576, blue: 0.102), title: "BTC today")
+            }
+            UsdBtcComparisonChart(months: report.months, style: .inApp)
+                .frame(height: 180)
         }
-        .chartLegend(position: .bottom)
-        .frame(height: 180)
         .padding(16)
         .background(cardBackground)
+    }
+
+    private func chartLegendSwatch(color: Color, title: String) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private var emptyState: some View {

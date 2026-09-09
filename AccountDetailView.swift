@@ -40,7 +40,6 @@ struct AccountDetailView: View {
     @State private var isImportParsing = false
     @State private var importErrorMessage: String?
     @State private var showImportErrorAlert = false
-    @State private var showingUsdBtcBacktest = false
     
     var body: some View {
         accountList
@@ -50,33 +49,39 @@ struct AccountDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
-                // Edit account button
-                Button {
-                    showingEditAccount = true
-                } label: {
-                    Image(systemName: "pencil")
-                        .font(.title2)
-                }
-                
-                // Add transaction button
                 Button {
                     showingAddTransaction = true
                 } label: {
                     Image(systemName: "plus.circle.fill")
                         .font(.title2)
                 }
-                
-                // Transfer button
-                Button {
-                    showingTransfer = true
+                .accessibilityLabel("Add transaction")
+
+                Menu {
+                    Button {
+                        showingImportPicker = true
+                    } label: {
+                        Label("Import Statement", systemImage: "square.and.arrow.down")
+                    }
+                    Button {
+                        showingTransfer = true
+                    } label: {
+                        Label("Transfer", systemImage: "arrow.left.arrow.right")
+                    }
+                    Button {
+                        showingEditAccount = true
+                    } label: {
+                        Label("Edit Account", systemImage: "pencil")
+                    }
                 } label: {
-                    Image(systemName: "arrow.left.arrow.right")
+                    Image(systemName: "ellipsis.circle")
                         .font(.title2)
                 }
+                .accessibilityLabel("More")
             }
         }
         .sheet(isPresented: $showingEditAccount) {
-            AccountEditorSheet(account: account) { name, type, startingBalance, isHidden, currency, btcDisplayFormat, feePercentage, startingBalanceUSD, startingBalanceBTCPrice in
+            AccountEditorSheet(account: account) { name, type, startingBalance, isHidden, currency, btcDisplayFormat, feePercentage, startingBalanceUSD, startingBalanceBTCPrice, reserveBalance in
                 accountViewModel.updateAccount(account,
                                                name: name,
                                                type: type,
@@ -86,7 +91,8 @@ struct AccountDetailView: View {
                                                btcDisplayFormat: btcDisplayFormat,
                                                feePercentage: feePercentage,
                                                startingBalanceUSD: startingBalanceUSD,
-                                               startingBalanceBTCPrice: startingBalanceBTCPrice)
+                                               startingBalanceBTCPrice: startingBalanceBTCPrice,
+                                               reserveBalance: reserveBalance)
                 accountViewModel.fetchAccounts()
             }
             .environmentObject(bitcoinPriceService)
@@ -100,11 +106,6 @@ struct AccountDetailView: View {
         .sheet(isPresented: $showingTransfer) {
             TransferSheet(fromAccount: account)
                 .environmentObject(accountViewModel)
-                .environmentObject(bitcoinPriceService)
-        }
-        .sheet(isPresented: $showingUsdBtcBacktest) {
-            UsdBtcBacktestView()
-                .environmentObject(reportsViewModel)
                 .environmentObject(bitcoinPriceService)
         }
         .fileImporter(
@@ -274,21 +275,6 @@ struct AccountDetailView: View {
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
-            }
-
-            Section {
-                Button {
-                    showingImportPicker = true
-                } label: {
-                    Label("Import Statement", systemImage: "square.and.arrow.down")
-                }
-                if account.isBitcoinDigitalWallet {
-                    Button {
-                        showingUsdBtcBacktest = true
-                    } label: {
-                        Label("USD vs Bitcoin", systemImage: "chart.line.uptrend.xyaxis")
-                    }
-                }
             }
 
             transactionsSection
