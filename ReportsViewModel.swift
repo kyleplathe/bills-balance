@@ -67,6 +67,8 @@ struct UsdBtcMonthPoint: Identifiable {
     var btcAmount: Decimal
     var avgBtcPrice: Decimal
     var isEstimate: Bool
+    var inflationAdjustedUsd: Decimal // USD amount adjusted for inflation to today
+    var inflationAdjustedBtcAtTime: Decimal // BTC needed for inflation-adjusted amount
     var id: Date { month }
 }
 
@@ -936,6 +938,12 @@ final class ReportsViewModel: ObservableObject {
                 ) else { continue }
 
                 let nowValue = amount.btc * (currentPrice > 0 ? currentPrice : amount.price)
+                
+                // Inflation adjustment
+                let inflationMultiplier = TruflationService.shared.inflationMultiplier(from: mStart, to: Date())
+                let inflationAdjustedUsd = amount.usd * inflationMultiplier
+                let inflationAdjustedBtc = amount.price > 0 ? inflationAdjustedUsd / amount.price : 0
+                
                 let point = UsdBtcMonthPoint(
                     month: mStart,
                     usdExpenses: amount.usd,
@@ -943,7 +951,9 @@ final class ReportsViewModel: ObservableObject {
                     btcValueNow: nowValue,
                     btcAmount: amount.btc,
                     avgBtcPrice: amount.price,
-                    isEstimate: amount.isEstimate
+                    isEstimate: amount.isEstimate,
+                    inflationAdjustedUsd: inflationAdjustedUsd,
+                    inflationAdjustedBtcAtTime: inflationAdjustedBtc
                 )
                 billMonthPoints[templateIndex].append(point)
                 billUsd[templateIndex] += amount.usd
@@ -966,6 +976,12 @@ final class ReportsViewModel: ObservableObject {
             }
 
             let avgPrice = priceCount > 0 ? priceSum / Decimal(priceCount) : 0
+            
+            // Inflation adjustment for aggregated month
+            let inflationMultiplier = TruflationService.shared.inflationMultiplier(from: mStart, to: Date())
+            let inflationAdjustedUsd = usdExp * inflationMultiplier
+            let inflationAdjustedBtc = avgPrice > 0 ? inflationAdjustedUsd / avgPrice : 0
+            
             months.append(
                 UsdBtcMonthPoint(
                     month: mStart,
@@ -974,7 +990,9 @@ final class ReportsViewModel: ObservableObject {
                     btcValueNow: btcNow,
                     btcAmount: btcQty,
                     avgBtcPrice: avgPrice,
-                    isEstimate: monthIsEstimate && !monthHasActual
+                    isEstimate: monthIsEstimate && !monthHasActual,
+                    inflationAdjustedUsd: inflationAdjustedUsd,
+                    inflationAdjustedBtcAtTime: inflationAdjustedBtc
                 )
             )
             totalUsd += usdExp

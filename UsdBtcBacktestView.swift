@@ -5,6 +5,7 @@ struct UsdBtcBacktestView: View {
     @EnvironmentObject private var reportsViewModel: ReportsViewModel
     @State private var shareItem: ShareFileItem?
     @State private var monthsBack: Double = 48
+    @State private var showInflationAdjusted: Bool = false
 
     private let currencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -20,6 +21,7 @@ struct UsdBtcBacktestView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     lookbackSection
                     expensePickerSection
+                    inflationToggleSection
                     if let report = reportsViewModel.usdBtcReport, !report.trackedBillNames.isEmpty {
                         statsSection(report)
                         chartSection(report)
@@ -63,6 +65,30 @@ struct UsdBtcBacktestView: View {
                 await reportsViewModel.loadUsdBtcReport()
             }
         }
+    }
+    
+    private var inflationToggleSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Inflation Adjustment")
+                    .font(.headline)
+                Spacer()
+                Toggle("", isOn: $showInflationAdjusted)
+                    .labelsHidden()
+                    .tint(Color(red: 0.969, green: 0.576, blue: 0.102))
+            }
+            if showInflationAdjusted {
+                Text("Shows sats needed accounting for USD inflation (~3% annually). Green dashed line shows inflation-adjusted amount.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Shows nominal sats needed without inflation adjustment. Enable to see Bitcoin vs USD inflation comparison.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .background(cardBackground)
     }
 
     private var lookbackSection: some View {
@@ -221,20 +247,41 @@ struct UsdBtcBacktestView: View {
     private func chartSection(_ report: UsdBtcReportData) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 14) {
-                chartLegendSwatch(color: Color(red: 0.969, green: 0.576, blue: 0.102), title: "Sats needed to pay bill")
+                chartLegendSwatch(color: Color(red: 0.969, green: 0.576, blue: 0.102), title: "Sats needed")
+                if showInflationAdjusted {
+                    chartLegendSwatch(color: .green, title: "Inflation-adjusted", dashed: true)
+                }
             }
-            UsdBtcComparisonChart(months: report.months, style: .inApp)
+            UsdBtcComparisonChart(months: report.months, style: .inApp, showInflationAdjusted: showInflationAdjusted)
                 .frame(height: 180)
         }
         .padding(16)
         .background(cardBackground)
     }
 
-    private func chartLegendSwatch(color: Color, title: String) -> some View {
+    private func chartLegendSwatch(color: Color, title: String, dashed: Bool = false) -> some View {
         HStack(spacing: 6) {
-            Circle()
-                .fill(color)
-                .frame(width: 7, height: 7)
+            if dashed {
+                Rectangle()
+                    .fill(color)
+                    .frame(width: 12, height: 2)
+                    .overlay(
+                        Rectangle()
+                            .fill(.white)
+                            .frame(width: 3, height: 2)
+                            .offset(x: -3)
+                    )
+                    .overlay(
+                        Rectangle()
+                            .fill(.white)
+                            .frame(width: 3, height: 2)
+                            .offset(x: 3)
+                    )
+            } else {
+                Circle()
+                    .fill(color)
+                    .frame(width: 7, height: 7)
+            }
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.secondary)

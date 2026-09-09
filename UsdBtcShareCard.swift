@@ -134,9 +134,14 @@ struct UsdBtcComparisonChart: View {
 
     let months: [UsdBtcMonthPoint]
     var style: Style = .share
+    var showInflationAdjusted: Bool = false
 
     private var lineColor: Color {
         bitcoinOrange
+    }
+    
+    private var inflationLineColor: Color {
+        .green
     }
 
     private var gridColor: Color {
@@ -161,9 +166,17 @@ struct UsdBtcComparisonChart: View {
         Canvas { context, size in
             // Convert BTC amounts to sats (1 BTC = 100,000,000 sats)
             let satsNeeded = months.map { NSDecimalNumber(decimal: $0.btcAtTime * 100_000_000).doubleValue }
+            let inflationAdjustedSats = months.map { NSDecimalNumber(decimal: $0.inflationAdjustedBtcAtTime * 100_000_000).doubleValue }
             guard satsNeeded.count > 1 else { return }
 
-            let maxV = (satsNeeded.max() ?? 1) * 1.08
+            // Determine max value based on whether we're showing inflation-adjusted
+            let maxV: Double
+            if showInflationAdjusted {
+                maxV = max(satsNeeded.max() ?? 1, inflationAdjustedSats.max() ?? 1) * 1.08
+            } else {
+                maxV = (satsNeeded.max() ?? 1) * 1.08
+            }
+            
             let minV = 0.0
             let span = max(maxV - minV, 1)
             let leading: CGFloat = 4
@@ -189,8 +202,37 @@ struct UsdBtcComparisonChart: View {
             context.stroke(grid, with: .color(gridColor), lineWidth: 1)
 
             let satsPoints = satsNeeded.enumerated().map { point(index: $0.offset, value: $0.element) }
+            
+            // Inflation-adjusted line and area (if enabled)
+            if showInflationAdjusted {
+                let inflationPoints = inflationAdjustedSats.enumerated().map { point(index: $0.offset, value: $0.element) }
+                
+                // Area fill between the two lines
+                var gapArea = Path()
+                if satsPoints.count == inflationPoints.count, satsPoints.count > 1 {
+                    gapArea.move(to: satsPoints[0])
+                    for p in satsPoints.dropFirst() { gapArea.addLine(to: p) }
+                    for p in inflationPoints.reversed() { gapArea.addLine(to: p) }
+                    gapArea.closeSubpath()
+                    context.fill(gapArea, with: .color(Color.green.opacity(0.12)))
+                }
+                
+                // Inflation-adjusted line
+                var inflationLine = Path()
+                if let first = inflationPoints.first {
+                    inflationLine.move(to: first)
+                    for p in inflationPoints.dropFirst() { inflationLine.addLine(to: p) }
+                }
+                context.stroke(inflationLine, with: .color(inflationLineColor), style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round, dash: [6, 3]))
+                
+                // Endpoint dot for inflation line
+                if let last = inflationPoints.last {
+                    let dot = Path(ellipseIn: CGRect(x: last.x - 3, y: last.y - 3, width: 6, height: 6))
+                    context.fill(dot, with: .color(inflationLineColor))
+                }
+            }
 
-            // Area fill under the line
+            // Area fill under nominal line
             var area = Path()
             if let first = satsPoints.first, let last = satsPoints.last {
                 area.move(to: CGPoint(x: first.x, y: plot.maxY))
@@ -216,7 +258,7 @@ struct UsdBtcComparisonChart: View {
             }
             context.stroke(satsLine, with: .color(lineColor), style: StrokeStyle(lineWidth: 2.6, lineCap: .round, lineJoin: .round))
 
-            // Endpoint dot
+            // Endpoint dot for nominal line
             if let last = satsPoints.last {
                 let dot = Path(ellipseIn: CGRect(x: last.x - 3.5, y: last.y - 3.5, width: 7, height: 7))
                 context.fill(dot, with: .color(bitcoinOrange))
