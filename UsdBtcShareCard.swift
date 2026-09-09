@@ -32,10 +32,17 @@ struct UsdBtcShareCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("BILLS & BALANCE")
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .tracking(1.4)
-                .foregroundStyle(Color.white.opacity(0.42))
+            HStack(spacing: 8) {
+                Image("BrandMark")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 18, height: 18)
+                    .opacity(0.6)
+                Text("BILLS & BALANCE")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .tracking(1.4)
+                    .foregroundStyle(Color.white.opacity(0.42))
+            }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(headlineName)
@@ -56,15 +63,15 @@ struct UsdBtcShareCard: View {
 
             UsdBtcComparisonChart(months: months, style: .share)
                 .frame(maxWidth: .infinity)
-                .frame(height: 168)
-                .padding(.top, 18)
+                .frame(height: 200)
+                .padding(.top, 20)
 
             HStack(spacing: 14) {
                 legendDot(color: bitcoinOrange, title: "Sats needed")
             }
-            .padding(.top, 10)
+            .padding(.top, 12)
 
-            Spacer(minLength: 12)
+            Spacer(minLength: 16)
 
             if let change {
                 let percent = abs((change.percentLess * 100 as NSDecimalNumber).intValue)
@@ -89,18 +96,19 @@ struct UsdBtcShareCard: View {
             }
         }
         .padding(28)
-        .frame(width: UsdBtcShareCard.canvasSide, height: UsdBtcShareCard.canvasSide, alignment: .topLeading)
+        .frame(width: UsdBtcShareCard.canvasWidth, height: UsdBtcShareCard.canvasHeight, alignment: .topLeading)
         .background(shareBackground)
     }
 
-    static let canvasSide: CGFloat = 400
+    static let canvasWidth: CGFloat = 400
+    static let canvasHeight: CGFloat = 500  // 4:5 ratio for Instagram
 
     static func pngURL(title: String, months: [UsdBtcMonthPoint], monthsBack: Int) -> URL? {
         let card = UsdBtcShareCard(title: title, months: months, monthsBack: monthsBack)
         let renderer = ImageRenderer(content: card)
-        renderer.scale = 1080 / canvasSide
+        renderer.scale = 1080 / canvasWidth  // Width scale for 1080px width
         renderer.isOpaque = true
-        renderer.proposedSize = ProposedViewSize(width: canvasSide, height: canvasSide)
+        renderer.proposedSize = ProposedViewSize(width: canvasWidth, height: canvasHeight)
         guard let image = renderer.uiImage, let data = image.pngData() else { return nil }
         let safe = title
             .replacingOccurrences(of: "/", with: "-")
