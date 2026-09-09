@@ -26,6 +26,7 @@ struct ReportsView: View {
     @State private var showingUsdBtcBacktest = false
     @State private var selectedAnchor: Date?
     @State private var isRecenteringPager = false
+    @State private var cachedPageAnchors: [Date] = []
 
     private var walletPeriod: ReportsViewModel.WalletPeriod {
         reportsViewModel.lastUsedWalletPeriod
@@ -189,8 +190,12 @@ struct ReportsView: View {
     }
 
     private var pageAnchors: [Date] {
-        var dates: [Date] = []
+        cachedPageAnchors
+    }
+    
+    private func computePageAnchors() {
         let current = reportsViewModel.currentAnchorDate()
+        var dates: [Date] = []
         
         // Add current period first
         dates.append(current)
@@ -229,7 +234,7 @@ struct ReportsView: View {
             }
         }
         
-        return dates
+        cachedPageAnchors = dates
     }
 
     private func snapshot(for date: Date) -> ActivityPeriodSnapshot? {
@@ -380,6 +385,7 @@ struct ReportsView: View {
     }
 
     private func handleAppear() {
+        computePageAnchors()
         isRecenteringPager = true
         reportsViewModel.jumpToCurrentPeriod()
         selectedAnchor = reportsViewModel.currentAnchorDate()
@@ -397,7 +403,33 @@ struct ReportsView: View {
         let current = reportsViewModel.currentAnchorDate()
         guard !isSamePeriod(newValue, current) else { return }
         isRecenteringPager = true
-        reportsViewModel.shiftPeriod(newValue < current ? -1 : 1)
+        
+        // Calculate the offset between current and new anchor
+        var offset = 0
+        let isForward = newValue > current
+        var checkDate = current
+        let maxIterations = 1000 // Safety limit
+        
+        for _ in 0..<maxIterations {
+            let nextOffset = isForward ? offset + 1 : offset - 1
+            checkDate = reportsViewModel.adjacentAnchorDate(offset: nextOffset)
+            
+            if isSamePeriod(checkDate, newValue) {
+                offset = nextOffset
+                break
+            }
+            
+            if isForward ? checkDate > newValue : checkDate < newValue {
+                break
+            }
+            
+            offset = nextOffset
+        }
+        
+        if offset != 0 {
+            reportsViewModel.shiftPeriod(offset)
+        }
+        
         selectedAnchor = reportsViewModel.currentAnchorDate()
         DispatchQueue.main.async {
             isRecenteringPager = false
@@ -405,6 +437,7 @@ struct ReportsView: View {
     }
 
     private func handlePeriodChange() {
+        computePageAnchors()
         isRecenteringPager = true
         reportsViewModel.jumpToCurrentPeriod()
         selectedAnchor = reportsViewModel.currentAnchorDate()
