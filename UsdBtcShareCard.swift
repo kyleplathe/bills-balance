@@ -165,7 +165,8 @@ struct UsdBtcComparisonChart: View {
     var body: some View {
         Canvas { context, size in
             // Convert BTC amounts to sats (1 BTC = 100,000,000 sats)
-            let satsNeeded = months.map { NSDecimalNumber(decimal: $0.btcAtTime * 100_000_000).doubleValue }
+            // btcAmount = actual BTC needed for nominal bill amount at historical BTC price
+            let satsNeeded = months.map { NSDecimalNumber(decimal: $0.btcAmount * 100_000_000).doubleValue }
             let inflationAdjustedSats = months.map { NSDecimalNumber(decimal: $0.inflationAdjustedBtcAtTime * 100_000_000).doubleValue }
             guard satsNeeded.count > 1 else { return }
 

@@ -156,8 +156,8 @@ struct UsdBtcBacktestView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             
-            let firstSats = report.months.first?.btcAtTime ?? 0
-            let lastSats = report.months.last?.btcAtTime ?? 0
+            let firstSats = report.months.first?.btcAmount ?? 0
+            let lastSats = report.months.last?.btcAmount ?? 0
             let totalFirstSats = firstSats * 100_000_000
             let totalLastSats = lastSats * 100_000_000
             let reduction = firstSats > 0 ? ((firstSats - lastSats) / firstSats) * 100 : 0
@@ -219,6 +219,61 @@ struct UsdBtcBacktestView: View {
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                         }
+                    }
+                }
+                
+                if showInflationAdjusted, let first = report.months.first, let last = report.months.last {
+                    Divider()
+                        .padding(.vertical, 4)
+                    
+                    let firstInflationSats = first.inflationAdjustedBtcAtTime * 100_000_000
+                    let lastInflationSats = last.inflationAdjustedBtcAtTime * 100_000_000
+                    let inflationReduction = first.inflationAdjustedBtcAtTime > 0 ? 
+                        ((first.inflationAdjustedBtcAtTime - last.inflationAdjustedBtcAtTime) / first.inflationAdjustedBtcAtTime) * 100 : 0
+                    
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Inflation-Adjusted (Constant Purchasing Power)")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.green)
+                        
+                        HStack(alignment: .top, spacing: 20) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(formatSatsCompact(firstInflationSats))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.green)
+                                    .monospacedDigit()
+                            }
+                            
+                            Image(systemName: "arrow.right")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(formatSatsCompact(lastInflationSats))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.green)
+                                    .monospacedDigit()
+                            }
+                            
+                            Spacer()
+                            
+                            if inflationReduction > 0 {
+                                VStack(alignment: .trailing, spacing: 4) {
+                                    Text(String(format: "%.1f%%", (inflationReduction as NSDecimalNumber).doubleValue))
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.green)
+                                        .monospacedDigit()
+                                    Text("less")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                        
+                        Text("Even accounting for inflation, Bitcoin still wins")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .italic()
                     }
                 }
             }
