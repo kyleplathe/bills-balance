@@ -591,6 +591,13 @@ struct CreditCardSpendingRow: View {
 }
 
 struct WalletCategorySection: View {
+    private struct PayeeCategoryRemoval: Identifiable {
+        let id = UUID()
+        let title: String
+        let category: String
+        let count: Int
+    }
+
     let items: [(name: String, amount: Decimal)]
     let appeared: Bool
     @Binding var expandedCategories: Set<String>
@@ -600,6 +607,7 @@ struct WalletCategorySection: View {
     var anchorDate: Date? = nil
     @EnvironmentObject private var reportsViewModel: ReportsViewModel
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
+    @EnvironmentObject private var accountViewModel: AccountViewModel
     
     // Sort by amount; keep the top 8 categories, then flip order when sorting low to high.
     private var sortedItems: [(name: String, amount: Decimal)] {
@@ -614,6 +622,8 @@ struct WalletCategorySection: View {
     @State private var categoryListOpacity: Double = 1.0
     @State private var legendOffset: CGFloat = 0
     @State private var legendOpacity: Double = 1.0
+    @State private var expandedPayeeGroups: Set<String> = []
+    @State private var pendingCategoryRemoval: PayeeCategoryRemoval?
     private let formatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .currency
@@ -755,7 +765,6 @@ struct WalletCategorySection: View {
                     VStack(spacing: 0) {
                         ForEach(Array(sortedItems.prefix(8).enumerated()), id: \.offset) { i, item in
                             let isExpanded = expandedCategories.contains(item.name)
-                            let transactions = reportsViewModel.transactionsForCategory(item.name, period: period, date: anchorDate)
                             
                             VStack(spacing: 0) {
                                 // Category row - tappable to expand/collapse
@@ -777,12 +786,15 @@ struct WalletCategorySection: View {
                                         Text(item.name)
                                             .font(.subheadline.weight(.semibold))
                                             .foregroundStyle(.primary)
-                                        Spacer()
-                                        VStack(alignment: .trailing, spacing: 2) {
-                                            Text(ActivityMoneyFormat.string(usd: item.amount, bitcoin: bitcoinPriceService))
-                                                .font(.subheadline.weight(.medium))
-                                                .foregroundStyle(.primary)
-                                        }
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.7)
+                                        Spacer(minLength: 8)
+                                        Text(ActivityMoneyFormat.string(usd: item.amount, bitcoin: bitcoinPriceService))
+                                            .font(.subheadline.weight(.medium))
+                                            .foregroundStyle(.primary)
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.7)
+                                            .layoutPriority(1)
                                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                                             .font(.caption.weight(.semibold))
                                             .foregroundStyle(.tertiary)
@@ -794,36 +806,33 @@ struct WalletCategorySection: View {
                                 }
                                 .buttonStyle(.plain)
                                 
-                                // Expanded transactions
+                                // Payee groups — singles open the editor; repeats expand in place.
                                 if isExpanded {
+                                    let groups = reportsViewModel.payeeGroupsForCategory(
+                                        item.name,
+                                        period: period,
+                                        date: anchorDate
+                                    )
                                     VStack(spacing: 0) {
-                                        if !transactions.isEmpty {
-                                            ForEach(transactions, id: \.objectID) { entry in
-                                                CategoryTransactionRow(
-                                                    entry: entry,
-                                                    category: item.name,
-                                                    onEdit: {
-                                                        onTransactionTap(entry)
-                                                    },
-                                                    onDelete: {},
-                                                    showsSwipeActions: false
-                                                )
-                                                .padding(.leading, 52)
-                                                .padding(.vertical, 8)
-
-                                                if entry != transactions.last {
-                                                    Divider()
-                                                        .padding(.leading, 52)
-                                                }
-                                            }
-                                        } else {
+                                        if groups.isEmpty {
                                             Text("No transactions")
                                                 .font(.caption)
                                                 .foregroundStyle(.secondary)
-                                                .padding(.leading, 52)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
                                                 .padding(.vertical, 8)
+                                        } else {
+                                            ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
+                                                if index > 0 {
+                                                    Divider()
+                                                }
+                                                payeeGroupBlock(group, category: item.name)
+                                            }
                                         }
                                     }
+                                    .padding(.leading, 60)
+                                    .padding(.trailing, 16)
+                                    .padding(.bottom, 6)
+                                    .clipped()
                                     .transition(.opacity.combined(with: .move(edge: .top)))
                                 }
                             }
@@ -831,7 +840,8 @@ struct WalletCategorySection: View {
                             
                             if i < sortedItems.count - 1 {
                                 Divider()
-                                    .padding(.leading, 52)
+                                    .padding(.leading, 60)
+                                    .padding(.trailing, 16)
                             }
                         }
                     }
@@ -839,7 +849,8 @@ struct WalletCategorySection: View {
                     .opacity(categoryListOpacity)
                 }
             }
-            .padding(.bottom, 8)
+            .padding(.bottom, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .fill(Color(.systemBackground))
@@ -848,6 +859,135 @@ struct WalletCategorySection: View {
                             .stroke(Color.primary.opacity(0.06))
                     )
             )
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .confirmationDialog(
+                "Remove Category",
+                isPresented: Binding(
+                    get: { pendingCategoryRemoval != nil },
+                    set: { if !$0 { pendingCategoryRemoval = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: pendingCategoryRemoval
+            ) { removal in
+                Button(
+                    removal.count == 1
+                        ? "Remove from this transaction"
+                        : "Remove from \(removal.count) transactions",
+                    role: .destructive
+                ) {
+                    confirmCategoryRemoval(removal)
+                }
+            } message: { removal in
+                if removal.count == 1 {
+                    Text("This removes “\(removal.category)” from “\(removal.title)”.")
+                } else {
+                    Text("This removes “\(removal.category)” from every “\(removal.title)” transaction, not just this period.")
+                }
+            }
+    }
+
+    @ViewBuilder
+    private func payeeGroupBlock(_ group: ReportsViewModel.CategoryPayeeGroup, category: String) -> some View {
+        if group.isSingleton, let entry = group.entries.first {
+            CategoryTransactionRow(
+                entry: entry,
+                category: category,
+                onEdit: { onTransactionTap(entry) },
+                onDelete: {},
+                showsSwipeActions: false
+            )
+            .padding(.vertical, 8)
+            .contextMenu { removeCategoryMenu(title: group.title, category: category) }
+        } else {
+            let expansionID = payeeExpansionID(category: category, groupID: group.id)
+            let isPayeeExpanded = expandedPayeeGroups.contains(expansionID)
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    if isPayeeExpanded {
+                        expandedPayeeGroups.remove(expansionID)
+                    } else {
+                        expandedPayeeGroups.insert(expansionID)
+                    }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(group.title)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                        Text("\(group.entries.count) transactions")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(ActivityMoneyFormat.string(usd: group.amount, bitcoin: bitcoinPriceService))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .layoutPriority(1)
+                    Image(systemName: isPayeeExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .contextMenu { removeCategoryMenu(title: group.title, category: category) }
+
+            if isPayeeExpanded {
+                VStack(spacing: 0) {
+                    ForEach(group.entries, id: \.objectID) { entry in
+                        Divider()
+                        CategoryTransactionRow(
+                            entry: entry,
+                            category: category,
+                            onEdit: { onTransactionTap(entry) },
+                            onDelete: {},
+                            showsSwipeActions: false
+                        )
+                        .padding(.vertical, 8)
+                    }
+                }
+                .padding(.leading, 12)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func removeCategoryMenu(title: String, category: String) -> some View {
+        if category != "Digital Wallet Fees" {
+            Button("Remove Category", role: .destructive) {
+                requestCategoryRemoval(title: title, category: category)
+            }
+        }
+    }
+
+    private func payeeExpansionID(category: String, groupID: String) -> String {
+        "\(category)\u{1e}\(groupID)"
+    }
+
+    private func requestCategoryRemoval(title: String, category: String) {
+        let count = accountViewModel.countEntries(withTitle: title, category: category)
+        pendingCategoryRemoval = PayeeCategoryRemoval(
+            title: title,
+            category: category,
+            count: max(count, 1)
+        )
+    }
+
+    private func confirmCategoryRemoval(_ removal: PayeeCategoryRemoval) {
+        _ = accountViewModel.bulkSetCategory(
+            nil,
+            forTitle: removal.title,
+            matchingCategory: removal.category
+        )
+        reportsViewModel.refresh()
+        expandedPayeeGroups.remove(payeeExpansionID(category: removal.category, groupID: CategoryPayeeGrouping.key(for: removal.title)))
     }
 }
 
@@ -1177,31 +1317,42 @@ struct CategoryTransactionRow: View {
         }
     }
 
+    private var subtitleText: String? {
+        var parts: [String] = []
+        if let date = entry.date {
+            parts.append(RelativeDateFormatter.string(from: date))
+        }
+        if let name = entry.account?.name, !name.isEmpty {
+            parts.append(name)
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " • ")
+    }
+
     private var rowButton: some View {
         Button(action: onEdit) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(entry.title ?? "Untitled")
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(.primary)
-                    if let account = entry.account {
-                        Text(account.name ?? "Account")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(ActivityMoneyFormat.string(usd: abs(usdAmount), bitcoin: bitcoinPriceService))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(amountColor)
-                    if let entryCategory = entry.category, !entryCategory.isEmpty,
-                       category != "Income" && category != "Digital Wallet Fees" {
-                        Text(entryCategory)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    if let subtitleText {
+                        Text(subtitleText)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(ActivityMoneyFormat.string(usd: abs(usdAmount), bitcoin: bitcoinPriceService))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(amountColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .layoutPriority(1)
             }
             .contentShape(Rectangle())
         }

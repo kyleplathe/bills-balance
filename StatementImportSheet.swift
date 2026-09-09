@@ -42,6 +42,9 @@ struct StatementImportSheet: View {
     @State private var expandedTxId: UUID?
     @State private var applySimilarPrompt: ApplySimilarPrompt?
     @State private var dismissedTransferIds: Set<UUID> = []
+    @State private var rewriteSuggestions: [StatementImportMatching.TitleRewriteSuggestion] = []
+    @State private var selectedRewriteKeys: Set<String> = []
+    @State private var rewritePromptDismissed = false
 
     private struct ApplySimilarPrompt: Identifiable {
         let id = UUID()
@@ -132,6 +135,31 @@ struct StatementImportSheet: View {
                                 .foregroundStyle(.secondary)
                         }
                         Text(footerText)
+                    }
+                }
+
+                if !visibleRewriteSuggestions.isEmpty {
+                    Section {
+                        ForEach(visibleRewriteSuggestions) { suggestion in
+                            knownRewriteRow(suggestion)
+                        }
+                        HStack {
+                            Button("Skip") {
+                                rewritePromptDismissed = true
+                            }
+                            .buttonStyle(.bordered)
+                            Spacer()
+                            Button("Apply \(selectedRewriteKeys.count)") {
+                                applySelectedRewrites()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(selectedRewriteKeys.isEmpty)
+                        }
+                        .padding(.vertical, 4)
+                    } header: {
+                        Text("Known description updates")
+                    } footer: {
+                        Text("These match descriptions you previously renamed. Apply them to this import, or skip to keep the statement text.")
                     }
                 }
 
@@ -321,21 +349,78 @@ struct StatementImportSheet: View {
         return suggestions
     }
 
+    private var visibleRewriteSuggestions: [StatementImportMatching.TitleRewriteSuggestion] {
+        rewritePromptDismissed ? [] : rewriteSuggestions
+    }
+
     private func prepareWorkingTransactions() {
-        var prepared = transactions
+        let prepared = transactions
         var originals: [UUID: String] = [:]
         for i in prepared.indices {
             originals[prepared[i].id] = prepared[i].title
-            if let rewrite = ImportTitleRewriteStore.rewrite(for: prepared[i].title) {
-                prepared[i].title = rewrite.preferredTitle
-                if let cat = rewrite.category, !cat.isEmpty {
-                    prepared[i].category = cat
-                    categoryOverrides[prepared[i].id] = cat
-                }
-            }
         }
         originalTitles = originals
         workingTransactions = prepared
+        refreshRewriteSuggestions()
+    }
+
+    private func refreshRewriteSuggestions() {
+        let suggestions = StatementImportMatching.pendingTitleRewrites(
+            originalTitles: originalTitles,
+            store: ImportTitleRewriteStore.all(),
+            ledgerHints: StatementImportMatching.rewriteHints(from: accountViewModel.ledgerTitleRewriteSamples())
+        )
+        rewriteSuggestions = suggestions
+        selectedRewriteKeys = Set(suggestions.map(\.normalizedOriginal))
+        rewritePromptDismissed = suggestions.isEmpty
+    }
+
+    private func knownRewriteRow(_ suggestion: StatementImportMatching.TitleRewriteSuggestion) -> some View {
+        Toggle(isOn: rewriteSelectedBinding(for: suggestion.normalizedOriginal)) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(suggestion.originalTitle) → \(suggestion.preferredTitle)")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                Text("\(suggestion.matchCount) transaction\(suggestion.matchCount == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private func rewriteSelectedBinding(for id: String) -> Binding<Bool> {
+        Binding(
+            get: { selectedRewriteKeys.contains(id) },
+            set: { on in
+                if on {
+                    selectedRewriteKeys.insert(id)
+                } else {
+                    selectedRewriteKeys.remove(id)
+                }
+            }
+        )
+    }
+
+    private func applySelectedRewrites() {
+        for suggestion in rewriteSuggestions where selectedRewriteKeys.contains(suggestion.normalizedOriginal) {
+            ImportTitleRewriteStore.save(
+                originalTitle: suggestion.originalTitle,
+                preferredTitle: suggestion.preferredTitle,
+                category: suggestion.category
+            )
+            for id in suggestion.transactionIds {
+                guard let i = workingTransactions.firstIndex(where: { $0.id == id }) else { continue }
+                workingTransactions[i].title = suggestion.preferredTitle
+                if let cat = suggestion.category, !cat.isEmpty {
+                    workingTransactions[i].category = cat
+                    categoryOverrides[id] = cat
+                }
+            }
+        }
+        rewriteSuggestions = []
+        selectedRewriteKeys = []
+        rewritePromptDismissed = true
     }
 
     @ViewBuilder
@@ -605,6 +690,10 @@ struct StatementImportSheet: View {
             }
         }
         guard !toImport.isEmpty else { return }
+
+        for tx in workingTransactions {
+            persistRewrite(for: tx.id)
+        }
 
         isImporting = true
         onImport(account, toImport, keepCurrentBalance)

@@ -302,6 +302,11 @@ struct AccountDetailView: View {
                         ForEach(pendingTransactions, id: \.objectID) { entry in
                             transactionRow(for: entry)
                         }
+                    } header: {
+                        Text("Pending")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 ForEach(groupedTransactions.keys.sorted(by: >), id: \.self) { monthDate in
@@ -392,65 +397,25 @@ struct AccountDetailView: View {
                 }
             }
             
-            balanceDetailsDisclosure
+            balanceCaption
         }
         .frame(maxWidth: .infinity)
         .multilineTextAlignment(.center)
     }
     
-    private var balanceDetailsDisclosure: some View {
-        VStack(spacing: 8) {
-            Button {
-                withAnimation(.smooth(duration: 0.32)) {
-                    showingBalanceDetails.toggle()
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Text("Balance")
-                        .font(.caption.weight(.semibold))
-                    Image(systemName: "chevron.down")
-                        .font(.caption2.weight(.semibold))
-                        .rotationEffect(.degrees(showingBalanceDetails ? 180 : 0))
-                }
+    private var balanceCaption: some View {
+        VStack(spacing: 4) {
+            Text("Available")
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-            }
-            .buttonStyle(.plain)
-            .modifier(BalanceDetailsPillChrome())
-            .accessibilityLabel(showingBalanceDetails ? "Hide Balance" : "Balance")
-            .accessibilityHint("Shows cleared and pending")
             
-            if showingBalanceDetails {
-                VStack(spacing: 6) {
-                    balanceBreakdownRow(label: "Cleared", value: formattedClearedBalance)
-                    balanceBreakdownRow(
-                        label: "Pending",
-                        value: formattedPendingBalance,
-                        valueColor: pendingForeground
-                    )
-                }
-                .padding(.horizontal, 4)
-                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+            if showsClearedCaption {
+                Text("Cleared \(formattedClearedBalance)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
             }
         }
-        .clipped()
-    }
-    
-    private func balanceBreakdownRow(label: String, value: String, valueColor: Color = .primary) -> some View {
-        HStack {
-            Text(label)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text(value)
-                .font(.subheadline)
-                .fontWeight(.semibold)
-                .monospacedDigit()
-                .foregroundStyle(valueColor)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(label) \(value)")
     }
     
     // MARK: - Cleared Balance Formatters
@@ -677,8 +642,27 @@ struct AccountDetailView: View {
         accountViewModel.totalBalance(for: account)
     }
     
+    private var pendingIncomeTotal: Decimal {
+        let entries = accountViewModel.ledgerEntries(for: account)
+        if account.currencyCode == "BTC" {
+            return entries.reduce(Decimal.zero) { partial, entry in
+                guard !entry.isReconciledFlag, entry.isCredit else { return partial }
+                return partial + entry.signedAmountInCurrency(for: account)
+            }
+        } else {
+            return entries.reduce(Decimal.zero) { partial, entry in
+                guard !entry.isReconciledFlag, entry.isCredit else { return partial }
+                return partial + entry.signedAmount
+            }
+        }
+    }
+
     private var availableBalance: Decimal {
-        totalBalance
+        BalanceMath.spendable(currentBalance: totalBalance, pendingIncome: pendingIncomeTotal)
+    }
+
+    private var showsClearedCaption: Bool {
+        !pendingTransactions.isEmpty && clearedBalance != availableBalance
     }
     
     private var pendingForeground: Color {
@@ -1048,19 +1032,6 @@ struct AccountDetailView: View {
         transactionToReconcile = nil
         reconcileSatsString = ""
         reconcileBTCPriceString = ""
-    }
-}
-
-private struct BalanceDetailsPillChrome: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content
-                .glassEffect(.regular.interactive(), in: Capsule())
-        } else {
-            content
-                .background(Capsule().fill(Color.secondary.opacity(0.12)))
-        }
     }
 }
 

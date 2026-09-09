@@ -17,12 +17,14 @@ Use this in App Store Connect for version 1.0. Host `PRIVACY.md` publicly (this 
 
 ## Description
 
-Bills & Balance is a local-first checkbook. Track recurring bills, multiple accounts, and what you can actually spend — without creating an account or sending your ledger to a server.
+Bills & Balance is a simple checkbook for your phone. See what’s due, what’s been paid, and what’s left — without signing up or sending your numbers to a server.
+
+If other money apps feel like too much, this one is closer to paper: bills on a calendar, a running balance, and reminders when something is coming due.
 
 • Recurring bills with reminders and auto-pay
-• Multi-account ledger with cleared and available balance
-• Calendar for bills and income
-• Activity by week, month, and year
+• Several accounts, with cleared and available balances
+• A calendar for bills and income
+• Activity by week, month, and year — just to see what happened
 • Optional Face ID lock
 • Backup to Files or iCloud Drive when you export
 
@@ -30,11 +32,11 @@ Your data stays on this iPhone or iPad until you export it.
 
 ## Keywords (100 character limit)
 
-bills,budget,checkbook,ledger,finance,recurring,calendar,accounts,balance,local
+bills,checkbook,ledger,pay,recurring,calendar,accounts,balance,local,reminders
 
 ## What’s New (1.0)
 
-First release. Recurring bills, multi-account ledger, calendar, activity, optional Face ID, and on-device backup.
+First release. A simple checkbook for bills, accounts, a calendar, and optional Face ID — all on your device.
 
 ## App Privacy nutrition labels
 

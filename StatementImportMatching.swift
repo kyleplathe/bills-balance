@@ -205,6 +205,128 @@ enum StatementImportMatching {
             return nil
         }
     }
+
+    struct LedgerTitleSample: Equatable {
+        var title: String
+        var notes: String?
+        var category: String?
+    }
+
+    struct TitleRewriteSuggestion: Identifiable, Equatable {
+        var normalizedOriginal: String
+        var originalTitle: String
+        var preferredTitle: String
+        var category: String?
+        var transactionIds: [UUID]
+
+        var id: String { normalizedOriginal }
+        var matchCount: Int { transactionIds.count }
+    }
+
+    static func rewriteLookupKeys(for originalTitle: String) -> [String] {
+        var keys: [String] = []
+        var seen = Set<String>()
+        let payee = StrikeCSVParser.payeeName(from: originalTitle)
+        let canonical = normalizeTitle(payee.isEmpty ? originalTitle : payee)
+        let raw = normalizeTitle(originalTitle)
+        for key in [canonical, raw] where !key.isEmpty && seen.insert(key).inserted {
+            keys.append(key)
+        }
+        return keys
+    }
+
+    /// Infer original→preferred title maps from imported Strike ledger rows whose notes still have the bank payee.
+    static func rewriteHints(from samples: [LedgerTitleSample]) -> [String: ImportTitleRewriteStore.Rewrite] {
+        struct Bucket {
+            var preferredCounts: [String: Int] = [:]
+            var preferredDisplay: [String: String] = [:]
+            var categoryCounts: [String: Int] = [:]
+        }
+
+        var buckets: [String: Bucket] = [:]
+        for sample in samples {
+            if LedgerTransfer.isTransfer(category: sample.category, title: sample.title) { continue }
+            guard let original = StrikeCSVParser.originalPayee(from: sample.notes) else { continue }
+            let origNorm = normalizeTitle(original)
+            let prefNorm = normalizeTitle(sample.title)
+            guard !origNorm.isEmpty, !prefNorm.isEmpty, origNorm != prefNorm else { continue }
+
+            var bucket = buckets[origNorm] ?? Bucket()
+            bucket.preferredCounts[prefNorm, default: 0] += 1
+            bucket.preferredDisplay[prefNorm] = sample.title
+            if let category = sample.category?.trimmingCharacters(in: .whitespacesAndNewlines), !category.isEmpty {
+                bucket.categoryCounts[category, default: 0] += 1
+            }
+            buckets[origNorm] = bucket
+        }
+
+        var hints: [String: ImportTitleRewriteStore.Rewrite] = [:]
+        for (origNorm, bucket) in buckets {
+            let total = bucket.preferredCounts.values.reduce(0, +)
+            guard let winner = bucket.preferredCounts.max(by: { $0.value < $1.value }) else { continue }
+            let tied = bucket.preferredCounts.filter { $0.value == winner.value }
+            guard tied.count == 1, winner.value * 2 >= total else { continue }
+            let category = bucket.categoryCounts.max(by: { $0.value < $1.value })?.key
+            hints[origNorm] = ImportTitleRewriteStore.Rewrite(
+                preferredTitle: bucket.preferredDisplay[winner.key] ?? winner.key,
+                category: category
+            )
+        }
+        return hints
+    }
+
+    static func lookupRewrite(
+        for originalTitle: String,
+        store: [String: ImportTitleRewriteStore.Rewrite],
+        ledgerHints: [String: ImportTitleRewriteStore.Rewrite]
+    ) -> (key: String, rewrite: ImportTitleRewriteStore.Rewrite)? {
+        let keys = rewriteLookupKeys(for: originalTitle)
+        for key in keys {
+            if let rewrite = store[key] { return (key, rewrite) }
+        }
+        for key in keys {
+            if let rewrite = ledgerHints[key] { return (key, rewrite) }
+        }
+        return nil
+    }
+
+    static func pendingTitleRewrites(
+        originalTitles: [UUID: String],
+        store: [String: ImportTitleRewriteStore.Rewrite],
+        ledgerHints: [String: ImportTitleRewriteStore.Rewrite]
+    ) -> [TitleRewriteSuggestion] {
+        var groups: [String: (originalTitle: String, rewrite: ImportTitleRewriteStore.Rewrite, ids: [UUID])] = [:]
+        for (id, original) in originalTitles.sorted(by: { $0.key.uuidString < $1.key.uuidString }) {
+            guard let hit = lookupRewrite(for: original, store: store, ledgerHints: ledgerHints) else { continue }
+            let preferredNorm = normalizeTitle(hit.rewrite.preferredTitle)
+            guard !preferredNorm.isEmpty else { continue }
+            let alreadyPreferred = rewriteLookupKeys(for: original).contains(preferredNorm)
+            guard !alreadyPreferred else { continue }
+
+            if var existing = groups[hit.key] {
+                existing.ids.append(id)
+                groups[hit.key] = existing
+            } else {
+                groups[hit.key] = (original, hit.rewrite, [id])
+            }
+        }
+
+        return groups.map { key, value in
+            TitleRewriteSuggestion(
+                normalizedOriginal: key,
+                originalTitle: value.originalTitle,
+                preferredTitle: value.rewrite.preferredTitle,
+                category: value.rewrite.category,
+                transactionIds: value.ids
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.matchCount != rhs.matchCount {
+                return lhs.matchCount > rhs.matchCount
+            }
+            return lhs.originalTitle.localizedCaseInsensitiveCompare(rhs.originalTitle) == .orderedAscending
+        }
+    }
 }
 
 enum ImportTitleRewriteStore {
@@ -216,9 +338,11 @@ enum ImportTitleRewriteStore {
     }
 
     static func rewrite(for originalTitle: String, defaults: UserDefaults = .standard) -> Rewrite? {
-        let norm = StatementImportMatching.normalizeTitle(originalTitle)
-        guard !norm.isEmpty else { return nil }
-        return all(defaults: defaults)[norm]
+        let dict = all(defaults: defaults)
+        for lookupKey in StatementImportMatching.rewriteLookupKeys(for: originalTitle) {
+            if let rewrite = dict[lookupKey] { return rewrite }
+        }
+        return nil
     }
 
     static func save(
@@ -227,13 +351,30 @@ enum ImportTitleRewriteStore {
         category: String?,
         defaults: UserDefaults = .standard
     ) {
-        let norm = StatementImportMatching.normalizeTitle(originalTitle)
-        guard !norm.isEmpty else { return }
+        let keys = StatementImportMatching.rewriteLookupKeys(for: originalTitle)
+        guard let norm = keys.first else { return }
+        let preferred = preferredTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !preferred.isEmpty else { return }
+        let preferredNorm = StatementImportMatching.normalizeTitle(preferred)
+        guard preferredNorm != norm else { return }
+
         var dict = all(defaults: defaults)
-        dict[norm] = Rewrite(preferredTitle: preferredTitle, category: category)
+        let existing = dict[norm]
+        let resolvedCategory: String? = {
+            if let category, !category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return category
+            }
+            return existing?.category
+        }()
+        dict[norm] = Rewrite(preferredTitle: preferred, category: resolvedCategory)
         if let data = try? JSONEncoder().encode(dict) {
             defaults.set(data, forKey: key)
         }
+    }
+
+    static func learn(fromNotes notes: String?, preferredTitle: String, category: String?, defaults: UserDefaults = .standard) {
+        guard let original = StrikeCSVParser.originalPayee(from: notes) else { return }
+        save(originalTitle: original, preferredTitle: preferredTitle, category: category, defaults: defaults)
     }
 
     static func all(defaults: UserDefaults = .standard) -> [String: Rewrite] {

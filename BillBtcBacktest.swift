@@ -147,7 +147,9 @@ enum BillBtcBacktest {
         dueDate: Date,
         actual: LedgerCandidate?,
         historicalPrice: Decimal?,
-        currentPrice: Decimal
+        currentPrice: Decimal,
+        now: Date = Date(),
+        calendar: Calendar = .current
     ) -> MonthAmount? {
         if let actual {
             let usd = actual.usd.magnitude
@@ -165,10 +167,50 @@ enum BillBtcBacktest {
         }
 
         guard template.amount > 0 else { return nil }
-        let price = (historicalPrice ?? 0) > 0 ? (historicalPrice ?? 0) : currentPrice
-        guard price > 0 else { return nil }
-        let usd = template.amount.magnitude
-        return MonthAmount(usd: usd, btc: usd / price, price: price, isEstimate: true)
+        guard let hist = historicalPrice, hist > 0 else { return nil }
+        let usd = inflationAdjustedUsd(template.amount.magnitude, on: dueDate, now: now, calendar: calendar)
+        return MonthAmount(usd: usd, btc: usd / hist, price: hist, isEstimate: true)
+    }
+
+    /// Annual CPI-U (1982-84=100). Years after the table grow at 3%.
+    static let cpiYearIndex: [Int: Decimal] = [
+        2013: Decimal(string: "232.957")!,
+        2014: Decimal(string: "236.736")!,
+        2015: Decimal(string: "237.017")!,
+        2016: Decimal(string: "240.007")!,
+        2017: Decimal(string: "245.120")!,
+        2018: Decimal(string: "251.107")!,
+        2019: Decimal(string: "255.657")!,
+        2020: Decimal(string: "258.811")!,
+        2021: Decimal(string: "270.970")!,
+        2022: Decimal(string: "292.655")!,
+        2023: Decimal(string: "304.702")!,
+        2024: Decimal(string: "313.689")!,
+        2025: Decimal(string: "322.1")!,
+        2026: Decimal(string: "329.0")!
+    ]
+
+    static func cpiIndex(on date: Date, calendar: Calendar = .current) -> Decimal {
+        let year = calendar.component(.year, from: date)
+        let month = calendar.component(.month, from: date)
+        let knownYears = cpiYearIndex.keys.sorted()
+        guard let firstYear = knownYears.first, let lastYear = knownYears.last else { return 1 }
+        let startYear = min(max(year, firstYear), lastYear)
+        let start = cpiYearIndex[startYear] ?? 1
+        let next: Decimal = {
+            if let listed = cpiYearIndex[startYear + 1] { return listed }
+            return start * Decimal(string: "1.03")!
+        }()
+        let fraction = Decimal(month - 1) / 12
+        return start + (next - start) * fraction
+    }
+
+    /// Scales a current payment back to `date` using CPI so estimated USD isn't a flat line.
+    static func inflationAdjustedUsd(_ amount: Decimal, on date: Date, now: Date = Date(), calendar: Calendar = .current) -> Decimal {
+        let thenCpi = cpiIndex(on: date, calendar: calendar)
+        let nowCpi = cpiIndex(on: now, calendar: calendar)
+        guard nowCpi > 0, thenCpi > 0 else { return amount }
+        return amount * thenCpi / nowCpi
     }
 
     static func shareTitle(billNames: [String]) -> String {
@@ -177,7 +219,7 @@ enum BillBtcBacktest {
             .filter { !$0.isEmpty }
         if names.count == 1 { return "\(names[0]) USD vs BTC" }
         if names.count == 2 { return "\(names[0]) & \(names[1]) USD vs BTC" }
-        if names.count > 2 { return "Bills USD vs BTC" }
+        if names.count > 2 { return "\(names.joined(separator: ", ")) USD vs BTC" }
         return "USD vs BTC"
     }
 
@@ -190,6 +232,141 @@ enum BillBtcBacktest {
         return title
     }
 
+    static let minLookbackMonths = 12
+    static let maxSliderLookbackMonths = 96
+    static let bitcoinHistoryStartComponents = DateComponents(year: 2013, month: 4, day: 1)
+
+    static func clampLookbackMonths(_ months: Int) -> Int {
+        min(maxSliderLookbackMonths, max(minLookbackMonths, months))
+    }
+
+    static func isFullHistoryLookback(_ months: Int) -> Bool {
+        months > maxSliderLookbackMonths
+    }
+
+    static func monthsSince2013(now: Date = Date(), calendar: Calendar = .current) -> Int {
+        guard let start = calendar.date(from: bitcoinHistoryStartComponents) else {
+            return maxSliderLookbackMonths
+        }
+        let months = calendar.dateComponents([.month], from: start, to: now).month ?? maxSliderLookbackMonths
+        return max(maxSliderLookbackMonths, months)
+    }
+
+    static func resolvedLookbackMonths(_ months: Int, now: Date = Date(), calendar: Calendar = .current) -> Int {
+        if isFullHistoryLookback(months) {
+            return monthsSince2013(now: now, calendar: calendar)
+        }
+        return clampLookbackMonths(months)
+    }
+
+    struct MonthlyAverages: Equatable {
+        var monthlyUsd: Decimal
+        var monthlyBtc: Decimal
+        var monthCount: Int
+    }
+
+    static func monthlyAverages(usdAmounts: [Decimal], btcAmounts: [Decimal]) -> MonthlyAverages? {
+        let pairs = zip(usdAmounts, btcAmounts).filter { $0.0 > 0 || $0.1 > 0 }
+        guard !pairs.isEmpty else { return nil }
+        let count = Decimal(pairs.count)
+        return MonthlyAverages(
+            monthlyUsd: pairs.map(\.0).reduce(0, +) / count,
+            monthlyBtc: pairs.map(\.1).reduce(0, +) / count,
+            monthCount: pairs.count
+        )
+    }
+
+    static func plotMax(_ values: [Double]) -> Double {
+        max((values.max() ?? 1) * 1.08, 1)
+    }
+
+    static func compactUsd(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "USD"
+        formatter.maximumFractionDigits = abs(value) >= 100 ? 0 : 2
+        formatter.minimumFractionDigits = 0
+        return formatter.string(from: NSNumber(value: value)) ?? "$0"
+    }
+
+    static func compactSats(_ sats: Double) -> String {
+        if sats >= 1_000_000 {
+            let millions = sats / 1_000_000
+            return String(format: millions >= 10 ? "%.0fM" : "%.1fM", millions)
+        }
+        if sats >= 10_000 {
+            return String(format: "%.0fk", sats / 1_000)
+        }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 0
+        return formatter.string(from: NSNumber(value: sats)) ?? "0"
+    }
+
+    static func satsValue(fromBTC btc: Decimal) -> Double {
+        (btc as NSDecimalNumber).doubleValue * 100_000_000
+    }
+
+    static func sharePunchline(billName: String) -> String {
+        let name = billName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty { return "Same bill. Fewer sats." }
+        return "Same \(name). Fewer sats."
+    }
+
+    struct IndexedPoint: Equatable {
+        var usd: Double
+        var sats: Double
+    }
+
+    /// Both series start at 100 using the first month with a positive USD and BTC amount.
+    static func indexedSeries(usdAmounts: [Decimal], btcAmounts: [Decimal]) -> [IndexedPoint] {
+        guard usdAmounts.count == btcAmounts.count, usdAmounts.count > 1 else { return [] }
+        let usdVals = usdAmounts.map { ($0 as NSDecimalNumber).doubleValue }
+        let satsVals = btcAmounts.map { ($0 as NSDecimalNumber).doubleValue }
+        guard let base = zip(usdVals, satsVals).first(where: { $0.0 > 0 && $0.1 > 0 }) else { return [] }
+        let usdBase = base.0
+        let satsBase = base.1
+        return zip(usdVals, satsVals).map { usd, sats in
+            IndexedPoint(usd: usd / usdBase * 100, sats: sats / satsBase * 100)
+        }
+    }
+
+    /// Inclusive start / exclusive end for consecutive estimated months.
+    static func estimateBands(dates: [Date], estimates: [Bool], calendar: Calendar = .current) -> [(start: Date, end: Date)] {
+        guard dates.count == estimates.count, !dates.isEmpty else { return [] }
+        var bands: [(Date, Date)] = []
+        var bandStart: Date?
+        for index in dates.indices {
+            if estimates[index] {
+                if bandStart == nil { bandStart = dates[index] }
+            } else if let start = bandStart {
+                bands.append((start, dates[index]))
+                bandStart = nil
+            }
+        }
+        if let start = bandStart, let last = dates.last {
+            let end = calendar.date(byAdding: .month, value: 1, to: last) ?? last
+            bands.append((start, end))
+        }
+        return bands
+    }
+
+    /// A month is estimated when every series that has that month is an estimate (or none have actuals).
+    static func combinedEstimates(dates: [[Date]], estimates: [[Bool]], axis: [Date]) -> [Bool] {
+        axis.map { date in
+            var sawActual = false
+            var sawAny = false
+            for index in dates.indices {
+                guard let monthIndex = dates[index].firstIndex(of: date) else { continue }
+                sawAny = true
+                if !estimates[index][monthIndex] {
+                    sawActual = true
+                }
+            }
+            return sawAny ? !sawActual : true
+        }
+    }
+
     /// Positive `percentLess` means later payments used less Bitcoin than earlier ones.
     struct BitcoinSpendChange: Equatable {
         var percentLess: Decimal
@@ -197,8 +374,8 @@ enum BillBtcBacktest {
         var monthCount: Int
     }
 
-    static func bitcoinSpendChange(btcAmounts: [Decimal], monthCount: Int) -> BitcoinSpendChange? {
-        let values = btcAmounts.filter { $0 > 0 }
+    static func spendChange(amounts: [Decimal], monthCount: Int) -> BitcoinSpendChange? {
+        let values = amounts.filter { $0 > 0 }
         guard values.count >= 6 else { return nil }
         let window = min(12, max(3, values.count / 4))
         let first = Array(values.prefix(window))
@@ -214,11 +391,41 @@ enum BillBtcBacktest {
         )
     }
 
+    static func bitcoinSpendChange(btcAmounts: [Decimal], monthCount: Int) -> BitcoinSpendChange? {
+        spendChange(amounts: btcAmounts, monthCount: monthCount)
+    }
+
+    static func usdSpendChange(usdAmounts: [Decimal], monthCount: Int) -> BitcoinSpendChange? {
+        spendChange(amounts: usdAmounts, monthCount: monthCount)
+    }
+
     static func changeSentence(_ change: BitcoinSpendChange) -> String {
         let percent = abs((change.percentLess * 100 as NSDecimalNumber).intValue)
         if change.percentLess >= 0 {
             return "Paid \(percent)% less Bitcoin than \(change.years) years ago"
         }
         return "Paid \(percent)% more Bitcoin than \(change.years) years ago"
+    }
+
+    static func trailingAverages(usdAmounts: [Decimal], btcAmounts: [Decimal], window: Int = 12) -> MonthlyAverages? {
+        let pairs = Array(zip(usdAmounts, btcAmounts).filter { $0.0 > 0 || $0.1 > 0 }.suffix(max(window, 1)))
+        guard !pairs.isEmpty else { return nil }
+        let count = Decimal(pairs.count)
+        return MonthlyAverages(
+            monthlyUsd: pairs.map(\.0).reduce(0, +) / count,
+            monthlyBtc: pairs.map(\.1).reduce(0, +) / count,
+            monthCount: pairs.count
+        )
+    }
+
+    static func signedPercentLabel(_ change: BitcoinSpendChange) -> String {
+        let percent = abs((change.percentLess * 100 as NSDecimalNumber).intValue)
+        if abs((change.percentLess as NSDecimalNumber).doubleValue) < 0.005 {
+            return "0%"
+        }
+        if change.percentLess >= 0 {
+            return "−\(percent)%"
+        }
+        return "+\(percent)%"
     }
 }

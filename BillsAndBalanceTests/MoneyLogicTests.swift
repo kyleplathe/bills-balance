@@ -151,6 +151,12 @@ final class BalanceMathTests: XCTestCase {
         XCTAssertEqual(available, Decimal(1500))
     }
 
+    func testSpendableExcludesPendingIncomeKeepsPendingOutflows() {
+        XCTAssertEqual(BalanceMath.spendable(currentBalance: 1500, pendingIncome: 500), Decimal(1000))
+        XCTAssertEqual(BalanceMath.spendable(currentBalance: 950, pendingIncome: 0), Decimal(950))
+        XCTAssertEqual(BalanceMath.spendable(currentBalance: 1450, pendingIncome: 500), Decimal(950))
+    }
+
     func testProjectionWindowIncludesStartExcludesEnd() {
         let calendar = Calendar(identifier: .gregorian)
         let start = calendar.date(from: DateComponents(year: 2026, month: 1, day: 1))!
@@ -357,9 +363,14 @@ final class RecurrenceCoreDataTests: XCTestCase {
     var billViewModel: BillViewModel!
 
     override func setUp() async throws {
+        AutoPaySkipStore.resetForTests()
         persistence = PersistenceController(inMemory: true)
         let context = persistence.container.viewContext
         billViewModel = BillViewModel(context: context)
+    }
+
+    override func tearDown() async throws {
+        AutoPaySkipStore.resetForTests()
     }
 
     func testAddBillRejectsSameNameDateAmount() {
@@ -468,6 +479,58 @@ final class RecurrenceCoreDataTests: XCTestCase {
             among: [mortgage, hoa]
         ))
     }
+
+    func testUnmarkingAutoPayBillRecordsSkipForThisDueDate() throws {
+        let context = persistence.container.viewContext
+        let accountVM = AccountViewModel(context: context)
+        billViewModel.attachAccountViewModel(accountVM)
+        let account = accountVM.addAccount(name: "Checking", type: "checking", startingBalance: 5_000)
+        let due = Calendar.current.startOfDay(for: Date())
+        guard let bill = billViewModel.addBill(
+            name: "Cursor",
+            amount: 20,
+            dueDate: due,
+            recurrenceType: "none",
+            autoPay: true,
+            account: account
+        ) else {
+            return XCTFail("Expected bill")
+        }
+        bill.isPaid = true
+        bill.paidDate = Date()
+        try context.save()
+
+        billViewModel.togglePaidStatus(for: bill)
+        XCTAssertFalse(bill.isPaid)
+        XCTAssertTrue(AutoPaySkipStore.isSkipped(billId: bill.id, dueDate: due))
+    }
+
+    func testSkippedAutoPayBillStaysUnpaidOnFetch() throws {
+        let context = persistence.container.viewContext
+        let accountVM = AccountViewModel(context: context)
+        billViewModel.attachAccountViewModel(accountVM)
+        let account = accountVM.addAccount(name: "Checking", type: "checking", startingBalance: 5_000)
+        let due = Calendar.current.startOfDay(for: Date())
+        guard let bill = billViewModel.addBill(
+            name: "Cursor",
+            amount: 20,
+            dueDate: due,
+            recurrenceType: "none",
+            autoPay: true,
+            account: account
+        ) else {
+            return XCTFail("Expected bill")
+        }
+        bill.createdAt = Date().addingTimeInterval(-60)
+        try context.save()
+        AutoPaySkipStore.skip(billId: bill.id, dueDate: due)
+        billViewModel.skipAutoPayProcessing(for: 0)
+
+        billViewModel.fetchBills()
+        XCTAssertFalse(bill.isPaid, "Unmarking an auto-pay bill must survive the next launch fetch")
+        let pending = (bill.ledgerEntries as? Set<LedgerEntry>)?.filter { !$0.isReconciledFlag } ?? []
+        XCTAssertTrue(pending.isEmpty)
+    }
 }
 
 final class StrikeCSVParserTests: XCTestCase {
@@ -518,6 +581,8 @@ final class StrikeCSVParserTests: XCTestCase {
         let notes = StrikeCSVParser.notes(payee: "Condos at Lake H", feeUSD: Decimal(string: "2.91"), reference: "59ced58f-s")
         XCTAssertTrue(notes.contains("Strike fee: $2.91"))
         XCTAssertEqual(StrikeCSVParser.reference(from: notes), "59ced58f-s")
+        XCTAssertEqual(StrikeCSVParser.originalPayee(from: notes), "Condos at Lake H")
+        XCTAssertNil(StrikeCSVParser.originalPayee(from: "Imported from CSV\nStrike ref: abc"))
     }
 
     func testBillPayNameScore() {
@@ -800,7 +865,98 @@ final class StatementImportMatchingTests: XCTestCase {
         let rewrite = ImportTitleRewriteStore.rewrite(for: "kyle  plathe", defaults: defaults)
         XCTAssertEqual(rewrite?.preferredTitle, "Mortgage")
         XCTAssertEqual(rewrite?.category, "Housing")
+        XCTAssertEqual(
+            ImportTitleRewriteStore.rewrite(for: "Bill pay to Kyle Plathe", defaults: defaults)?.preferredTitle,
+            "Mortgage"
+        )
+        ImportTitleRewriteStore.save(
+            originalTitle: "Kyle Plathe",
+            preferredTitle: "Kyle Plathe",
+            category: nil,
+            defaults: defaults
+        )
+        XCTAssertEqual(ImportTitleRewriteStore.rewrite(for: "Kyle Plathe", defaults: defaults)?.preferredTitle, "Mortgage")
         defaults.removePersistentDomain(forName: "ImportTitleRewriteTests")
+    }
+
+    func testRewriteHintsLearnFromStrikeNotes() {
+        let notes = StrikeCSVParser.notes(payee: "Kyle D Plathe", feeUSD: Decimal(string: "5.97"), reference: "abc")
+        let hints = StatementImportMatching.rewriteHints(from: [
+            .init(title: "Mortgage", notes: notes, category: "Housing"),
+            .init(title: "Mortgage", notes: notes, category: "Housing"),
+            .init(title: "Kyle D Plathe", notes: notes, category: nil)
+        ])
+        XCTAssertEqual(hints["kyle d plathe"]?.preferredTitle, "Mortgage")
+        XCTAssertEqual(hints["kyle d plathe"]?.category, "Housing")
+    }
+
+    func testRewriteHintsSkipTiedPreferredTitles() {
+        let notes = StrikeCSVParser.notes(payee: "Wells Fargo", feeUSD: nil, reference: "ref")
+        let hints = StatementImportMatching.rewriteHints(from: [
+            .init(title: "Transfer", notes: notes, category: nil),
+            .init(title: "Bank", notes: notes, category: nil)
+        ])
+        XCTAssertNil(hints["wells fargo"])
+    }
+
+    func testRewriteHintsSkipTransferTitles() {
+        let notes = StrikeCSVParser.notes(payee: "Wells Fargo", feeUSD: nil, reference: "ref")
+        let hints = StatementImportMatching.rewriteHints(from: [
+            .init(title: "Transfer to Checking", notes: notes, category: LedgerTransfer.category)
+        ])
+        XCTAssertTrue(hints.isEmpty)
+    }
+
+    func testPendingTitleRewritesGroupMatchesAndPreferStore() {
+        let mortgageA = UUID()
+        let mortgageB = UUID()
+        let hoa = UUID()
+        let coffee = UUID()
+        let suggestions = StatementImportMatching.pendingTitleRewrites(
+            originalTitles: [
+                mortgageA: "Kyle D Plathe",
+                mortgageB: "Bill pay to Kyle D Plathe",
+                hoa: "Condos at Lake H",
+                coffee: "Starbucks"
+            ],
+            store: [
+                "kyle d plathe": .init(preferredTitle: "Mortgage", category: "Housing")
+            ],
+            ledgerHints: [
+                "kyle d plathe": .init(preferredTitle: "Wrong", category: nil),
+                "condos at lake h": .init(preferredTitle: "HOA", category: "Housing")
+            ]
+        )
+        XCTAssertEqual(suggestions.map(\.preferredTitle), ["Mortgage", "HOA"])
+        XCTAssertEqual(suggestions[0].matchCount, 2)
+        XCTAssertEqual(Set(suggestions[0].transactionIds), [mortgageA, mortgageB])
+        XCTAssertEqual(suggestions[0].category, "Housing")
+        XCTAssertEqual(suggestions[1].preferredTitle, "HOA")
+        XCTAssertEqual(suggestions[1].transactionIds, [hoa])
+    }
+
+    func testPendingTitleRewritesSkipWhenAlreadyPreferred() {
+        let id = UUID()
+        let suggestions = StatementImportMatching.pendingTitleRewrites(
+            originalTitles: [id: "Mortgage"],
+            store: ["mortgage": .init(preferredTitle: "Mortgage", category: nil)],
+            ledgerHints: [:]
+        )
+        XCTAssertTrue(suggestions.isEmpty)
+    }
+
+    func testLearnFromImportedNotes() {
+        let defaults = UserDefaults(suiteName: "ImportTitleRewriteLearnTests")!
+        defaults.removePersistentDomain(forName: "ImportTitleRewriteLearnTests")
+        let notes = StrikeCSVParser.notes(payee: "Kyle D Plathe", feeUSD: nil, reference: "abc")
+        ImportTitleRewriteStore.learn(
+            fromNotes: notes,
+            preferredTitle: "Mortgage",
+            category: "Housing",
+            defaults: defaults
+        )
+        XCTAssertEqual(ImportTitleRewriteStore.rewrite(for: "Kyle D Plathe", defaults: defaults)?.preferredTitle, "Mortgage")
+        defaults.removePersistentDomain(forName: "ImportTitleRewriteLearnTests")
     }
 }
 
@@ -847,6 +1003,60 @@ final class ActivityLedgerRulesTests: XCTestCase {
             cardNames: ["Chase"],
             category: "Transfer"
         ))
+    }
+}
+
+final class CategoryPayeeGroupingTests: XCTestCase {
+    private struct Item {
+        let title: String?
+        let amount: Decimal
+        let date: Date
+    }
+
+    func testGroupsCaseInsensitiveTitlesAndSumsAmounts() {
+        let later = Date()
+        let earlier = later.addingTimeInterval(-86_400)
+        let groups = CategoryPayeeGrouping.groups(
+            [
+                Item(title: "Mortgage", amount: 2000, date: earlier),
+                Item(title: "mortgage", amount: 2000, date: later),
+                Item(title: "HOA Dues", amount: 350, date: later)
+            ],
+            title: { $0.title },
+            amount: { $0.amount },
+            date: { $0.date }
+        )
+        XCTAssertEqual(groups.map(\.title), ["Mortgage", "HOA Dues"])
+        XCTAssertEqual(groups[0].amount, 4000)
+        XCTAssertEqual(groups[0].items.count, 2)
+        XCTAssertEqual(groups[1].items.count, 1)
+    }
+
+    func testSingletonStaysASingleItem() {
+        let groups = CategoryPayeeGrouping.groups(
+            [Item(title: "Home Depot", amount: 87, date: Date())],
+            title: { $0.title },
+            amount: { $0.amount },
+            date: { $0.date }
+        )
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups[0].items.count, 1)
+        XCTAssertEqual(groups[0].title, "Home Depot")
+    }
+
+    func testEmptyTitlesGroupAsUntitled() {
+        let groups = CategoryPayeeGrouping.groups(
+            [
+                Item(title: nil, amount: 10, date: Date()),
+                Item(title: "  ", amount: 5, date: Date())
+            ],
+            title: { $0.title },
+            amount: { $0.amount },
+            date: { $0.date }
+        )
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups[0].title, "Untitled")
+        XCTAssertEqual(groups[0].amount, 15)
     }
 }
 
@@ -967,11 +1177,35 @@ final class BillBtcBacktestTests: XCTestCase {
         XCTAssertEqual(templates.first?.dueDay, 1)
     }
 
+    func testSharePunchlineUsesBillName() {
+        XCTAssertEqual(BillBtcBacktest.sharePunchline(billName: "Mortgage"), "Same Mortgage. Fewer sats.")
+        XCTAssertEqual(BillBtcBacktest.sharePunchline(billName: "  "), "Same bill. Fewer sats.")
+    }
+
+    func testCompactSatsFormats() {
+        XCTAssertEqual(BillBtcBacktest.compactSats(4_200_000), "4.2M")
+        XCTAssertEqual(BillBtcBacktest.compactSats(480_000), "480k")
+        XCTAssertEqual(BillBtcBacktest.satsValue(fromBTC: Decimal(string: "0.01")!), 1_000_000, accuracy: 0.1)
+    }
+
+    func testEstimateWithoutHistoricalPriceIsSkipped() {
+        let template = BillBtcBacktest.Template(name: "Rent", amount: 1500, dueDay: 1, seriesId: nil, category: "Housing")
+        let result = BillBtcBacktest.monthAmount(
+            template: template,
+            dueDate: Date(),
+            actual: nil,
+            historicalPrice: nil,
+            currentPrice: 100_000
+        )
+        XCTAssertNil(result)
+    }
+
     func testShareTitleUsesBillName() {
         XCTAssertEqual(BillBtcBacktest.shareTitle(billNames: ["Mortgage"]), "Mortgage USD vs BTC")
         XCTAssertEqual(BillBtcBacktest.shareTitle(billNames: ["Rent", "Xcel"]), "Rent & Xcel USD vs BTC")
-        XCTAssertEqual(BillBtcBacktest.shareTitle(billNames: ["Rent", "Xcel", "Internet"]), "Bills USD vs BTC")
+        XCTAssertEqual(BillBtcBacktest.shareTitle(billNames: ["Rent", "Xcel", "Internet"]), "Rent, Xcel, Internet USD vs BTC")
         XCTAssertEqual(BillBtcBacktest.shareHeadlineName(from: "Mortgage USD vs BTC"), "Mortgage")
+        XCTAssertEqual(BillBtcBacktest.shareHeadlineName(from: "Rent, Xcel, Internet USD vs BTC"), "Rent, Xcel, Internet")
     }
 
     func testBitcoinSpendChangeShowsLessOverTime() {
@@ -1010,6 +1244,126 @@ final class BillBtcBacktestTests: XCTestCase {
             ),
             0
         )
+    }
+
+    func testMonthlyAverages() {
+        let usd: [Decimal] = [1500, 1500, 1800]
+        let btc: [Decimal] = [Decimal(string: "0.03")!, Decimal(string: "0.02")!, Decimal(string: "0.01")!]
+        let avg = BillBtcBacktest.monthlyAverages(usdAmounts: usd, btcAmounts: btc)
+        XCTAssertEqual(avg?.monthCount, 3)
+        XCTAssertEqual(avg?.monthlyUsd, 1600)
+        XCTAssertEqual(avg?.monthlyBtc, Decimal(string: "0.02"))
+    }
+
+    func testIndexedSeriesStartsAt100() {
+        let usd: [Decimal] = [1000, 1000, 1100]
+        let btc: [Decimal] = [Decimal(string: "0.04")!, Decimal(string: "0.02")!, Decimal(string: "0.01")!]
+        let indexed = BillBtcBacktest.indexedSeries(usdAmounts: usd, btcAmounts: btc)
+        XCTAssertEqual(indexed.count, 3)
+        XCTAssertEqual(indexed[0].usd, 100, accuracy: 0.001)
+        XCTAssertEqual(indexed[0].sats, 100, accuracy: 0.001)
+        XCTAssertEqual(indexed[1].usd, 100, accuracy: 0.001)
+        XCTAssertEqual(indexed[1].sats, 50, accuracy: 0.001)
+        XCTAssertEqual(indexed[2].usd, 110, accuracy: 0.001)
+        XCTAssertEqual(indexed[2].sats, 25, accuracy: 0.001)
+    }
+
+    func testMultipleBillsIndexIndependently() {
+        let mortgage = BillBtcBacktest.indexedSeries(
+            usdAmounts: [2000, 2000, 2000],
+            btcAmounts: [Decimal(string: "0.04")!, Decimal(string: "0.02")!, Decimal(string: "0.01")!]
+        )
+        let utility = BillBtcBacktest.indexedSeries(
+            usdAmounts: [100, 100, 100],
+            btcAmounts: [Decimal(string: "0.002")!, Decimal(string: "0.001")!, Decimal(string: "0.0005")!]
+        )
+        XCTAssertEqual(mortgage[0].sats, 100, accuracy: 0.001)
+        XCTAssertEqual(utility[0].sats, 100, accuracy: 0.001)
+        XCTAssertEqual(mortgage[2].sats, 25, accuracy: 0.001)
+        XCTAssertEqual(utility[2].sats, 25, accuracy: 0.001)
+    }
+
+    func testEstimateBandsCoverHypotheticalPrefix() {
+        let jan = calendar.date(from: DateComponents(year: 2025, month: 1, day: 1))!
+        let feb = calendar.date(from: DateComponents(year: 2025, month: 2, day: 1))!
+        let mar = calendar.date(from: DateComponents(year: 2025, month: 3, day: 1))!
+        let apr = calendar.date(from: DateComponents(year: 2025, month: 4, day: 1))!
+        let bands = BillBtcBacktest.estimateBands(
+            dates: [jan, feb, mar, apr],
+            estimates: [true, true, false, false],
+            calendar: calendar
+        )
+        XCTAssertEqual(bands.count, 1)
+        XCTAssertEqual(bands[0].start, jan)
+        XCTAssertEqual(bands[0].end, mar)
+    }
+
+    func testCombinedEstimatesIsActualIfAnyBillHasPayment() {
+        let jan = calendar.date(from: DateComponents(year: 2025, month: 1, day: 1))!
+        let feb = calendar.date(from: DateComponents(year: 2025, month: 2, day: 1))!
+        let flags = BillBtcBacktest.combinedEstimates(
+            dates: [[jan, feb], [jan, feb]],
+            estimates: [[true, true], [true, false]],
+            axis: [jan, feb]
+        )
+        XCTAssertEqual(flags, [true, false])
+    }
+
+    func testLookbackClampIncludesEightYears() {
+        XCTAssertEqual(BillBtcBacktest.clampLookbackMonths(96), 96)
+        XCTAssertEqual(BillBtcBacktest.clampLookbackMonths(5), 12)
+        XCTAssertEqual(BillBtcBacktest.clampLookbackMonths(48), 48)
+        XCTAssertEqual(BillBtcBacktest.clampLookbackMonths(200), 96)
+    }
+
+    func testResolvedLookbackUsesSince2013() {
+        let now = calendar.date(from: DateComponents(year: 2026, month: 9, day: 1))!
+        XCTAssertEqual(BillBtcBacktest.monthsSince2013(now: now, calendar: calendar), 161)
+        XCTAssertEqual(BillBtcBacktest.resolvedLookbackMonths(96, now: now, calendar: calendar), 96)
+        XCTAssertEqual(BillBtcBacktest.resolvedLookbackMonths(200, now: now, calendar: calendar), 161)
+        XCTAssertTrue(BillBtcBacktest.isFullHistoryLookback(161))
+        XCTAssertFalse(BillBtcBacktest.isFullHistoryLookback(96))
+    }
+
+    func testInflationAdjustedUsdIsLowerInThePast() {
+        let now = calendar.date(from: DateComponents(year: 2026, month: 9, day: 1))!
+        let then = calendar.date(from: DateComponents(year: 2018, month: 6, day: 1))!
+        let adjusted = BillBtcBacktest.inflationAdjustedUsd(2000, on: then, now: now, calendar: calendar)
+        XCTAssertLessThan(NSDecimalNumber(decimal: adjusted).doubleValue, 2000)
+        XCTAssertGreaterThan(NSDecimalNumber(decimal: adjusted).doubleValue, 1400)
+    }
+
+    func testEstimateUsesInflationAdjustedUsd() {
+        let template = BillBtcBacktest.Template(name: "Rent", amount: 2000, dueDay: 1, seriesId: nil, category: "Housing")
+        let due = calendar.date(from: DateComponents(year: 2018, month: 6, day: 1))!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 9, day: 1))!
+        let result = BillBtcBacktest.monthAmount(
+            template: template,
+            dueDate: due,
+            actual: nil,
+            historicalPrice: 7_500,
+            currentPrice: 100_000,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertEqual(result?.isEstimate, true)
+        XCTAssertLessThan(NSDecimalNumber(decimal: result?.usd ?? 0).doubleValue, 2000)
+        XCTAssertGreaterThan(NSDecimalNumber(decimal: result?.btc ?? 0).doubleValue, 0)
+    }
+
+    func testTrailingAveragesUsesLastWindow() {
+        let usd = Array(repeating: Decimal(1000), count: 12) + Array(repeating: Decimal(2000), count: 12)
+        let btc = Array(repeating: Decimal(string: "0.04")!, count: 12) + Array(repeating: Decimal(string: "0.01")!, count: 12)
+        let avg = BillBtcBacktest.trailingAverages(usdAmounts: usd, btcAmounts: btc)
+        XCTAssertEqual(avg?.monthlyUsd, 2000)
+        XCTAssertEqual(avg?.monthlyBtc, Decimal(string: "0.01"))
+    }
+
+    func testSignedPercentLabel() {
+        let up = BillBtcBacktest.BitcoinSpendChange(percentLess: Decimal(string: "-0.10")!, years: 4, monthCount: 48)
+        let down = BillBtcBacktest.BitcoinSpendChange(percentLess: Decimal(string: "0.05")!, years: 4, monthCount: 48)
+        XCTAssertEqual(BillBtcBacktest.signedPercentLabel(up), "+10%")
+        XCTAssertEqual(BillBtcBacktest.signedPercentLabel(down), "−5%")
     }
 }
 
@@ -1346,6 +1700,65 @@ final class AutoPayShortfallTests: XCTestCase {
     }
 }
 
+final class AutoPayProcessingTests: XCTestCase {
+    override func setUp() {
+        AutoPaySkipStore.resetForTests()
+    }
+
+    override func tearDown() {
+        AutoPaySkipStore.resetForTests()
+    }
+
+    func testProcessesDueUnpaidAutoPayBill() {
+        let now = Date()
+        XCTAssertTrue(AutoPayProcessing.shouldProcess(
+            autoPay: true,
+            isPaid: false,
+            hasAccount: true,
+            createdAt: now.addingTimeInterval(-60),
+            processingDate: now.addingTimeInterval(-86_400),
+            isSkipped: false,
+            now: now
+        ))
+    }
+
+    func testSkipsWhenUserUnmarkedThisDueDate() {
+        let now = Date()
+        XCTAssertFalse(AutoPayProcessing.shouldProcess(
+            autoPay: true,
+            isPaid: false,
+            hasAccount: true,
+            createdAt: now.addingTimeInterval(-60),
+            processingDate: now,
+            isSkipped: true,
+            now: now
+        ))
+    }
+
+    func testSkipsNewlyCreatedBills() {
+        let now = Date()
+        XCTAssertFalse(AutoPayProcessing.shouldProcess(
+            autoPay: true,
+            isPaid: false,
+            hasAccount: true,
+            createdAt: now,
+            processingDate: now,
+            isSkipped: false,
+            now: now
+        ))
+    }
+
+    func testSkipStoreSurvivesSameOccurrence() {
+        let id = UUID()
+        let due = Date()
+        XCTAssertFalse(AutoPaySkipStore.isSkipped(billId: id, dueDate: due))
+        AutoPaySkipStore.skip(billId: id, dueDate: due)
+        XCTAssertTrue(AutoPaySkipStore.isSkipped(billId: id, dueDate: due))
+        AutoPaySkipStore.clear(billId: id, dueDate: due)
+        XCTAssertFalse(AutoPaySkipStore.isSkipped(billId: id, dueDate: due))
+    }
+}
+
 @MainActor
 final class TransactionSuggestionTests: XCTestCase {
     var persistence: PersistenceController!
@@ -1414,6 +1827,41 @@ final class TransactionSuggestionTests: XCTestCase {
         XCTAssertEqual(viewModel.suggestedTitles(prefix: "Net", account: card), [])
         XCTAssertEqual(viewModel.suggestedTitles(prefix: "Net"), ["Netflix"])
         XCTAssertEqual(viewModel.suggestedCategory(forTitle: "Netflix"), "Subscriptions")
+    }
+
+    func testBulkSetCategoryLeavesOtherCategoriesAlone() {
+        let account = makeAccount()
+        addEntry(to: account, title: "Starbucks", category: nil)
+        addEntry(to: account, title: "Starbucks", category: nil)
+        addEntry(to: account, title: "Starbucks", category: "Shopping")
+
+        XCTAssertEqual(viewModel.bulkSetCategory("Housing", forTitle: "Starbucks"), 2)
+
+        let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
+        request.predicate = NSPredicate(format: "title ==[cd] %@", "Starbucks")
+        let entries = (try? persistence.container.viewContext.fetch(request)) ?? []
+        let categories = entries.compactMap(\.category).sorted()
+        XCTAssertEqual(categories, ["Housing", "Housing", "Shopping"])
+    }
+
+    func testBulkClearCategoryOnlyRemovesThatPayee() {
+        let account = makeAccount()
+        addEntry(to: account, title: "Starbucks", category: "Housing")
+        addEntry(to: account, title: "Starbucks", category: "Housing")
+        addEntry(to: account, title: "Mortgage", category: "Housing")
+
+        XCTAssertEqual(viewModel.countEntries(withTitle: "Starbucks", category: "Housing"), 2)
+        XCTAssertEqual(
+            viewModel.bulkSetCategory(nil, forTitle: "Starbucks", matchingCategory: "Housing"),
+            2
+        )
+
+        let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
+        let entries = (try? persistence.container.viewContext.fetch(request)) ?? []
+        let starbucks = entries.filter { ($0.title ?? "").localizedCaseInsensitiveCompare("Starbucks") == .orderedSame }
+        let mortgage = entries.first { ($0.title ?? "") == "Mortgage" }
+        XCTAssertTrue(starbucks.allSatisfy { $0.category == nil || $0.category?.isEmpty == true })
+        XCTAssertEqual(mortgage?.category, "Housing")
     }
 }
 

@@ -195,7 +195,7 @@ final class ReportsViewModel: ObservableObject {
     @Published var creditCardViewMode: CreditCardViewMode = .transactions
     @Published var categorySortDescending: Bool = true
     @Published var usdBtcBacktestEnabled: Bool = false
-    /// Number of months to include in USD vs BTC report (e.g. 48 = 4 years).
+    /// Number of months to include in USD vs BTC report (e.g. 96 = 8 years, or since 2013).
     @Published var usdBtcMonthsBack: Int = 48
     @Published var usdBtcExcludedBillNames: Set<String> = []
     @Published var usdBtcAvailableBillNames: [String] = []
@@ -230,7 +230,7 @@ final class ReportsViewModel: ObservableObject {
         }
         let storedMonths = UserDefaults.standard.integer(forKey: Self.usdBtcMonthsBackKey)
         if storedMonths >= 12 {
-            usdBtcMonthsBack = min(48, storedMonths)
+            usdBtcMonthsBack = BillBtcBacktest.resolvedLookbackMonths(storedMonths, calendar: calendar)
         }
         if let storedBills = UserDefaults.standard.array(forKey: Self.usdBtcExcludedBillsKey) as? [String] {
             usdBtcExcludedBillNames = Set(storedBills)
@@ -254,12 +254,20 @@ final class ReportsViewModel: ObservableObject {
         hasActiveBitcoinDigitalWallet && usdBtcEasterEggEligible
     }
 
+    var usdBtcUsesFullHistory: Bool {
+        BillBtcBacktest.isFullHistoryLookback(usdBtcMonthsBack)
+    }
+
     func setUsdBtcMonthsBack(_ months: Int) {
-        let clamped = min(48, max(12, months))
-        guard clamped != usdBtcMonthsBack else { return }
-        usdBtcMonthsBack = clamped
-        UserDefaults.standard.set(clamped, forKey: Self.usdBtcMonthsBackKey)
+        let resolved = BillBtcBacktest.resolvedLookbackMonths(months, calendar: calendar)
+        guard resolved != usdBtcMonthsBack else { return }
+        usdBtcMonthsBack = resolved
+        UserDefaults.standard.set(resolved, forKey: Self.usdBtcMonthsBackKey)
         Task { await loadUsdBtcReport() }
+    }
+
+    func setUsdBtcFullHistory() {
+        setUsdBtcMonthsBack(BillBtcBacktest.monthsSince2013(calendar: calendar))
     }
 
     func toggleUsdBtcBill(_ name: String) {
@@ -932,7 +940,9 @@ final class ReportsViewModel: ObservableObject {
                     dueDate: due,
                     actual: actual,
                     historicalPrice: hist,
-                    currentPrice: currentPrice
+                    currentPrice: currentPrice,
+                    now: now,
+                    calendar: calendar
                 ) else { continue }
 
                 let nowValue = amount.btc * (currentPrice > 0 ? currentPrice : amount.price)
@@ -1623,6 +1633,40 @@ final class ReportsViewModel: ObservableObject {
         return ActivityLedgerRules.isCardSpendingTitle(entry.title ?? "", cardNames: cardNames, isCreditEntry: entry.isCredit)
     }
     
+    struct CategoryPayeeGroup: Identifiable {
+        let id: String
+        let title: String
+        let amount: Decimal
+        let entries: [LedgerEntry]
+        var isSingleton: Bool { entries.count == 1 }
+    }
+
+    /// Payee/bill groups inside a category. Singletons skip a third disclosure.
+    func payeeGroupsForCategory(_ category: String, period: WalletPeriod, date: Date? = nil) -> [CategoryPayeeGroup] {
+        let entries = transactionsForCategory(category, period: period, date: date)
+        let grouped = CategoryPayeeGrouping.groups(
+            entries,
+            title: { $0.title },
+            amount: { entry in
+                guard let account = entry.account else { return .zero }
+                if category == "Digital Wallet Fees" {
+                    return calculateDigitalWalletFee(for: entry, account: account, btcService: bitcoinPriceService)
+                }
+                return abs(reportUSDAmount(for: entry, account: account, btcService: bitcoinPriceService))
+            },
+            date: { $0.date ?? .distantPast },
+            amountDescending: categorySortDescending
+        )
+        return grouped.map { group in
+            CategoryPayeeGroup(
+                id: CategoryPayeeGrouping.key(for: group.title),
+                title: group.title,
+                amount: group.amount,
+                entries: group.items
+            )
+        }
+    }
+
     /// Gets all transactions for a specific category within a period
     func transactionsForCategory(_ category: String, period: WalletPeriod, date: Date? = nil) -> [LedgerEntry] {
         let (start, end) = periodBounds(for: period, date: date ?? currentAnchorDate())

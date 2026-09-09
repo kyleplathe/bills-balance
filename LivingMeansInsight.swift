@@ -22,7 +22,7 @@ enum LivingMeansInsight {
         "A clear due date is already a kind of control.",
         "Pay what you can see. The rest gets easier.",
         "Living within your means starts with knowing the month.",
-        "One honest calendar beats a perfect budget you don’t open.",
+        "One honest calendar beats a plan you never open.",
         "Keep going. The month is still yours to shape."
     ]
 

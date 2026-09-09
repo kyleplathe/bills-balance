@@ -176,6 +176,7 @@ struct ReportsView: View {
                             fallbackTitle: reportsViewModel.periodTitle(for: walletPeriod, date: date)
                         )
                         .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
                         .id(date)
                     }
                 }

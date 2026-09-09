@@ -479,6 +479,19 @@ class AccountViewModel: ObservableObject {
         }
     }
 
+    func ledgerTitleRewriteSamples() -> [StatementImportMatching.LedgerTitleSample] {
+        let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
+        request.fetchBatchSize = 100
+        let entries = (try? context.fetch(request)) ?? []
+        return entries.map { entry in
+            StatementImportMatching.LedgerTitleSample(
+                title: entry.title ?? "",
+                notes: entry.notes,
+                category: entry.category
+            )
+        }
+    }
+
     func transferCounterparts(excluding account: Account) -> [StatementImportMatching.TransferCounterpart] {
         let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
         request.predicate = NSPredicate(format: "account != nil AND account != %@", account)
@@ -1013,27 +1026,46 @@ class AccountViewModel: ObservableObject {
         refreshLedgerEntries()
     }
     
-    /// Returns how many uncategorized (or differently-categorized) entries share the same title (case-insensitive).
-    func countMatchingUncategorizedEntries(title: String, category: String) -> Int {
+    /// Entries with the same title and category (`""` matches missing/empty).
+    func countEntries(withTitle title: String, category: String) -> Int {
         let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
-        request.predicate = NSPredicate(format: "title ==[cd] %@ AND (category == nil OR category == '' OR category != %@)", title, category)
+        request.predicate = titleAndCategoryPredicate(title: title, category: category)
         return (try? context.count(for: request)) ?? 0
     }
 
-    /// Bulk-sets category on every entry whose title matches (case-insensitive).
+    /// Bulk-sets category on uncategorized entries whose title matches (case-insensitive).
     @discardableResult
     func bulkSetCategory(_ category: String, forTitle title: String) -> Int {
+        bulkSetCategory(category, forTitle: title, matchingCategory: "")
+    }
+
+    /// Bulk-sets or clears category on entries with the same title and current category.
+    @discardableResult
+    func bulkSetCategory(_ category: String?, forTitle title: String, matchingCategory: String) -> Int {
         let request = NSFetchRequest<LedgerEntry>(entityName: "LedgerEntry")
-        request.predicate = NSPredicate(format: "title ==[cd] %@ AND (category == nil OR category == '' OR category != %@)", title, category)
+        request.predicate = titleAndCategoryPredicate(title: title, category: matchingCategory)
         let entries = (try? context.fetch(request)) ?? []
+        let trimmed = category?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let newValue: String? = trimmed.isEmpty ? nil : trimmed
         for entry in entries {
-            entry.category = category
+            entry.category = newValue
         }
         if !entries.isEmpty {
             saveContext()
             refreshLedgerEntries()
         }
         return entries.count
+    }
+
+    private func titleAndCategoryPredicate(title: String, category: String) -> NSPredicate {
+        let titlePred = NSPredicate(format: "title ==[cd] %@", title)
+        let categoryPred: NSPredicate
+        if category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            categoryPred = NSPredicate(format: "category == nil OR category == %@", "")
+        } else {
+            categoryPred = NSPredicate(format: "category ==[cd] %@", category)
+        }
+        return NSCompoundPredicate(andPredicateWithSubpredicates: [titlePred, categoryPred])
     }
 
     /// Count of transactions with no category.

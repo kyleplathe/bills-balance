@@ -72,6 +72,23 @@ enum StrikeCSVParser {
         return trimmed
     }
 
+    /// Original statement payee from imported Strike notes (`Bill pay to …`), ignoring fee/ref lines.
+    static func originalPayee(from notes: String?) -> String? {
+        guard let notes else { return nil }
+        for line in notes.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let lower = trimmed.lowercased()
+            if lower.hasPrefix(referenceNotePrefix.lowercased()) { continue }
+            if lower.hasPrefix("strike fee:") { continue }
+            if lower.hasPrefix("imported from csv") { continue }
+            guard lower.hasPrefix("bill pay") else { continue }
+            let payee = payeeName(from: trimmed)
+            return payee.isEmpty ? nil : payee
+        }
+        return nil
+    }
+
     // MARK: - Rows
 
     struct RawRow {

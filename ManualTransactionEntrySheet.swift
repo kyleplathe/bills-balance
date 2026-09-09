@@ -19,6 +19,7 @@ struct TransactionEditorSheet: View {
     }
 
     private let mode: Mode
+    private let originalCategory: String
 
     @State private var title: String
     @State private var amountString: String
@@ -32,6 +33,8 @@ struct TransactionEditorSheet: View {
     @State private var isCleared: Bool
     @State private var showBulkCategoryAlert = false
     @State private var bulkCategoryCount = 0
+    @State private var bulkMatchingCategory = ""
+    @State private var bulkNewCategory: String?
     @State private var showMissingCategorySheet = false
     @State private var promptCategoryName = ""
     @FocusState private var isAmountFocused: Bool
@@ -39,6 +42,7 @@ struct TransactionEditorSheet: View {
 
     init(account: Account) {
         mode = .create(account)
+        originalCategory = ""
         _title = State(initialValue: "")
         _amountString = State(initialValue: "")
         _feeAmountString = State(initialValue: "")
@@ -53,6 +57,7 @@ struct TransactionEditorSheet: View {
 
     init(entry: LedgerEntry) {
         mode = .edit(entry)
+        originalCategory = entry.category ?? ""
         _title = State(initialValue: entry.title ?? "")
         _isCredit = State(initialValue: entry.isCredit)
         _isCleared = State(initialValue: entry.isReconciledFlag)
@@ -304,11 +309,19 @@ struct TransactionEditorSheet: View {
                     finishSave()
                 }
                 Button("Apply to All (\(bulkCategoryCount))") {
-                    accountViewModel.bulkSetCategory(category, forTitle: title)
+                    accountViewModel.bulkSetCategory(
+                        bulkNewCategory,
+                        forTitle: title,
+                        matchingCategory: bulkMatchingCategory
+                    )
                     finishSave()
                 }
             } message: {
-                Text("Set \(bulkCategoryCount) other \"\(title)\" transaction\(bulkCategoryCount == 1 ? "" : "s") to \"\(category)\" too?")
+                if let name = bulkNewCategory, !name.isEmpty {
+                    Text("Set \(bulkCategoryCount) other \"\(title)\" transaction\(bulkCategoryCount == 1 ? "" : "s") to \"\(name)\" too?")
+                } else {
+                    Text("Remove \"\(bulkMatchingCategory)\" from \(bulkCategoryCount) other \"\(title)\" transaction\(bulkCategoryCount == 1 ? "" : "s") too?")
+                }
             }
         }
     }
@@ -370,7 +383,13 @@ struct TransactionEditorSheet: View {
 
     private func saveTransaction(allowEmptyCategory: Bool = false) {
         guard canSave, let amount = parsedAmount else { return }
-        if !allowEmptyCategory, category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        let isClearingAssignedCategory: Bool = {
+            if case .edit = mode { return !originalCategory.isEmpty }
+            return false
+        }()
+        if !allowEmptyCategory,
+           category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !isClearingAssignedCategory {
             promptCategoryName = ""
             showMissingCategorySheet = true
             return
@@ -463,12 +482,19 @@ struct TransactionEditorSheet: View {
             feeAmount: fee > 0 ? fee : nil
         )
 
-        let originalCategory = entry.category ?? ""
+        ImportTitleRewriteStore.learn(
+            fromNotes: notes.isEmpty ? nil : notes,
+            preferredTitle: title,
+            category: category
+        )
+
         let newCategory = category ?? ""
-        if !newCategory.isEmpty, newCategory != originalCategory, !title.isEmpty {
-            let matchCount = accountViewModel.countMatchingUncategorizedEntries(title: title, category: newCategory)
+        if newCategory != originalCategory, !title.isEmpty {
+            let matchCount = accountViewModel.countEntries(withTitle: title, category: originalCategory)
             if matchCount > 0 {
                 bulkCategoryCount = matchCount
+                bulkMatchingCategory = originalCategory
+                bulkNewCategory = newCategory.isEmpty ? nil : newCategory
                 showBulkCategoryAlert = true
                 return
             }

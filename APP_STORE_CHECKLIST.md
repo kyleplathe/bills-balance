@@ -46,7 +46,7 @@ Copy from `APP_STORE_LISTING.md` into **App Store Connect → Apps → Bills & B
 - [x] Copyright: Instakyle Tech Solutions LLC (c) 2026
 - [x] App Privacy: data collected = **none**; tracking = **No**
 - [ ] Description — version page, **Description** box (text in `APP_STORE_LISTING.md`)
-- [ ] Keywords — version page, **Keywords** (`bills,budget,checkbook,ledger,finance,recurring,calendar,accounts,balance,local`)
+- [ ] Keywords — version page, **Keywords** (`bills,checkbook,ledger,pay,recurring,calendar,accounts,balance,local,reminders`)
 - [ ] What’s New — version page, **What’s New in This Version**
 - [ ] Privacy Policy URL — **App Information** (left sidebar), not the version page
 - [ ] Support URL — version page, **Support URL**

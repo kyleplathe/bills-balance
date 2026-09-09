@@ -431,6 +431,7 @@ class BillViewModel: ObservableObject {
         if bill.isPaid && !wasPaid {
             // Marking as paid
             bill.paidDate = Date()
+            AutoPaySkipStore.clear(billId: bill.id, dueDate: bill.dueDate)
             if !viaAutoPay {
                 notificationManager.cancelNotification(for: bill)
             }
@@ -497,6 +498,11 @@ class BillViewModel: ObservableObject {
             }
             notificationManager.scheduleNotification(for: bill)
             accountViewModel?.removeLedgerEntries(for: bill)
+            // Keep this occurrence unpaid across relaunch; auto-pay would otherwise
+            // mark it paid again on the next fetchBills() / rebuild.
+            if bill.autoPay {
+                AutoPaySkipStore.skip(billId: bill.id, dueDate: bill.dueDate)
+            }
         }
         
         // Save without triggering fetchBills() to prevent recursive calls and duplicate creation
@@ -619,6 +625,7 @@ class BillViewModel: ObservableObject {
         if !bill.isPaid {
             bill.isPaid = true
             bill.paidDate = Date()
+            AutoPaySkipStore.clear(billId: bill.id, dueDate: bill.dueDate)
             notificationManager.cancelNotification(for: bill)
         }
 
@@ -714,6 +721,7 @@ class BillViewModel: ObservableObject {
         bill.isPaid = true
         bill.paidDate = paidDate
         bill.updatedAt = Date()
+        AutoPaySkipStore.clear(billId: bill.id, dueDate: bill.dueDate)
         notificationManager.cancelNotification(for: bill)
 
         if !wasPaid, let recurrenceType = bill.recurrenceType, recurrenceType != "none" {
@@ -1138,27 +1146,31 @@ class BillViewModel: ObservableObject {
     // MARK: - Helper Methods
     private func processAutoPayBills(sourceBills: [Bill]) {
         let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
         let now = Date()
         
         let autoPayBills: [Bill] = sourceBills.compactMap { bill in
-            guard bill.autoPay, !bill.isPaid else { return nil }
-            
-            // Skip bills that were just created (within last 5 seconds) to prevent immediate processing
-            // This prevents newly created bills from being immediately marked as paid and creating duplicates
-            if let createdAt = bill.createdAt, now.timeIntervalSince(createdAt) < 5.0 {
-                print("⏸️ Skipping auto-pay for newly created bill: \(bill.name ?? "Bill") (created \(String(format: "%.1f", now.timeIntervalSince(createdAt)))s ago)")
+            let processingDate = businessDayCalculator.processingDate(for: bill, businessDaysBefore: 3)
+            let isSkipped = AutoPaySkipStore.isSkipped(billId: bill.id, dueDate: bill.dueDate)
+            guard AutoPayProcessing.shouldProcess(
+                autoPay: bill.autoPay,
+                isPaid: bill.isPaid,
+                hasAccount: bill.account != nil,
+                createdAt: bill.createdAt,
+                processingDate: processingDate,
+                isSkipped: isSkipped,
+                now: now,
+                calendar: calendar
+            ) else {
+                if bill.autoPay, !bill.isPaid, isSkipped {
+                    print("⏸️ Skipping auto-pay for \(bill.name ?? "Bill") – unpaid override for this due date")
+                } else if bill.autoPay, !bill.isPaid, bill.account == nil {
+                    print("Skipping auto-pay for \(bill.name ?? "Bill") – no debt account linked.")
+                } else if bill.autoPay, !bill.isPaid, let createdAt = bill.createdAt, now.timeIntervalSince(createdAt) < AutoPayProcessing.newBillGracePeriod {
+                    print("⏸️ Skipping auto-pay for newly created bill: \(bill.name ?? "Bill") (created \(String(format: "%.1f", now.timeIntervalSince(createdAt)))s ago)")
+                }
                 return nil
             }
-            
-            guard bill.account != nil else {
-                print("Skipping auto-pay for \(bill.name ?? "Bill") – no debt account linked.")
-                return nil
-            }
-            guard let processingDate = businessDayCalculator.processingDate(for: bill, businessDaysBefore: 3) else {
-                return nil
-            }
-            return calendar.startOfDay(for: processingDate) <= today ? bill : nil
+            return bill
         }
         
         guard !autoPayBills.isEmpty else { return }

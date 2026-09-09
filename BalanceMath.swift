@@ -12,6 +12,12 @@ enum BalanceMath {
         currentBalance - (pendingBills - pendingIncome)
     }
 
+    /// Account spendable: ledger total minus pending inflows that have not cleared yet.
+    /// Pending outflows still count so reserved spending is not treated as available.
+    static func spendable(currentBalance: Decimal, pendingIncome: Decimal) -> Decimal {
+        currentBalance - pendingIncome
+    }
+
     static func windowEnd(from start: Date, days: Int, calendar: Calendar = .current) -> Date {
         calendar.date(byAdding: .day, value: max(days, 1), to: calendar.startOfDay(for: start)) ?? start
     }

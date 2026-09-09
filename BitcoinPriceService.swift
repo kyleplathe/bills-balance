@@ -153,7 +153,7 @@ class BitcoinPriceService: ObservableObject {
         UserDefaults.standard.set(Date(), forKey: Self.historicalFetchedKey)
     }
 
-    /// USD price on `date`'s UTC day, or the nearest earlier cached day.
+    /// USD price on `date`'s UTC day, the nearest earlier cached day, or the nearest later day.
     func historicalUSDPrice(on date: Date, calendar: Calendar = Calendar(identifier: .gregorian)) -> Decimal? {
         var utcCal = calendar
         utcCal.timeZone = TimeZone(secondsFromGMT: 0) ?? calendar.timeZone
@@ -169,6 +169,10 @@ class BitcoinPriceService: ObservableObject {
            let value = cache[formatter.string(from: prior)], value > 0 {
             return Decimal(value)
         }
+        if let later = sorted.first(where: { $0 >= day }),
+           let value = cache[formatter.string(from: later)], value > 0 {
+            return Decimal(value)
+        }
         return nil
     }
 
@@ -179,9 +183,14 @@ class BitcoinPriceService: ObservableObject {
         utcCal.timeZone = TimeZone(secondsFromGMT: 0)!
         let startDay = utcCal.startOfDay(for: start)
         let endDay = utcCal.startOfDay(for: end)
-        var missing = false
+        let cachedDays = cache.keys.compactMap { formatter.date(from: $0) }.sorted()
+        let earliest = cachedDays.first
+        var missing = cache.isEmpty
+        if let earliest, earliest > utcCal.date(byAdding: .day, value: 45, to: startDay) ?? startDay {
+            missing = true
+        }
         var cursor = startDay
-        while cursor <= endDay {
+        while !missing, cursor <= endDay {
             if cache[formatter.string(from: cursor)] == nil {
                 missing = true
                 break
@@ -191,11 +200,10 @@ class BitcoinPriceService: ObservableObject {
         }
         let lastFetch = UserDefaults.standard.object(forKey: Self.historicalFetchedKey) as? Date
         let cacheStale = lastFetch == nil || Date().timeIntervalSince(lastFetch!) > 86_400
-        guard missing || cache.isEmpty || cacheStale else { return }
+        guard missing || cacheStale else { return }
 
-        let days = max(utcCal.dateComponents([.day], from: startDay, to: endDay).day ?? 1461, 30)
         do {
-            let fetched = try await CoinGeckoClient.fetchBitcoinMarketChart(days: min(days + 2, 1461))
+            let fetched = try await CoinGeckoClient.fetchFullBitcoinMarketChart()
             var merged = cache
             for (day, price) in fetched {
                 merged[formatter.string(from: day)] = (price as NSDecimalNumber).doubleValue
@@ -270,8 +278,19 @@ enum CoinGeckoClient {
     }
 
     static func fetchBitcoinMarketChart(days: Int) async throws -> [(Date, Decimal)] {
-        let clamped = max(1, days)
-        guard let url = URL(string: "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=\(clamped)&interval=daily") else {
+        try await fetchBitcoinMarketChart(daysParameter: String(max(1, days)), includeDailyInterval: true)
+    }
+
+    static func fetchFullBitcoinMarketChart() async throws -> [(Date, Decimal)] {
+        try await fetchBitcoinMarketChart(daysParameter: "max", includeDailyInterval: false)
+    }
+
+    private static func fetchBitcoinMarketChart(daysParameter: String, includeDailyInterval: Bool) async throws -> [(Date, Decimal)] {
+        var urlString = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=\(daysParameter)"
+        if includeDailyInterval {
+            urlString += "&interval=daily"
+        }
+        guard let url = URL(string: urlString) else {
             throw ClientError.invalidURL
         }
 
@@ -283,7 +302,7 @@ enum CoinGeckoClient {
             }
 
             var request = URLRequest(url: url)
-            request.timeoutInterval = 30
+            request.timeoutInterval = daysParameter == "max" ? 60 : 30
             request.cachePolicy = .returnCacheDataElseLoad
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             request.setValue("BillsAndBalance/1.0 (iOS)", forHTTPHeaderField: "User-Agent")

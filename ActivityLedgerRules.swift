@@ -90,3 +90,70 @@ enum ActivityLedgerRules {
         return true
     }
 }
+
+/// Groups category transactions by payee/bill title for Activity drill-in.
+enum CategoryPayeeGrouping {
+    static func key(for title: String?) -> String {
+        (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    static func displayTitle(for title: String?) -> String {
+        let trimmed = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Untitled" : trimmed
+    }
+
+    struct Group<Item> {
+        let title: String
+        let amount: Decimal
+        let items: [Item]
+    }
+
+    static func groups<Item>(
+        _ items: [Item],
+        title: (Item) -> String?,
+        amount: (Item) -> Decimal,
+        date: (Item) -> Date,
+        amountDescending: Bool = true
+    ) -> [Group<Item>] {
+        var buckets: [String: (title: String, amount: Decimal, date: Date, items: [Item])] = [:]
+        for item in items {
+            let rawTitle = title(item)
+            let bucketKey = key(for: rawTitle)
+            let display = displayTitle(for: rawTitle)
+            let itemDate = date(item)
+            let itemAmount = amount(item)
+            if var existing = buckets[bucketKey] {
+                existing.amount += itemAmount
+                existing.items.append(item)
+                if itemDate >= existing.date {
+                    existing.date = itemDate
+                }
+                existing.title = preferredDisplayTitle(existing.title, display)
+                buckets[bucketKey] = existing
+            } else {
+                buckets[bucketKey] = (display, itemAmount, itemDate, [item])
+            }
+        }
+        return buckets.values
+            .sorted { lhs, rhs in
+                if lhs.amount != rhs.amount {
+                    return amountDescending ? lhs.amount > rhs.amount : lhs.amount < rhs.amount
+                }
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+            .map { bucket in
+                Group(
+                    title: bucket.title,
+                    amount: bucket.amount,
+                    items: bucket.items.sorted { date($0) > date($1) }
+                )
+            }
+    }
+
+    private static func preferredDisplayTitle(_ current: String, _ candidate: String) -> String {
+        let currentHasCaps = current.rangeOfCharacter(from: .uppercaseLetters) != nil
+        let candidateHasCaps = candidate.rangeOfCharacter(from: .uppercaseLetters) != nil
+        if candidateHasCaps && !currentHasCaps { return candidate }
+        return current
+    }
+}
