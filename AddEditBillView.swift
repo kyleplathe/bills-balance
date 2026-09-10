@@ -131,20 +131,10 @@ struct AddEditBillView: View {
                             }
                         }
                     Toggle("Auto-Pay", isOn: $autoPay)
-                    if accountViewModel.hasActiveBitcoinDigitalWallet, !paysFromBitcoinWallet {
-                        Toggle("Track in Bitcoin", isOn: $trackInBitcoin)
-                    }
                     NotesField(text: $notes)
                 } footer: {
-                    if autoPay || paysFromBitcoinWallet {
-                        VStack(alignment: .leading, spacing: 6) {
-                            if autoPay {
-                                Text("Marks this bill paid 3 business days before it’s due and adds a pending transaction on the linked account. Unmarking paid skips Auto-Pay for this due date.")
-                            }
-                            if paysFromBitcoinWallet {
-                                Text("Tracked because this pays from your Bitcoin wallet.")
-                            }
-                        }
+                    if autoPay {
+                        Text("Marks this bill paid 3 business days before it’s due and adds a pending transaction on the linked account. Unmarking paid skips Auto-Pay for this due date.")
                     }
                 }
             }

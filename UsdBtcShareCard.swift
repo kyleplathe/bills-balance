@@ -1,111 +1,137 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 private let bitcoinOrange = Color(red: 0.969, green: 0.576, blue: 0.102)
 private let shareBackground = Color(red: 0.06, green: 0.06, blue: 0.075)
 
+enum UsdBtcBillStyle {
+    static let palette: [Color] = [
+        bitcoinOrange,
+        Color(red: 0.22, green: 0.47, blue: 0.93),
+        Color(red: 0.20, green: 0.62, blue: 0.38),
+        Color(red: 0.76, green: 0.28, blue: 0.48),
+        Color(red: 0.55, green: 0.36, blue: 0.96),
+        Color(red: 0.18, green: 0.66, blue: 0.72),
+        Color(red: 0.90, green: 0.72, blue: 0.18),
+        Color(red: 0.42, green: 0.45, blue: 0.58)
+    ]
+
+    static func color(at index: Int) -> Color {
+        palette[index % palette.count]
+    }
+
+    static func color(forName name: String, in names: [String]) -> Color {
+        color(at: names.firstIndex(of: name) ?? 0)
+    }
+}
+
 struct UsdBtcShareCard: View {
     let title: String
-    let months: [UsdBtcMonthPoint]
+    let bills: [UsdBtcBillSeries]
     let monthsBack: Int
-
-    private var headlineName: String {
-        BillBtcBacktest.shareHeadlineName(from: title)
-    }
+    var colorNames: [String] = []
+    var quote: BillBtcBacktest.BitcoinQuote = BillBtcBacktest.randomBitcoinQuote()
 
     private var change: BillBtcBacktest.BitcoinSpendChange? {
-        BillBtcBacktest.bitcoinSpendChange(
-            btcAmounts: months.map(\.btcAmount),
-            monthCount: max(months.count, monthsBack)
-        )
+        BillBtcBacktest.storyChange(bills: bills, monthsBack: monthsBack)
     }
 
-    private var yearSpanLabel: String {
-        guard let first = months.first?.month, let last = months.last?.month else {
-            return "\(max(monthsBack / 12, 1)) years of payments"
-        }
-        let years = Calendar.current.dateComponents([.year], from: first, to: last).year ?? 0
-        if years >= 2 {
-            return "\(years)+ years of payments"
-        }
-        return "\(max(months.count, 1)) months of payments"
+    private var backtestLabel: String {
+        let dates = bills.flatMap { $0.months.map(\.month) }
+        let months = BillBtcBacktest.backtestMonthSpan(from: dates)
+        return BillBtcBacktest.backtestCaption(monthCount: months > 0 ? months : monthsBack)
+    }
+
+    private var thenNow: BillBtcBacktest.ThenNowSnapshot? {
+        BillBtcBacktest.thenNow(from: bills)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("BILLS & BALANCE")
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .tracking(1.4)
-                .foregroundStyle(Color.white.opacity(0.42))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(headlineName)
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                Text("USD vs BTC")
-                    .font(.system(size: 22, weight: .semibold, design: .rounded))
-                    .foregroundStyle(bitcoinOrange)
+            HStack(spacing: 8) {
+                Image("BrandMark")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 18, height: 18)
+                    .opacity(0.6)
+                Text("BILLS & BALANCE")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .tracking(1.4)
+                    .foregroundStyle(Color.white.opacity(0.42))
             }
+
+            UsdBtcStoryHeadline(change: change, billCount: bills.count, style: .share)
+                .padding(.top, 12)
+
+            Text(backtestLabel)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.5))
+                .padding(.top, 6)
+
+            if let thenNow {
+                UsdBtcThenNowComparison(
+                    snapshot: thenNow,
+                    style: .share
+                )
+                .padding(.top, 16)
+            }
+
+            UsdBtcComparisonChart(
+                bills: bills,
+                style: .share,
+                colorNames: colorNames,
+                showsKey: true,
+                plotHeight: 132
+            )
             .padding(.top, 14)
 
-            Text(yearSpanLabel)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.5))
-                .padding(.top, 8)
-
-            UsdBtcComparisonChart(months: months, style: .share)
-                .frame(maxWidth: .infinity)
-                .frame(height: 168)
-                .padding(.top, 18)
-
-            HStack(spacing: 14) {
-                legendDot(color: bitcoinOrange, title: "Sats needed")
+            VStack(alignment: .center, spacing: 6) {
+                Text("“\(quote.text)”")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .italic()
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(Color.white.opacity(0.48))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.85)
+                Text("— \(quote.attribution)")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .tracking(0.5)
+                    .foregroundStyle(bitcoinOrange.opacity(0.72))
             }
-            .padding(.top, 10)
-
-            Spacer(minLength: 12)
-
-            if let change {
-                let percent = abs((change.percentLess * 100 as NSDecimalNumber).intValue)
-                let less = change.percentLess >= 0
-                Text("\(percent)%")
-                    .font(.system(size: 44, weight: .bold, design: .rounded))
-                    .foregroundStyle(less ? .green : .white)
-                    .monospacedDigit()
-                Text(less
-                     ? "less Bitcoin to pay the same bill"
-                     : "more Bitcoin to pay the same bill")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Color.white.opacity(0.72))
-                    .padding(.top, 2)
-            }
-
-            if let change, change.percentLess > 0 {
-                Text("Deflation: Same dollars. Fewer sats over time.")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Color.white.opacity(0.38))
-                    .padding(.top, 12)
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
-        .padding(28)
-        .frame(width: UsdBtcShareCard.canvasSide, height: UsdBtcShareCard.canvasSide, alignment: .topLeading)
+        .padding(24)
+        .frame(width: UsdBtcShareCard.canvasWidth, height: UsdBtcShareCard.canvasHeight, alignment: .topLeading)
         .background(shareBackground)
     }
 
-    static let canvasSide: CGFloat = 400
+    static let canvasWidth: CGFloat = 400
+    static let canvasHeight: CGFloat = 620
 
-    static func pngURL(title: String, months: [UsdBtcMonthPoint], monthsBack: Int) -> URL? {
-        let card = UsdBtcShareCard(title: title, months: months, monthsBack: monthsBack)
-        let renderer = ImageRenderer(content: card)
-        renderer.scale = 1080 / canvasSide
+    static func pngURL(
+        title: String,
+        bills: [UsdBtcBillSeries],
+        monthsBack: Int,
+        colorNames: [String] = []
+    ) -> URL? {
+        removeStaleSharePNGs()
+        let snapshotID = UUID()
+        let quote = BillBtcBacktest.randomBitcoinQuote()
+        let card = UsdBtcShareCard(
+            title: title,
+            bills: bills,
+            monthsBack: monthsBack,
+            colorNames: colorNames,
+            quote: quote
+        )
+        let renderer = ImageRenderer(content: card.id(snapshotID))
+        renderer.scale = 1080 / canvasWidth
         renderer.isOpaque = true
-        renderer.proposedSize = ProposedViewSize(width: canvasSide, height: canvasSide)
+        renderer.proposedSize = ProposedViewSize(width: canvasWidth, height: canvasHeight)
         guard let image = renderer.uiImage, let data = image.pngData() else { return nil }
-        let safe = title
-            .replacingOccurrences(of: "/", with: "-")
-            .replacingOccurrences(of: ":", with: "-")
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(safe).png")
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bitcoin-deflation-\(snapshotID.uuidString).png")
         do {
             try data.write(to: url, options: .atomic)
             return url
@@ -114,15 +140,127 @@ struct UsdBtcShareCard: View {
         }
     }
 
-    private func legendDot(color: Color, title: String) -> some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(color)
-                .frame(width: 7, height: 7)
-            Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.55))
+    private static func removeStaleSharePNGs() {
+        let tmp = FileManager.default.temporaryDirectory
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: tmp,
+            includingPropertiesForKeys: nil
+        ) else { return }
+        for url in files {
+            let name = url.lastPathComponent
+            let isOldTitle = name.hasSuffix(".png") && name.contains("USD vs BTC")
+            let isPriorExport = name.hasPrefix("bitcoin-deflation-") && name.hasSuffix(".png")
+            if isOldTitle || isPriorExport {
+                try? FileManager.default.removeItem(at: url)
+            }
         }
+    }
+}
+
+struct UsdBtcStoryHeadline: View {
+    let change: BillBtcBacktest.BitcoinSpendChange?
+    let billCount: Int
+    var style: UsdBtcComparisonChart.Style = .inApp
+
+    private var isShare: Bool { style == .share }
+
+    var body: some View {
+        if let change {
+            let percent = BillBtcBacktest.percentPoints(change.percentLess)
+            let noun = billCount <= 1 ? "bill" : "bills"
+            let word = change.percentLess >= 0 ? "less" : "more"
+            let accent = change.percentLess >= 0 ? Color.green : (isShare ? Color.white : Color.primary)
+            (
+                Text("Same \(noun). ")
+                    .foregroundStyle(isShare ? Color.white : Color.primary)
+                + Text("\(percent)%")
+                    .foregroundStyle(accent)
+                + Text(" \(word) Bitcoin.")
+                    .foregroundStyle(isShare ? Color.white : Color.primary)
+            )
+            .font(isShare
+                  ? .system(size: 17, weight: .semibold, design: .rounded)
+                  : .title3.weight(.semibold))
+            .monospacedDigit()
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel(BillBtcBacktest.storyHeadline(percentLess: change.percentLess, billCount: billCount))
+        } else {
+            Text(BillBtcBacktest.sameDollarsCaption(billCount: billCount))
+                .font(isShare
+                      ? .system(size: 17, weight: .semibold, design: .rounded)
+                      : .title3.weight(.semibold))
+                .foregroundStyle(isShare ? Color.white : Color.primary)
+        }
+    }
+}
+
+struct UsdBtcThenNowComparison: View {
+    let snapshot: BillBtcBacktest.ThenNowSnapshot
+    var style: UsdBtcComparisonChart.Style = .inApp
+
+    private var isShare: Bool { style == .share }
+
+    private var muted: Color {
+        isShare ? Color.white.opacity(0.42) : Color.secondary
+    }
+
+    private var primary: Color {
+        isShare ? Color.white : Color.primary
+    }
+
+    private var usdLabel: String {
+        "\(BillBtcBacktest.compactUsd((snapshot.monthlyUsd as NSDecimalNumber).doubleValue))/mo avg"
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            column(
+                eyebrow: "Then",
+                detail: "\(snapshot.thenLabel)  ·  \(usdLabel)",
+                sats: snapshot.thenSats,
+                highlight: false
+            )
+            Image(systemName: "arrow.right")
+                .font(.system(size: isShare ? 16 : 20, weight: .semibold))
+                .foregroundStyle(bitcoinOrange)
+                .accessibilityHidden(true)
+            column(
+                eyebrow: "Now",
+                detail: usdLabel,
+                sats: snapshot.nowSats,
+                highlight: true
+            )
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var accessibilityText: String {
+        let then = BillBtcBacktest.satsCaption(snapshot.thenSats)
+        let now = BillBtcBacktest.satsCaption(snapshot.nowSats)
+        return "\(snapshot.thenLabel) \(then). Now \(now). Same \(usdLabel)."
+    }
+
+    private func column(eyebrow: String, detail: String, sats: Double, highlight: Bool) -> some View {
+        VStack(alignment: highlight ? .trailing : .leading, spacing: isShare ? 3 : 4) {
+            Text(eyebrow.uppercased())
+                .font(.system(size: isShare ? 10 : 11, weight: .semibold, design: .rounded))
+                .tracking(0.8)
+                .foregroundStyle(muted)
+            Text(BillBtcBacktest.satsCaption(sats))
+                .font(.system(size: isShare ? 15 : 18, weight: .bold, design: .rounded))
+                .foregroundStyle(highlight ? bitcoinOrange : primary)
+                .monospacedDigit()
+                .minimumScaleFactor(0.7)
+                .lineLimit(1)
+            Text(detail)
+                .font(.system(size: isShare ? 11 : 12, weight: .medium, design: .rounded))
+                .foregroundStyle(muted)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: highlight ? .trailing : .leading)
     }
 }
 
@@ -132,53 +270,188 @@ struct UsdBtcComparisonChart: View {
         case inApp
     }
 
-    let months: [UsdBtcMonthPoint]
+    let bills: [UsdBtcBillSeries]
     var style: Style = .share
+    var colorNames: [String] = []
+    var showsKey: Bool = true
+    var plotHeight: CGFloat? = nil
+    var onReorder: (([String]) -> Void)? = nil
 
-    private var lineColor: Color {
-        bitcoinOrange
-    }
+    @State private var draggingName: String?
 
     private var gridColor: Color {
         style == .share ? Color.white.opacity(0.08) : Color.secondary.opacity(0.22)
     }
 
     private var labelColor: Color {
-        style == .share ? Color.white.opacity(0.4) : Color.secondary
+        style == .share ? Color.white.opacity(0.42) : Color.secondary
     }
 
-    private func formatSats(_ sats: Double) -> String {
-        if sats >= 1_000_000 {
-            return String(format: "%.1fM", sats / 1_000_000)
-        } else if sats >= 1_000 {
-            return String(format: "%.0fK", sats / 1_000)
-        } else {
-            return String(format: "%.0f", sats)
-        }
+    private var resolvedPlotHeight: CGFloat {
+        plotHeight ?? (style == .share ? 140 : 188)
+    }
+
+    private var plottedBill: UsdBtcBillSeries {
+        BillBtcBacktest.combinedBillSeries(from: bills)
+    }
+
+    private var backtestLabel: String {
+        BillBtcBacktest.backtestCaption(
+            monthCount: BillBtcBacktest.backtestMonthSpan(from: plottedBill.months.map(\.month))
+        )
     }
 
     var body: some View {
-        Canvas { context, size in
-            // Convert BTC amounts to sats (1 BTC = 100,000,000 sats)
-            let satsNeeded = months.map { NSDecimalNumber(decimal: $0.btcAtTime * 100_000_000).doubleValue }
-            guard satsNeeded.count > 1 else { return }
+        VStack(alignment: .leading, spacing: style == .share ? 10 : 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Sats needed")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(labelColor)
+                if style == .inApp {
+                    Spacer(minLength: 8)
+                    Text(backtestLabel)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(labelColor)
+                        .lineLimit(1)
+                }
+            }
+            chartCanvas
+                .frame(maxWidth: .infinity)
+                .frame(height: resolvedPlotHeight)
+            if showsKey {
+                chartKey
+            }
+        }
+    }
 
-            let maxV = (satsNeeded.max() ?? 1) * 1.08
+    private var keyItems: [BillBtcBacktest.ChartKeyItem] {
+        BillBtcBacktest.chartKeyItems(from: bills)
+    }
+
+    private var canReorder: Bool {
+        style == .inApp && onReorder != nil && keyItems.count > 1
+    }
+
+    private var chartKey: some View {
+        let items = keyItems
+        let names = colorNames.isEmpty ? bills.map(\.name) : colorNames
+        return Group {
+            if !items.isEmpty {
+                let rows = VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        if index > 0 {
+                            Divider().opacity(style == .share ? 0.18 : 1)
+                        }
+                        keyRow(item, names: names)
+                            .opacity(draggingName == item.name ? 0.55 : 1)
+                            .modifier(UsdBtcKeyReorderModifier(
+                                enabled: canReorder,
+                                name: item.name,
+                                items: items.map(\.name),
+                                draggingName: $draggingName,
+                                onReorder: onReorder
+                            ))
+                    }
+                    if canReorder {
+                        Text("Hold a row to reorder")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .padding(.top, 8)
+                    }
+                }
+                if style == .inApp, items.count > 4 {
+                    ScrollView {
+                        rows
+                    }
+                    .frame(maxHeight: 240)
+                    .scrollIndicators(.visible)
+                } else {
+                    rows
+                }
+            }
+        }
+    }
+
+    private func keyRow(_ item: BillBtcBacktest.ChartKeyItem, names: [String]) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            Capsule(style: .continuous)
+                .fill(
+                    bills.count == 1
+                        ? bitcoinOrange
+                        : UsdBtcBillStyle.color(forName: item.name, in: names)
+                )
+                .frame(width: 3, height: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.name)
+                    .font(.system(size: style == .share ? 13 : 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(nameColor)
+                    .lineLimit(1)
+                Text("\(BillBtcBacktest.compactUsd((item.monthlyUsd as NSDecimalNumber).doubleValue))/mo avg · \(BillBtcBacktest.actualDataCaption(actualMonths: item.actualMonths))")
+                    .font(.system(size: style == .share ? 10 : 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(amountColor)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            Spacer(minLength: 8)
+            Text(BillBtcBacktest.signedPercentLabel(
+                BillBtcBacktest.BitcoinSpendChange(
+                    percentLess: item.percentLess,
+                    years: 1,
+                    monthCount: 1
+                )
+            ))
+            .font(.system(size: style == .share ? 13 : 15, weight: .semibold, design: .rounded))
+            .foregroundStyle(item.percentLess >= 0 ? Color.green : Color.red.opacity(0.85))
+            .monospacedDigit()
+            .frame(minWidth: 44, alignment: .trailing)
+        }
+        .padding(.vertical, style == .share ? 6 : 8)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    private var amountColor: Color {
+        style == .share ? Color.white.opacity(0.55) : Color.secondary
+    }
+
+    private var nameColor: Color {
+        style == .share ? Color.white.opacity(0.9) : Color.primary
+    }
+
+    private var chartCanvas: some View {
+        Canvas { context, size in
+            let datesAxis = Array(Set(plottedBill.months.map(\.month))).sorted()
+            guard let line = BillBtcBacktest.indexedAverageLine(from: plottedBill.months),
+                  datesAxis.count > 1 else { return }
+
+            let values = line.sats
+            let maxV = BillBtcBacktest.plotMax(values)
             let minV = 0.0
             let span = max(maxV - minV, 1)
             let leading: CGFloat = 4
-            let trailing: CGFloat = style == .inApp ? 42 : 4
+            let trailing: CGFloat = 44
             let top: CGFloat = 8
             let bottom: CGFloat = 22
-            let plot = CGRect(x: leading, y: top, width: size.width - leading - trailing, height: size.height - top - bottom)
+            let plot = CGRect(
+                x: leading,
+                y: top,
+                width: size.width - leading - trailing,
+                height: size.height - top - bottom
+            )
 
-            func point(index: Int, value: Double) -> CGPoint {
-                let x = plot.minX + plot.width * CGFloat(index) / CGFloat(satsNeeded.count - 1)
-                let y = plot.maxY - plot.height * CGFloat((value - minV) / span)
-                return CGPoint(x: x, y: y)
+            func xPosition(for date: Date) -> CGFloat {
+                guard let index = datesAxis.firstIndex(of: date) else { return plot.minX }
+                return plot.minX + plot.width * CGFloat(index) / CGFloat(max(datesAxis.count - 1, 1))
             }
 
-            // Grid lines
+            func point(date: Date, value: Double) -> CGPoint {
+                CGPoint(
+                    x: xPosition(for: date),
+                    y: plot.maxY - plot.height * CGFloat((value - minV) / span)
+                )
+            }
+
             var grid = Path()
             let gridSteps = 4
             for step in 0...gridSteps {
@@ -188,57 +461,59 @@ struct UsdBtcComparisonChart: View {
             }
             context.stroke(grid, with: .color(gridColor), lineWidth: 1)
 
-            let satsPoints = satsNeeded.enumerated().map { point(index: $0.offset, value: $0.element) }
-
-            // Area fill under the line
+            let points = zip(line.dates, values).map { point(date: $0, value: $1) }
             var area = Path()
-            if let first = satsPoints.first, let last = satsPoints.last {
+            if let first = points.first, let last = points.last {
                 area.move(to: CGPoint(x: first.x, y: plot.maxY))
                 area.addLine(to: first)
-                for p in satsPoints.dropFirst() { area.addLine(to: p) }
+                for p in points.dropFirst() { area.addLine(to: p) }
                 area.addLine(to: CGPoint(x: last.x, y: plot.maxY))
                 area.closeSubpath()
-            }
-            context.fill(
-                area,
-                with: .linearGradient(
-                    Gradient(colors: [bitcoinOrange.opacity(style == .share ? 0.42 : 0.28), bitcoinOrange.opacity(0.02)]),
-                    startPoint: CGPoint(x: plot.midX, y: plot.minY),
-                    endPoint: CGPoint(x: plot.midX, y: plot.maxY)
+                context.fill(
+                    area,
+                    with: .linearGradient(
+                        Gradient(colors: [
+                            bitcoinOrange.opacity(style == .share ? 0.38 : 0.24),
+                            bitcoinOrange.opacity(0.02)
+                        ]),
+                        startPoint: CGPoint(x: plot.midX, y: plot.minY),
+                        endPoint: CGPoint(x: plot.midX, y: plot.maxY)
+                    )
                 )
+            }
+
+            var path = Path()
+            if let first = points.first {
+                path.move(to: first)
+                for p in points.dropFirst() { path.addLine(to: p) }
+            }
+            context.stroke(
+                path,
+                with: .color(bitcoinOrange),
+                style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round)
             )
 
-            // Main line showing sats needed (decreasing over time)
-            var satsLine = Path()
-            if let first = satsPoints.first {
-                satsLine.move(to: first)
-                for p in satsPoints.dropFirst() { satsLine.addLine(to: p) }
+            if let first = points.first {
+                let dot = Path(ellipseIn: CGRect(x: first.x - 3.5, y: first.y - 3.5, width: 7, height: 7))
+                context.fill(dot, with: .color(bitcoinOrange.opacity(0.55)))
             }
-            context.stroke(satsLine, with: .color(lineColor), style: StrokeStyle(lineWidth: 2.6, lineCap: .round, lineJoin: .round))
-
-            // Endpoint dot
-            if let last = satsPoints.last {
-                let dot = Path(ellipseIn: CGRect(x: last.x - 3.5, y: last.y - 3.5, width: 7, height: 7))
+            if let last = points.last {
+                let dot = Path(ellipseIn: CGRect(x: last.x - 4, y: last.y - 4, width: 8, height: 8))
                 context.fill(dot, with: .color(bitcoinOrange))
             }
 
-            // Y-axis labels (sats) on the right side for inApp style
-            if style == .inApp {
-                for step in 0...gridSteps {
-                    let value = minV + (maxV - minV) * Double(step) / Double(gridSteps)
-                    let y = plot.maxY - plot.height * CGFloat(step) / CGFloat(gridSteps)
-                    let text = formatSats(value)
-                    let resolved = context.resolve(
-                        Text(text)
-                            .font(.caption2)
-                            .foregroundColor(labelColor)
-                    )
-                    context.draw(resolved, at: CGPoint(x: size.width - 4, y: y), anchor: .trailing)
-                }
+            for step in 0...gridSteps {
+                let value = minV + (maxV - minV) * Double(step) / Double(gridSteps)
+                let y = plot.maxY - plot.height * CGFloat(step) / CGFloat(gridSteps)
+                let resolved = context.resolve(
+                    Text(BillBtcBacktest.compactSats(value))
+                        .font(.caption2)
+                        .foregroundColor(labelColor)
+                )
+                context.draw(resolved, at: CGPoint(x: size.width - 4, y: y), anchor: .trailing)
             }
 
-            // X-axis labels (years)
-            let labels = yearLabels()
+            let labels = yearLabels(from: datesAxis)
             for (xRatio, text) in labels {
                 let resolved = context.resolve(
                     Text(text)
@@ -246,57 +521,134 @@ struct UsdBtcComparisonChart: View {
                         .foregroundColor(labelColor)
                 )
                 let x = plot.minX + plot.width * xRatio
-                let anchor: UnitPoint = xRatio < 0.5 ? .bottomLeading : .bottomTrailing
+                let anchor: UnitPoint = xRatio == 0 ? .bottomLeading : (xRatio == 1 ? .bottomTrailing : .bottom)
                 context.draw(resolved, at: CGPoint(x: x, y: size.height - 6), anchor: anchor)
             }
         }
+        .accessibilityLabel("Backtest of sats needed over time")
     }
 
-    private func yearLabels() -> [(CGFloat, String)] {
-        guard let first = months.first?.month, let last = months.last?.month else { return [] }
+    private func yearLabels(from dates: [Date]) -> [(CGFloat, String)] {
+        guard let first = dates.first, let last = dates.last else { return [] }
         let cal = Calendar.current
         let startYear = cal.component(.year, from: first)
         let endYear = cal.component(.year, from: last)
         if startYear == endYear {
-            return [(0, String(startYear)), (1, String(endYear))]
+            return [(0, String(startYear))]
+        }
+        if endYear - startYear >= 3 {
+            let mid = startYear + (endYear - startYear) / 2
+            return [(0, String(startYear)), (0.5, String(mid)), (1, String(endYear))]
         }
         return [(0, String(startYear)), (1, String(endYear))]
+    }
+}
+
+private struct UsdBtcKeyReorderModifier: ViewModifier {
+    let enabled: Bool
+    let name: String
+    let items: [String]
+    @Binding var draggingName: String?
+    var onReorder: (([String]) -> Void)?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .onDrag {
+                    draggingName = name
+                    return NSItemProvider(object: name as NSString)
+                }
+                .onDrop(
+                    of: [UTType.plainText],
+                    delegate: UsdBtcKeyDropDelegate(
+                        name: name,
+                        items: items,
+                        draggingName: $draggingName,
+                        onReorder: onReorder
+                    )
+                )
+        } else {
+            content
+        }
+    }
+}
+
+private struct UsdBtcKeyDropDelegate: DropDelegate {
+    let name: String
+    let items: [String]
+    @Binding var draggingName: String?
+    var onReorder: (([String]) -> Void)?
+
+    func dropEntered(info: DropInfo) {
+        guard let draggingName, draggingName != name,
+              let from = items.firstIndex(of: draggingName),
+              let to = items.firstIndex(of: name),
+              from != to else { return }
+        var next = items
+        next.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+        onReorder?(next)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggingName = nil
+        return true
     }
 }
 
 struct UsdBtcActivityCard: View {
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var reportsViewModel: ReportsViewModel
-    let appeared: Bool
     let onOpen: () -> Void
 
+    private var report: UsdBtcReportData? {
+        reportsViewModel.usdBtcReport.map { reportsViewModel.filteredUsdBtcReport($0) }
+    }
+
+    private var previewBills: [UsdBtcBillSeries] {
+        guard let report else { return [] }
+        return [BillBtcBacktest.combinedMonthlySeries(from: report)]
+    }
+
+    private var billCount: Int { report?.bills.count ?? 0 }
+
     private var change: BillBtcBacktest.BitcoinSpendChange? {
-        guard let report = reportsViewModel.usdBtcReport else { return nil }
-        return BillBtcBacktest.bitcoinSpendChange(
-            btcAmounts: report.months.map(\.btcAmount),
-            monthCount: max(report.months.count, report.monthsBack)
-        )
+        guard let report else { return nil }
+        return BillBtcBacktest.storyChange(from: report)
+    }
+
+    private var averages: BillBtcBacktest.MonthlyAverages? {
+        guard let report else { return nil }
+        return BillBtcBacktest.storyAverages(from: report)
     }
 
     var body: some View {
         Button(action: onOpen) {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 Text("Bitcoin Deflation")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
-                if let change {
-                    Text(BillBtcBacktest.changeSentence(change))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .fixedSize(horizontal: false, vertical: true)
+                UsdBtcStoryHeadline(change: change, billCount: billCount, style: .inApp)
+                if let averages {
+                    Text("\(BillBtcBacktest.compactUsd((averages.monthlyUsd as NSDecimalNumber).doubleValue))/mo avg")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
                 }
-                if let months = reportsViewModel.usdBtcReport?.months, months.count > 1 {
-                    UsdBtcComparisonChart(months: months, style: .inApp)
-                        .frame(height: 120)
-                        .opacity(appeared ? 1 : 0)
+                if !previewBills.isEmpty {
+                    UsdBtcComparisonChart(
+                        bills: previewBills,
+                        style: .inApp,
+                        colorNames: reportsViewModel.usdBtcAvailableBillNames,
+                        showsKey: false,
+                        plotHeight: 120
+                    )
                 }
-                HStack(spacing: 14) {
-                    legendDot(Color(red: 0.969, green: 0.576, blue: 0.102), title: "Sats needed")
+                HStack {
                     Spacer()
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
@@ -309,18 +661,7 @@ struct UsdBtcActivityCard: View {
             .background(activitySnapshotChrome)
         }
         .buttonStyle(.plain)
-        .accessibilityHint("Opens the USD versus Bitcoin comparison")
-    }
-
-    private func legendDot(_ color: Color, title: String) -> some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(color)
-                .frame(width: 7, height: 7)
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
+        .accessibilityHint("Opens Bitcoin Deflation")
     }
 
     private var activitySnapshotChrome: some View {

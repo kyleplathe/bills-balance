@@ -153,7 +153,8 @@ class BitcoinPriceService: ObservableObject {
         UserDefaults.standard.set(Date(), forKey: Self.historicalFetchedKey)
     }
 
-    /// USD price on `date`'s UTC day, the nearest earlier cached day, or the nearest later day.
+    /// USD price on `date`'s UTC day, or a nearby earlier cached day (not a later year).
+    /// Far-away later prices would flatten the backtest to ~0% change.
     func historicalUSDPrice(on date: Date, calendar: Calendar = Calendar(identifier: .gregorian)) -> Decimal? {
         var utcCal = calendar
         utcCal.timeZone = TimeZone(secondsFromGMT: 0) ?? calendar.timeZone
@@ -165,12 +166,10 @@ class BitcoinPriceService: ObservableObject {
             return Decimal(value)
         }
         let sorted = cache.keys.compactMap { formatter.date(from: $0) }.sorted()
+        let maxGap: TimeInterval = 45 * 24 * 60 * 60
         if let prior = sorted.last(where: { $0 <= day }),
+           day.timeIntervalSince(prior) <= maxGap,
            let value = cache[formatter.string(from: prior)], value > 0 {
-            return Decimal(value)
-        }
-        if let later = sorted.first(where: { $0 >= day }),
-           let value = cache[formatter.string(from: later)], value > 0 {
             return Decimal(value)
         }
         return nil
@@ -203,7 +202,12 @@ class BitcoinPriceService: ObservableObject {
         guard missing || cacheStale else { return }
 
         do {
-            let fetched = try await CoinGeckoClient.fetchFullBitcoinMarketChart()
+            let fetched: [(Date, Decimal)]
+            do {
+                fetched = try await CoinGeckoClient.fetchFullBitcoinMarketChart()
+            } catch {
+                fetched = try await CoinGeckoClient.fetchBitcoinMarketChart(days: 2920)
+            }
             var merged = cache
             for (day, price) in fetched {
                 merged[formatter.string(from: day)] = (price as NSDecimalNumber).doubleValue
@@ -303,7 +307,7 @@ enum CoinGeckoClient {
 
             var request = URLRequest(url: url)
             request.timeoutInterval = daysParameter == "max" ? 60 : 30
-            request.cachePolicy = .returnCacheDataElseLoad
+            request.cachePolicy = .reloadIgnoringLocalCacheData
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             request.setValue("BillsAndBalance/1.0 (iOS)", forHTTPHeaderField: "User-Agent")
 

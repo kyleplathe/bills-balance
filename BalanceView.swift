@@ -187,6 +187,11 @@ struct BalanceView: View {
         .onAppear {
             accountViewModel.fetchAccounts()
         }
+        .task {
+            if reportsViewModel.hasActiveBitcoinDigitalWallet {
+                await reportsViewModel.loadUsdBtcReport()
+            }
+        }
         .onChange(of: showingAddAccount) { _, isPresented in
             // Refresh accounts when the add account sheet is dismissed
             if !isPresented {

@@ -656,29 +656,22 @@ class AccountViewModel: ObservableObject {
         entry.account = account
         entry.bill = bill
         
-        // Handle BTC accounts: store both USD and BTC amounts at transaction time
+        // Handle BTC accounts: store both USD and BTC so mark-paid is dual-currency.
         if account.currencyCode == "BTC" {
-            // Store USD amount (from bill)
             entry.usdAmount = NSDecimalNumber(decimal: amount)
-            
-            if let sats = satsAmount {
-                // Use provided sats amount (convert sats to BTC)
-                let btcAmount = sats / 100_000_000
-                entry.btcAmount = NSDecimalNumber(decimal: btcAmount)
-                entry.amount = NSDecimalNumber(decimal: btcAmount) // Store BTC amount for BTC accounts
-                
-                // Calculate and store BTC price from USD amount and BTC amount
-                if btcAmount > 0 {
-                    let btcPrice = amount / btcAmount
-                    entry.btcPriceAtTransaction = NSDecimalNumber(decimal: btcPrice)
-                }
+            let priceService = bitcoinPriceService ?? BitcoinPriceService.shared
+            let rate: Decimal = {
+                if let hist = priceService.historicalUSDPrice(on: date), hist > 0 { return hist }
+                return priceService.btcToUsdRate
+            }()
+            if let filled = BillBtcBacktest.btcFilledFromUsd(usd: amount, satsAmount: satsAmount, btcUsdRate: rate) {
+                entry.btcAmount = NSDecimalNumber(decimal: filled.btc)
+                entry.amount = NSDecimalNumber(decimal: filled.btc)
+                entry.btcPriceAtTransaction = NSDecimalNumber(decimal: filled.price)
             } else {
-                // No sats provided - store USD only, BTC will be entered later
-                // Don't set btcAmount or amount yet - will be set when user enters sats
-                entry.amount = NSDecimalNumber(decimal: 0) // Temporary, will be updated
+                entry.amount = NSDecimalNumber(decimal: 0)
             }
         } else {
-            // For USD accounts, store USD amount
             entry.usdAmount = NSDecimalNumber(decimal: amount)
         }
         

@@ -1,249 +1,193 @@
 import SwiftUI
 
 struct UsdBtcBacktestView: View {
-    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var reportsViewModel: ReportsViewModel
     @State private var shareItem: ShareFileItem?
     @State private var monthsBack: Double = 48
-
-    private let currencyFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency
-        f.currencyCode = "USD"
-        f.maximumFractionDigits = 0
-        return f
-    }()
+    @State private var isDraggingLookback = false
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    lookbackSection
-                    expensePickerSection
-                    if let report = reportsViewModel.usdBtcReport, !report.trackedBillNames.isEmpty {
-                        statsSection(report)
-                        chartSection(report)
-                        Text(caption(for: report))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        emptyState
-                    }
-                }
-                .padding(16)
-            }
-            .background(Color(.systemGroupedBackground).ignoresSafeArea())
-            .navigationTitle("Bitcoin Deflation")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(.primary)
-                    }
-                    .accessibilityLabel("Close")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    if let report = reportsViewModel.usdBtcReport, !report.months.isEmpty {
-                        shareMenu(for: report)
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if !reportsViewModel.usdBtcAvailableBillNames.isEmpty {
+                    storyCard(report: displayedReport)
+                } else if reportsViewModel.usdBtcIsLoading {
+                    ProgressView("Loading Bitcoin history…")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 32)
+                } else {
+                    emptyState
                 }
             }
-            .sheet(item: $shareItem) { item in
-                ActivityShareSheet(activityItems: [item.url]) {
-                    try? FileManager.default.removeItem(at: item.url)
-                    shareItem = nil
+            .padding(16)
+        }
+        .scrollDisabled(isDraggingLookback)
+        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .navigationTitle("Bitcoin Deflation")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if let report = displayedReport, !report.bills.isEmpty {
+                    shareButton(for: report)
                 }
             }
-            .task {
-                monthsBack = Double(reportsViewModel.usdBtcMonthsBack)
-                await reportsViewModel.loadUsdBtcReport()
+        }
+        .sheet(item: $shareItem) { item in
+            ActivityShareSheet(activityItems: [item.url]) {
+                try? FileManager.default.removeItem(at: item.url)
+                shareItem = nil
             }
+            .id(item.id)
+        }
+        .task {
+            monthsBack = Double(BillBtcBacktest.clampLookbackMonths(reportsViewModel.usdBtcMonthsBack))
+            await reportsViewModel.loadUsdBtcReport()
         }
     }
 
-    private var lookbackSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Lookback")
-                    .font(.headline)
-                Spacer()
-                Text(lookbackLabel)
-                    .font(.subheadline.weight(.semibold))
-                    .monospacedDigit()
+    private var displayedReport: UsdBtcReportData? {
+        guard let full = reportsViewModel.usdBtcReport else { return nil }
+        return BillBtcBacktest.windowed(
+            reportsViewModel.filteredUsdBtcReport(full),
+            monthsBack: Int(monthsBack)
+        )
+    }
+
+    private func storyCard(report: UsdBtcReportData?) -> some View {
+        let change = report.flatMap { BillBtcBacktest.storyChange(from: $0) }
+        let averages = report.flatMap { BillBtcBacktest.storyAverages(from: $0) }
+        return VStack(alignment: .leading, spacing: 18) {
+            if let report, !report.bills.isEmpty {
+                storyHeader(change: change, averages: averages, report: report)
+                UsdBtcComparisonChart(
+                    bills: orderedBills(report.bills),
+                    style: .inApp,
+                    colorNames: reportsViewModel.usdBtcAvailableBillNames,
+                    onReorder: { names in
+                        reportsViewModel.setUsdBtcBillOrder(names)
+                    }
+                )
+                .id("\(Int(monthsBack))-\(report.bills.map(\.name).joined(separator: ","))")
+            } else {
+                Text("Turn on a bill to see Bitcoin over time.")
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-            Slider(value: $monthsBack, in: 12...48, step: 12) {
-                Text("Lookback")
-            }
-            .tint(Color(red: 0.969, green: 0.576, blue: 0.102))
-            .onChange(of: monthsBack) { _, newValue in
-                reportsViewModel.setUsdBtcMonthsBack(Int(newValue))
-            }
+            lookbackSlider
+            billChips
         }
-        .padding(16)
+        .padding(18)
         .background(cardBackground)
     }
 
-    private var expensePickerSection: some View {
+    private func storyHeader(
+        change: BillBtcBacktest.BitcoinSpendChange?,
+        averages: BillBtcBacktest.MonthlyAverages?,
+        report: UsdBtcReportData
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            UsdBtcStoryHeadline(change: change, billCount: report.bills.count, style: .inApp)
+
+            if let snapshot = BillBtcBacktest.thenNow(from: report) {
+                UsdBtcThenNowComparison(snapshot: snapshot, style: .inApp)
+            } else if let averages {
+                Text(BillBtcBacktest.compactUsd((averages.monthlyUsd as NSDecimalNumber).doubleValue) + "/mo avg")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+        }
+    }
+
+    private func orderedBills(_ bills: [UsdBtcBillSeries]) -> [UsdBtcBillSeries] {
+        BillBtcBacktest.orderedBills(bills, by: reportsViewModel.orderedUsdBtcNames(bills.map(\.name)))
+    }
+
+    private var lookbackSlider: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Lookback")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(lookbackLabel)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Slider(
+                value: $monthsBack,
+                in: Double(BillBtcBacktest.minLookbackMonths)...Double(BillBtcBacktest.maxSliderLookbackMonths),
+                step: 12,
+                onEditingChanged: { editing in
+                    isDraggingLookback = editing
+                    if !editing {
+                        reportsViewModel.setUsdBtcMonthsBack(Int(monthsBack))
+                    }
+                }
+            )
+            .tint(Color(red: 0.969, green: 0.576, blue: 0.102))
+        }
+    }
+
+    private var billChips: some View {
         let names = reportsViewModel.usdBtcAvailableBillNames
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("Expenses")
-                .font(.headline)
+        return Group {
             if names.isEmpty {
                 Text("No tracked bills yet.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(names, id: \.self) { name in
-                    Button {
-                        reportsViewModel.toggleUsdBtcBill(name)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: reportsViewModel.isUsdBtcBillIncluded(name) ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(reportsViewModel.isUsdBtcBillIncluded(name) ? Color(red: 0.969, green: 0.576, blue: 0.102) : .secondary)
-                            Text(name)
-                                .foregroundStyle(.primary)
-                            Spacer()
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Paid in Bitcoin")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 108), spacing: 8, alignment: .leading)], alignment: .leading, spacing: 8) {
+                        ForEach(names, id: \.self) { name in
+                            let included = reportsViewModel.isUsdBtcBillIncluded(name)
+                            Button {
+                                reportsViewModel.toggleUsdBtcBill(name)
+                                HapticManager.shared.buttonTapped()
+                            } label: {
+                                Text(name)
+                                    .lineLimit(1)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(included ? Color.primary : .secondary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .frame(maxWidth: .infinity)
+                                    .background(
+                                        Capsule(style: .continuous)
+                                            .fill(included
+                                                  ? Color(red: 0.969, green: 0.576, blue: 0.102).opacity(0.18)
+                                                  : Color.primary.opacity(0.05))
+                                    )
+                                    .overlay(
+                                        Capsule(style: .continuous)
+                                            .strokeBorder(included
+                                                          ? Color(red: 0.969, green: 0.576, blue: 0.102).opacity(0.45)
+                                                          : Color.clear)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .opacity(included ? 1 : 0.55)
+                            .accessibilityAddTraits(included ? [.isSelected] : [])
                         }
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
-        .padding(16)
-        .background(cardBackground)
     }
 
     private var lookbackLabel: String {
         let years = Int(monthsBack) / 12
-        if years == 1 { return "1 year" }
+        if years <= 1 { return "1 year" }
         return "\(years) years"
-    }
-
-    private func statsSection(_ report: UsdBtcReportData) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(report.trackedBillNames.joined(separator: " · "))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            
-            let firstSats = report.months.first?.btcAtTime ?? 0
-            let lastSats = report.months.last?.btcAtTime ?? 0
-            let totalFirstSats = firstSats * 100_000_000
-            let totalLastSats = lastSats * 100_000_000
-            let reduction = firstSats > 0 ? ((firstSats - lastSats) / firstSats) * 100 : 0
-            
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    backtestStat(title: "Bill amount", value: currencyFormatter.string(from: report.totalUsd as NSDecimalNumber) ?? "$0")
-                    Spacer()
-                }
-                
-                HStack(alignment: .top, spacing: 20) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Started")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        if let first = report.months.first {
-                            Text(formatSatsCompact(totalFirstSats))
-                                .font(.title3.weight(.semibold))
-                                .foregroundStyle(Color(red: 0.969, green: 0.576, blue: 0.102))
-                                .monospacedDigit()
-                            Text(yearLabel(for: first.month))
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    
-                    Image(systemName: "arrow.right")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 18)
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Today")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        if let last = report.months.last {
-                            Text(formatSatsCompact(totalLastSats))
-                                .font(.title3.weight(.semibold))
-                                .foregroundStyle(Color(red: 0.969, green: 0.576, blue: 0.102))
-                                .monospacedDigit()
-                            Text(yearLabel(for: last.month))
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    
-                    Spacer()
-                    
-                    if reduction > 0 {
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Text("Reduction")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                            Text(String(format: "%.1f%%", (reduction as NSDecimalNumber).doubleValue))
-                                .font(.title3.weight(.semibold))
-                                .foregroundStyle(.green)
-                                .monospacedDigit()
-                            Text("less sats")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                }
-            }
-        }
-        .padding(16)
-        .background(cardBackground)
-    }
-    
-    private func formatSatsCompact(_ sats: Decimal) -> String {
-        let satsDouble = (sats as NSDecimalNumber).doubleValue
-        if satsDouble >= 1_000_000 {
-            return String(format: "%.2fM", satsDouble / 1_000_000)
-        } else if satsDouble >= 1_000 {
-            return String(format: "%.1fK", satsDouble / 1_000)
-        } else {
-            return String(format: "%.0f", satsDouble)
-        }
-    }
-    
-    private func yearLabel(for date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy"
-        return formatter.string(from: date)
-    }
-
-    private func chartSection(_ report: UsdBtcReportData) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 14) {
-                chartLegendSwatch(color: Color(red: 0.969, green: 0.576, blue: 0.102), title: "Sats needed to pay bill")
-            }
-            UsdBtcComparisonChart(months: report.months, style: .inApp)
-                .frame(height: 180)
-        }
-        .padding(16)
-        .background(cardBackground)
-    }
-
-    private func chartLegendSwatch(color: Color, title: String) -> some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(color)
-                .frame(width: 7, height: 7)
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
     }
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Pay a dollar bill in Bitcoin (sats) to see Bitcoin deflation over time. The chart shows how many fewer sats you need to pay the same bill as Bitcoin's purchasing power increases.")
+            Text("Mark a dollar bill paid from your Bitcoin wallet to see how much less Bitcoin it takes over time.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -261,64 +205,26 @@ struct UsdBtcBacktestView: View {
             )
     }
 
-    @ViewBuilder
-    private func shareMenu(for report: UsdBtcReportData) -> some View {
-        if report.bills.count <= 1 {
-            let names = report.trackedBillNames
-            let months = report.bills.first?.months ?? report.months
-            Button {
-                share(title: BillBtcBacktest.shareTitle(billNames: names), months: months, monthsBack: report.monthsBack)
-            } label: {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.title2)
-            }
-            .accessibilityLabel("Share")
-        } else {
-            Menu {
-                ForEach(report.bills) { bill in
-                    Button(BillBtcBacktest.shareTitle(billNames: [bill.name])) {
-                        share(title: BillBtcBacktest.shareTitle(billNames: [bill.name]), months: bill.months, monthsBack: report.monthsBack)
-                    }
-                }
-                Button(BillBtcBacktest.shareTitle(billNames: report.trackedBillNames)) {
-                    share(title: BillBtcBacktest.shareTitle(billNames: report.trackedBillNames), months: report.months, monthsBack: report.monthsBack)
-                }
-            } label: {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.title2)
-            }
-            .accessibilityLabel("Share")
+    private func shareButton(for report: UsdBtcReportData) -> some View {
+        Button {
+            share(report)
+        } label: {
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: 15, weight: .semibold))
+                .offset(y: -0.5)
         }
+        .accessibilityLabel("Share")
     }
 
-    private func share(title: String, months: [UsdBtcMonthPoint], monthsBack: Int) {
-        guard let url = UsdBtcShareCard.pngURL(title: title, months: months, monthsBack: monthsBack) else { return }
+    private func share(_ report: UsdBtcReportData) {
+        let names = reportsViewModel.orderedUsdBtcNames(report.trackedBillNames)
+        guard let url = UsdBtcShareCard.pngURL(
+            title: BillBtcBacktest.shareTitle(billNames: names),
+            bills: orderedBills(report.bills),
+            monthsBack: report.monthsBack,
+            colorNames: names
+        ) else { return }
         HapticManager.shared.buttonTapped()
         shareItem = ShareFileItem(url: url)
-    }
-
-    private func backtestStat(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.subheadline.weight(.semibold))
-                .monospacedDigit()
-        }
-    }
-
-    private func caption(for report: UsdBtcReportData) -> String {
-        var parts: [String] = []
-        if report.actualMonths > 0 {
-            parts.append("\(report.actualMonths) month\(report.actualMonths == 1 ? "" : "s") from imported payments")
-        }
-        if report.estimatedMonths > 0 {
-            parts.append("\(report.estimatedMonths) estimated")
-        }
-        if parts.isEmpty {
-            return "Hypothetical cost in BTC using historical prices until real payments are imported."
-        }
-        return parts.joined(separator: " · ") + "."
     }
 }

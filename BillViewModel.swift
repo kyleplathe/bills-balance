@@ -354,7 +354,8 @@ class BillViewModel: ObservableObject {
                                                     date: paidDate,
                                                     isCredit: false,
                                                     title: bill.name,
-                                                    notes: bill.notes)
+                                                    notes: bill.notes,
+                                                    bitcoinPriceService: BitcoinPriceService.shared)
             }
         }
         
@@ -484,6 +485,7 @@ class BillViewModel: ObservableObject {
                                                                 isCredit: false,
                                                                 title: bill.name,
                                                                 notes: transactionNotes,
+                                                                bitcoinPriceService: BitcoinPriceService.shared,
                                                                 satsAmount: satsAmount)
                 // Mark transaction as unreconciled (pending) so it shows up unchecked in account
                 entry?.isReconciledFlag = false
@@ -567,15 +569,14 @@ class BillViewModel: ObservableObject {
             }
             // For non-digital-wallet accounts, totalAmount remains as amountDecimal (no fee added)
             
-            // Store USD amount - include fee in total if digital wallet, otherwise just bill amount
-            // No automatic BTC calculation - user will enter sats when marking as paid or reconciling
             accountViewModel?.recordLedgerEntry(for: bill,
                                                 amount: totalAmount,
                                                 date: transactionDate,
                                                 isCredit: false,
                                                 title: bill.name,
                                                 notes: transactionNotes,
-                                                satsAmount: nil) // No auto-calculation
+                                                bitcoinPriceService: BitcoinPriceService.shared,
+                                                satsAmount: nil)
         } else {
             // No account assigned - just use bill amount (no fees ever applied)
             accountViewModel?.recordLedgerEntry(for: bill,
@@ -584,7 +585,8 @@ class BillViewModel: ObservableObject {
                                                 isCredit: false,
                                                 title: bill.name,
                                                 notes: bill.notes,
-                                                satsAmount: nil) // No auto-calculation
+                                                bitcoinPriceService: BitcoinPriceService.shared,
+                                                satsAmount: nil)
         }
         
         saveContext()
@@ -740,6 +742,7 @@ class BillViewModel: ObservableObject {
             isCredit: false,
             title: bill.name,
             notes: notes,
+            bitcoinPriceService: BitcoinPriceService.shared,
             satsAmount: sats
         )
         if let fee = feeUSD, fee > 0 {

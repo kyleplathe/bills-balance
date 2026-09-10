@@ -82,13 +82,6 @@ struct ReportsView: View {
                             Label("Review Uncategorized (\(uncatCount))", systemImage: "tag")
                         }
                     }
-                    if reportsViewModel.showsUsdBtcEasterEgg {
-                        Button {
-                            showingUsdBtcBacktest = true
-                        } label: {
-                            Label("USD vs Bitcoin", systemImage: "chart.line.uptrend.xyaxis")
-                        }
-                    }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                         .font(.title2)
@@ -127,7 +120,7 @@ struct ReportsView: View {
                 .environmentObject(accountViewModel)
                 .environmentObject(categoryManager)
         }
-        .sheet(isPresented: $showingUsdBtcBacktest) {
+        .navigationDestination(isPresented: $showingUsdBtcBacktest) {
             UsdBtcBacktestView()
                 .environmentObject(reportsViewModel)
                 .environmentObject(bitcoinPriceService)
@@ -274,6 +267,7 @@ struct ReportsView: View {
                         periodCards(from: snapshot)
                     } else {
                         emptyPeriodPlaceholder
+                        usdBtcActivityCardIfAvailable
                     }
                 } else if reportsViewModel.isLoading {
                     ProgressView("Loading…")
@@ -319,11 +313,7 @@ struct ReportsView: View {
             isCurrentPeriodInProgress: snapshot.isCurrentPeriodInProgress,
             anchorDate: snapshot.anchorDate
         )
-        if snapshot.period == .year, reportsViewModel.showsUsdBtcEasterEgg {
-            UsdBtcActivityCard(appeared: appeared) {
-                showingUsdBtcBacktest = true
-            }
-        }
+        usdBtcActivityCardIfAvailable
         WalletIncomeFeesRows(
             income: snapshot.income,
             creditCardSpending: snapshot.creditCardSpending,
@@ -346,6 +336,15 @@ struct ReportsView: View {
                 period: snapshot.period,
                 anchorDate: snapshot.anchorDate
             )
+        }
+    }
+
+    @ViewBuilder
+    private var usdBtcActivityCardIfAvailable: some View {
+        if walletPeriod == .year, reportsViewModel.showsUsdBtcEasterEgg {
+            UsdBtcActivityCard {
+                showingUsdBtcBacktest = true
+            }
         }
     }
 

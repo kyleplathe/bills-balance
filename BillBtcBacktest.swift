@@ -9,7 +9,6 @@ enum BillBtcBacktest {
         var category: String?
     }
 
-    /// A bill instance used to decide which recurring series appear in USD vs Bitcoin.
     struct BillSource: Equatable {
         var groupingKey: String
         var name: String
@@ -17,8 +16,6 @@ enum BillBtcBacktest {
         var dueDate: Date?
         var seriesId: UUID?
         var category: String?
-        var trackInBitcoin: Bool
-        var paidInBitcoin: Bool
     }
 
     struct LedgerCandidate {
@@ -39,25 +36,71 @@ enum BillBtcBacktest {
         var isEstimate: Bool
     }
 
-    /// Dollar bill paid with an actual BTC/sats amount (not merely assigned to a BTC account).
-    static func isUsdBillPaidInBitcoin(isCredit: Bool, usdAmount: Decimal, btcAmount: Decimal) -> Bool {
+    static func hasUsdAndBitcoinPayment(isCredit: Bool, usdAmount: Decimal, btcAmount: Decimal) -> Bool {
         !isCredit && usdAmount > 0 && btcAmount > 0
+    }
+
+    static func isTrackedBitcoinPayment(
+        isCredit: Bool,
+        usdAmount: Decimal,
+        btcAmount: Decimal,
+        paysFromBitcoinWallet: Bool
+    ) -> Bool {
+        guard !isCredit else { return false }
+        if usdAmount > 0 && btcAmount > 0 { return true }
+        if paysFromBitcoinWallet && (usdAmount > 0 || btcAmount > 0) { return true }
+        return false
+    }
+
+    static func isUsdBillPaidInBitcoin(isCredit: Bool, usdAmount: Decimal, btcAmount: Decimal) -> Bool {
+        hasUsdAndBitcoinPayment(isCredit: isCredit, usdAmount: usdAmount, btcAmount: btcAmount)
+            || (!isCredit && btcAmount > 0)
+    }
+
+    /// BTC to store when a dollar bill is marked paid from a Bitcoin wallet.
+    static func btcFilledFromUsd(usd: Decimal, satsAmount: Decimal?, btcUsdRate: Decimal) -> (btc: Decimal, price: Decimal)? {
+        if let sats = satsAmount, sats > 0 {
+            let btc = sats / 100_000_000
+            guard btc > 0 else { return nil }
+            let price = usd > 0 ? usd / btc : btcUsdRate
+            return (btc, price > 0 ? price : btcUsdRate)
+        }
+        guard usd > 0, btcUsdRate > 0 else { return nil }
+        return (usd / btcUsdRate, btcUsdRate)
+    }
+
+    /// Ignore stored BTC that is clearly the wrong unit versus USD ÷ that month’s price.
+    static func isPlausibleActualBtc(_ stored: Decimal, estimated: Decimal) -> Bool {
+        guard stored > 0, estimated > 0 else { return false }
+        let ratio = stored / estimated
+        return ratio >= Decimal(string: "0.25")! && ratio <= 4
     }
 
     static func groupingKey(seriesId: UUID?, billId: UUID?, objectURI: String) -> String {
         seriesId?.uuidString ?? billId?.uuidString ?? objectURI
     }
 
-    /// Latest bill in each series that was paid in BTC/sats, or explicitly flagged Track in Bitcoin.
-    static func templates(from bills: [BillSource], calendar: Calendar = .current) -> [Template] {
-        var trackedKeys = Set<String>()
-        for bill in bills where bill.trackInBitcoin || bill.paidInBitcoin {
-            trackedKeys.insert(bill.groupingKey)
+    static func paymentDisplayTitle(title: String, billName: String?, notes: String? = nil) -> String {
+        if let preferred = ImportTitleRewriteStore.rewrite(for: title)?.preferredTitle {
+            let trimmed = preferred.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
         }
+        if let payee = StrikeCSVParser.originalPayee(from: notes),
+           let preferred = ImportTitleRewriteStore.rewrite(for: payee)?.preferredTitle {
+            let trimmed = preferred.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        let linked = (billName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !linked.isEmpty { return linked }
+        return title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
+    /// One template per bill name: latest amount in the series.
+    static func templates(from bills: [BillSource], calendar: Calendar = .current) -> [Template] {
         var latest: [String: BillSource] = [:]
         for bill in bills {
-            guard trackedKeys.contains(bill.groupingKey) else { continue }
+            let name = bill.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, bill.amount > 0 else { continue }
             if let existing = latest[bill.groupingKey], let existingDue = existing.dueDate, let due = bill.dueDate {
                 if due > existingDue { latest[bill.groupingKey] = bill }
             } else if latest[bill.groupingKey] == nil {
@@ -67,19 +110,19 @@ enum BillBtcBacktest {
             }
         }
 
-        return latest.values.compactMap { bill in
-            let name = bill.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty else { return nil }
-            let dueDay = calendar.component(.day, from: bill.dueDate ?? Date())
-            return Template(
-                name: name,
+        let latestTemplates = latest.values.map { bill -> Template in
+            Template(
+                name: bill.name.trimmingCharacters(in: .whitespacesAndNewlines),
                 amount: bill.amount,
-                dueDay: dueDay,
+                dueDay: calendar.component(.day, from: bill.dueDate ?? Date()),
                 seriesId: bill.seriesId,
                 category: bill.category
             )
         }
-        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let uniqueByName = Dictionary(grouping: latestTemplates, by: \.name).values.compactMap { group in
+            group.max(by: { $0.amount < $1.amount })
+        }
+        return uniqueByName.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     static func dueDate(inMonth monthStart: Date, day: Int, calendar: Calendar = .current) -> Date {
@@ -124,6 +167,10 @@ enum BillBtcBacktest {
             if nameNorm.count >= 3, StatementImportMatching.normalizeTitle(row.title).contains(nameNorm) {
                 score += 60
             }
+            let displayName = paymentDisplayTitle(title: row.title, billName: row.billName)
+            if nameNorm.count >= 3, StatementImportMatching.normalizeTitle(displayName) == nameNorm {
+                score += 80
+            }
             let categoryMatch: Bool = {
                 guard let cat = template.category, !cat.isEmpty else { return false }
                 return (row.category ?? "").caseInsensitiveCompare(cat) == .orderedSame
@@ -133,6 +180,10 @@ enum BillBtcBacktest {
             }
             if amountsClose(row.usd, template.amount) {
                 score += 15
+                // Strike bill pay: payee often differs, but same category + dollar invoice + sats.
+                if categoryMatch, (row.btc ?? 0) > 0 {
+                    score += 45
+                }
             }
             if score >= 50 {
                 ranked.append((idx, score))
@@ -142,6 +193,50 @@ enum BillBtcBacktest {
         return ranked.max(by: { $0.score < $1.score })?.index
     }
 
+    /// True when a debit with stored sats matches this bill (Strike bill pay, linked or by name/amount).
+    static func hasBitcoinPayment(template: Template, in candidates: [LedgerCandidate]) -> Bool {
+        matchingIndex(
+            template: template,
+            in: candidates.filter { ($0.btc ?? 0) > 0 },
+            used: [],
+            monthStart: .distantPast,
+            monthEnd: .distantFuture
+        ) != nil
+    }
+
+    static func bitcoinPaidTemplates(from templates: [Template], candidates: [LedgerCandidate]) -> [Template] {
+        let btcCandidates = candidates.filter { ($0.btc ?? 0) > 0 }
+        var used = Set<Int>()
+        var paid: [Template] = []
+        for template in templates {
+            guard let idx = matchingIndex(
+                template: template,
+                in: btcCandidates,
+                used: used,
+                monthStart: .distantPast,
+                monthEnd: .distantFuture
+            ) else { continue }
+            used.insert(idx)
+            paid.append(template)
+        }
+        for template in templates where !paid.contains(where: { $0.name == template.name }) {
+            let uniqueAmount = templates.filter { amountsClose($0.amount, template.amount) }.count == 1
+            guard uniqueAmount else { continue }
+            guard let idx = btcCandidates.enumerated().first(where: { index, row in
+                !used.contains(index) && amountsClose(row.usd, template.amount)
+            })?.offset else { continue }
+            used.insert(idx)
+            paid.append(template)
+        }
+        return paid.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    static func satsNeeded(usd: Decimal, btcUsdPrice: Decimal) -> Decimal {
+        guard btcUsdPrice > 0 else { return 0 }
+        return usd / btcUsdPrice
+    }
+
+    /// Same dollar bill at that month’s BTC-USD price. Uses stored sats when they look real.
     static func monthAmount(
         template: Template,
         dueDate: Date,
@@ -149,68 +244,60 @@ enum BillBtcBacktest {
         historicalPrice: Decimal?,
         currentPrice: Decimal,
         now: Date = Date(),
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        lookbackStart _: Date? = nil
     ) -> MonthAmount? {
-        if let actual {
-            let usd = actual.usd.magnitude
-            let price: Decimal = {
-                if let stored = actual.price, stored > 0 { return stored }
-                if let hist = historicalPrice, hist > 0 { return hist }
-                return currentPrice
-            }()
-            let btc: Decimal = {
-                if let stored = actual.btc, stored > 0 { return stored.magnitude }
-                guard price > 0 else { return 0 }
-                return usd / price
-            }()
-            return MonthAmount(usd: usd, btc: btc, price: price, isEstimate: false)
-        }
+        let billUsd = template.amount.magnitude
+        _ = now
+        guard billUsd > 0 else { return nil }
 
-        guard template.amount > 0 else { return nil }
-        guard let hist = historicalPrice, hist > 0 else { return nil }
-        let usd = inflationAdjustedUsd(template.amount.magnitude, on: dueDate, now: now, calendar: calendar)
-        return MonthAmount(usd: usd, btc: usd / hist, price: hist, isEstimate: true)
+        let price: Decimal? = {
+            if let hist = historicalPrice, hist > 0 { return hist }
+            if let stored = actual?.price, stored > 0 { return stored }
+            let fallback = fallbackBtcUsd(on: dueDate, calendar: calendar)
+            if fallback > 0 { return fallback }
+            return currentPrice > 0 ? currentPrice : nil
+        }()
+        guard let price, price > 0 else { return nil }
+
+        let estimated = satsNeeded(usd: billUsd, btcUsdPrice: price)
+        let stored = actual?.btc ?? 0
+        let useActual = isPlausibleActualBtc(stored, estimated: estimated)
+        return MonthAmount(
+            usd: billUsd,
+            btc: useActual ? stored : estimated,
+            price: price,
+            isEstimate: actual == nil
+        )
     }
 
-    /// Annual CPI-U (1982-84=100). Years after the table grow at 3%.
-    static let cpiYearIndex: [Int: Decimal] = [
-        2013: Decimal(string: "232.957")!,
-        2014: Decimal(string: "236.736")!,
-        2015: Decimal(string: "237.017")!,
-        2016: Decimal(string: "240.007")!,
-        2017: Decimal(string: "245.120")!,
-        2018: Decimal(string: "251.107")!,
-        2019: Decimal(string: "255.657")!,
-        2020: Decimal(string: "258.811")!,
-        2021: Decimal(string: "270.970")!,
-        2022: Decimal(string: "292.655")!,
-        2023: Decimal(string: "304.702")!,
-        2024: Decimal(string: "313.689")!,
-        2025: Decimal(string: "322.1")!,
-        2026: Decimal(string: "329.0")!
+    static let fallbackBtcUsdByYear: [Int: Decimal] = [
+        2013: Decimal(string: "150")!,
+        2014: Decimal(string: "550")!,
+        2015: Decimal(string: "270")!,
+        2016: Decimal(string: "570")!,
+        2017: Decimal(string: "2500")!,
+        2018: Decimal(string: "7500")!,
+        2019: Decimal(string: "5200")!,
+        2020: Decimal(string: "11000")!,
+        2021: Decimal(string: "35000")!,
+        2022: Decimal(string: "28000")!,
+        2023: Decimal(string: "28000")!,
+        2024: Decimal(string: "64000")!,
+        2025: Decimal(string: "95000")!,
+        2026: Decimal(string: "100000")!
     ]
 
-    static func cpiIndex(on date: Date, calendar: Calendar = .current) -> Decimal {
+    static func fallbackBtcUsd(on date: Date, calendar: Calendar = .current) -> Decimal {
         let year = calendar.component(.year, from: date)
         let month = calendar.component(.month, from: date)
-        let knownYears = cpiYearIndex.keys.sorted()
-        guard let firstYear = knownYears.first, let lastYear = knownYears.last else { return 1 }
+        let knownYears = fallbackBtcUsdByYear.keys.sorted()
+        guard let firstYear = knownYears.first, let lastYear = knownYears.last else { return 0 }
         let startYear = min(max(year, firstYear), lastYear)
-        let start = cpiYearIndex[startYear] ?? 1
-        let next: Decimal = {
-            if let listed = cpiYearIndex[startYear + 1] { return listed }
-            return start * Decimal(string: "1.03")!
-        }()
+        let start = fallbackBtcUsdByYear[startYear] ?? 0
+        let next = fallbackBtcUsdByYear[startYear + 1] ?? (start * Decimal(string: "1.2")!)
         let fraction = Decimal(month - 1) / 12
         return start + (next - start) * fraction
-    }
-
-    /// Scales a current payment back to `date` using CPI so estimated USD isn't a flat line.
-    static func inflationAdjustedUsd(_ amount: Decimal, on date: Date, now: Date = Date(), calendar: Calendar = .current) -> Decimal {
-        let thenCpi = cpiIndex(on: date, calendar: calendar)
-        let nowCpi = cpiIndex(on: now, calendar: calendar)
-        guard nowCpi > 0, thenCpi > 0 else { return amount }
-        return amount * thenCpi / nowCpi
     }
 
     static func shareTitle(billNames: [String]) -> String {
@@ -234,29 +321,10 @@ enum BillBtcBacktest {
 
     static let minLookbackMonths = 12
     static let maxSliderLookbackMonths = 96
-    static let bitcoinHistoryStartComponents = DateComponents(year: 2013, month: 4, day: 1)
+    static let minMatchedMonths = 6
 
     static func clampLookbackMonths(_ months: Int) -> Int {
         min(maxSliderLookbackMonths, max(minLookbackMonths, months))
-    }
-
-    static func isFullHistoryLookback(_ months: Int) -> Bool {
-        months > maxSliderLookbackMonths
-    }
-
-    static func monthsSince2013(now: Date = Date(), calendar: Calendar = .current) -> Int {
-        guard let start = calendar.date(from: bitcoinHistoryStartComponents) else {
-            return maxSliderLookbackMonths
-        }
-        let months = calendar.dateComponents([.month], from: start, to: now).month ?? maxSliderLookbackMonths
-        return max(maxSliderLookbackMonths, months)
-    }
-
-    static func resolvedLookbackMonths(_ months: Int, now: Date = Date(), calendar: Calendar = .current) -> Int {
-        if isFullHistoryLookback(months) {
-            return monthsSince2013(now: now, calendar: calendar)
-        }
-        return clampLookbackMonths(months)
     }
 
     struct MonthlyAverages: Equatable {
@@ -273,6 +341,74 @@ enum BillBtcBacktest {
             monthlyUsd: pairs.map(\.0).reduce(0, +) / count,
             monthlyBtc: pairs.map(\.1).reduce(0, +) / count,
             monthCount: pairs.count
+        )
+    }
+
+    static func smoothingWindow(monthCount: Int) -> Int {
+        min(12, max(3, monthCount / 4))
+    }
+
+    static func rollingAverage(_ values: [Decimal], window: Int) -> [Decimal] {
+        guard window > 0, !values.isEmpty else { return values }
+        return values.indices.map { index in
+            let start = max(0, index - window + 1)
+            let slice = values[start...index].filter { $0 > 0 }
+            guard !slice.isEmpty else { return 0 }
+            return slice.reduce(0, +) / Decimal(slice.count)
+        }
+    }
+
+    struct IndexedAverageLine: Equatable {
+        var dates: [Date]
+        var sats: [Double]
+    }
+
+    struct ChartKeyItem: Identifiable, Equatable {
+        var name: String
+        var monthlyUsd: Decimal
+        var percentLess: Decimal
+        var actualMonths: Int
+        var id: String { name }
+    }
+
+    static func chartKeyItems(from bills: [UsdBtcBillSeries]) -> [ChartKeyItem] {
+        bills.compactMap { bill in
+            guard let line = indexedAverageLine(from: bill.months) else { return nil }
+            guard let first = line.sats.first(where: { $0 > 0 }), first > 0 else { return nil }
+            let last = line.sats.last ?? first
+            let percentLess = Decimal((first - last) / first)
+            let averages = trailingAverages(
+                usdAmounts: bill.months.map(\.usdExpenses),
+                btcAmounts: bill.months.map(\.btcAmount)
+            )
+            return ChartKeyItem(
+                name: bill.name,
+                monthlyUsd: averages?.monthlyUsd ?? bill.months.last?.usdExpenses ?? 0,
+                percentLess: percentLess,
+                actualMonths: bill.months.filter { !$0.isEstimate }.count
+            )
+        }
+    }
+
+    static func orderedBills(_ bills: [UsdBtcBillSeries], by names: [String]) -> [UsdBtcBillSeries] {
+        let lookup = Dictionary(uniqueKeysWithValues: bills.map { ($0.name, $0) })
+        let ordered = names.compactMap { lookup[$0] }
+        let leftover = bills.filter { bill in !names.contains(bill.name) }
+        return ordered + leftover
+    }
+
+    static func orderedNames(_ names: [String], by order: [String]) -> [String] {
+        let known = order.filter { names.contains($0) }
+        let unknown = names.filter { !order.contains($0) }
+        return known + unknown
+    }
+
+    static func indexedAverageLine(from points: [UsdBtcMonthPoint], window: Int? = nil) -> IndexedAverageLine? {
+        guard points.count > 1 else { return nil }
+        let resolvedWindow = window ?? smoothingWindow(monthCount: points.count)
+        return IndexedAverageLine(
+            dates: points.map(\.month),
+            sats: rollingAverage(points.map(\.btcAmount), window: resolvedWindow).map { satsValue(fromBTC: $0) }
         )
     }
 
@@ -303,71 +439,171 @@ enum BillBtcBacktest {
         return formatter.string(from: NSNumber(value: sats)) ?? "0"
     }
 
+    static func satsCaption(_ sats: Double) -> String {
+        "\(compactSats(sats)) sats"
+    }
+
+    struct ThenNowSnapshot: Equatable {
+        var thenLabel: String
+        var thenSats: Double
+        var nowSats: Double
+        var monthlyUsd: Decimal
+    }
+
+    static func thenNow(from bills: [UsdBtcBillSeries]) -> ThenNowSnapshot? {
+        let combined = combinedBillSeries(from: bills)
+        return thenNow(from: combined)
+    }
+
+    static func thenNow(from report: UsdBtcReportData) -> ThenNowSnapshot? {
+        thenNow(from: combinedMonthlySeries(from: report))
+    }
+
+    static func thenNow(from bill: UsdBtcBillSeries) -> ThenNowSnapshot? {
+        guard let line = indexedAverageLine(from: bill.months),
+              let first = line.sats.first, first > 0,
+              let last = line.sats.last,
+              let firstDate = line.dates.first else { return nil }
+        let averages = trailingAverages(
+            usdAmounts: bill.months.map(\.usdExpenses),
+            btcAmounts: bill.months.map(\.btcAmount)
+        )
+        return ThenNowSnapshot(
+            thenLabel: String(Calendar.current.component(.year, from: firstDate)),
+            thenSats: first,
+            nowSats: last,
+            monthlyUsd: averages?.monthlyUsd ?? bill.months.last?.usdExpenses ?? 0
+        )
+    }
+
+    static func compactBitcoin(_ btc: Decimal) -> String {
+        let value = abs((btc as NSDecimalNumber).doubleValue)
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = value >= 1 ? 2 : 4
+        formatter.maximumFractionDigits = value >= 0.01 ? 4 : 6
+        let number = formatter.string(from: NSNumber(value: value)) ?? "0"
+        return "\(number) BTC"
+    }
+
+    static func percentPoints(_ percentLess: Decimal) -> Int {
+        Int((abs((percentLess as NSDecimalNumber).doubleValue) * 100).rounded())
+    }
+
+    static func lessBitcoinCaption(percentLess: Decimal, billCount: Int = 1) -> String {
+        let noun = billCount == 1 ? "bill" : "bills"
+        return percentLess >= 0
+            ? "less Bitcoin to pay the same \(noun)"
+            : "more Bitcoin to pay the same \(noun)"
+    }
+
+    static func sameDollarsCaption(billCount: Int) -> String {
+        billCount <= 1 ? "Same bill. Less Bitcoin." : "Same bills. Less Bitcoin."
+    }
+
+    static func storyHeadline(percentLess: Decimal, billCount: Int) -> String {
+        let percent = percentPoints(percentLess)
+        let noun = billCount <= 1 ? "bill" : "bills"
+        let word = percentLess >= 0 ? "less" : "more"
+        return "Same \(noun). \(percent)% \(word) Bitcoin."
+    }
+
+    static func actualDataCaption(actualMonths: Int) -> String {
+        if actualMonths <= 0 { return "Backtest" }
+        if actualMonths == 1 { return "1 mo actual" }
+        return "\(actualMonths) mo actual"
+    }
+
+    static func backtestMonthSpan(from dates: [Date], calendar: Calendar = .current) -> Int {
+        guard let first = dates.min(), let last = dates.max() else { return 0 }
+        let months = calendar.dateComponents([.month], from: first, to: last).month ?? 0
+        return max(months + 1, 1)
+    }
+
+    static func backtestCaption(monthCount: Int) -> String {
+        let years = max(monthCount, 0) / 12
+        if years <= 0 { return "Backtest" }
+        if years == 1 { return "Backtest 1 year" }
+        return "Backtest \(years)+ years"
+    }
+
     static func satsValue(fromBTC btc: Decimal) -> Double {
         (btc as NSDecimalNumber).doubleValue * 100_000_000
     }
 
+    struct BitcoinQuote: Equatable {
+        var text: String
+        var attribution: String
+    }
+
+    static let bitcoinQuotes: [BitcoinQuote] = [
+        BitcoinQuote(
+            text: "The root problem with conventional currency is all the trust that's required to make it work.",
+            attribution: "Satoshi Nakamoto"
+        ),
+        BitcoinQuote(
+            text: "Lost coins only make everyone else's coins worth slightly more.",
+            attribution: "Satoshi Nakamoto"
+        ),
+        BitcoinQuote(
+            text: "If you don't believe me or don't get it, I don't have time to try to convince you, sorry.",
+            attribution: "Satoshi Nakamoto"
+        ),
+        BitcoinQuote(
+            text: "It might make sense just to get some in case it catches on.",
+            attribution: "Satoshi Nakamoto"
+        ),
+        BitcoinQuote(
+            text: "We have proposed a system for electronic transactions without relying on trust.",
+            attribution: "Satoshi Nakamoto"
+        ),
+        BitcoinQuote(
+            text: "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks.",
+            attribution: "Genesis block"
+        ),
+        BitcoinQuote(
+            text: "Don't trust, verify.",
+            attribution: "Bitcoin"
+        ),
+        BitcoinQuote(
+            text: "Not your keys, not your coins.",
+            attribution: "Bitcoin"
+        ),
+        BitcoinQuote(
+            text: "Fix the money, fix the world.",
+            attribution: "Bitcoin"
+        ),
+        BitcoinQuote(
+            text: "Stay humble. Stack sats.",
+            attribution: "Bitcoin"
+        ),
+        BitcoinQuote(
+            text: "21 million. Forever.",
+            attribution: "Bitcoin"
+        ),
+        BitcoinQuote(
+            text: "Sound money. Same bills.",
+            attribution: "Bills & Balance"
+        )
+    ]
+
+    static func randomBitcoinQuote() -> BitcoinQuote {
+        bitcoinQuotes.randomElement() ?? bitcoinQuotes[0]
+    }
+
     static func sharePunchline(billName: String) -> String {
-        let name = billName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if name.isEmpty { return "Same bill. Fewer sats." }
-        return "Same \(name). Fewer sats."
+        sharePunchline(billNames: [billName])
     }
 
-    struct IndexedPoint: Equatable {
-        var usd: Double
-        var sats: Double
+    static func sharePunchline(billNames: [String]) -> String {
+        let names = billNames
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if names.count == 1 { return "Same \(names[0]). Less Bitcoin." }
+        if names.count > 1 { return "Same bills. Less Bitcoin." }
+        return "Same bill. Less Bitcoin."
     }
 
-    /// Both series start at 100 using the first month with a positive USD and BTC amount.
-    static func indexedSeries(usdAmounts: [Decimal], btcAmounts: [Decimal]) -> [IndexedPoint] {
-        guard usdAmounts.count == btcAmounts.count, usdAmounts.count > 1 else { return [] }
-        let usdVals = usdAmounts.map { ($0 as NSDecimalNumber).doubleValue }
-        let satsVals = btcAmounts.map { ($0 as NSDecimalNumber).doubleValue }
-        guard let base = zip(usdVals, satsVals).first(where: { $0.0 > 0 && $0.1 > 0 }) else { return [] }
-        let usdBase = base.0
-        let satsBase = base.1
-        return zip(usdVals, satsVals).map { usd, sats in
-            IndexedPoint(usd: usd / usdBase * 100, sats: sats / satsBase * 100)
-        }
-    }
-
-    /// Inclusive start / exclusive end for consecutive estimated months.
-    static func estimateBands(dates: [Date], estimates: [Bool], calendar: Calendar = .current) -> [(start: Date, end: Date)] {
-        guard dates.count == estimates.count, !dates.isEmpty else { return [] }
-        var bands: [(Date, Date)] = []
-        var bandStart: Date?
-        for index in dates.indices {
-            if estimates[index] {
-                if bandStart == nil { bandStart = dates[index] }
-            } else if let start = bandStart {
-                bands.append((start, dates[index]))
-                bandStart = nil
-            }
-        }
-        if let start = bandStart, let last = dates.last {
-            let end = calendar.date(byAdding: .month, value: 1, to: last) ?? last
-            bands.append((start, end))
-        }
-        return bands
-    }
-
-    /// A month is estimated when every series that has that month is an estimate (or none have actuals).
-    static func combinedEstimates(dates: [[Date]], estimates: [[Bool]], axis: [Date]) -> [Bool] {
-        axis.map { date in
-            var sawActual = false
-            var sawAny = false
-            for index in dates.indices {
-                guard let monthIndex = dates[index].firstIndex(of: date) else { continue }
-                sawAny = true
-                if !estimates[index][monthIndex] {
-                    sawActual = true
-                }
-            }
-            return sawAny ? !sawActual : true
-        }
-    }
-
-    /// Positive `percentLess` means later payments used less Bitcoin than earlier ones.
     struct BitcoinSpendChange: Equatable {
         var percentLess: Decimal
         var years: Int
@@ -376,7 +612,7 @@ enum BillBtcBacktest {
 
     static func spendChange(amounts: [Decimal], monthCount: Int) -> BitcoinSpendChange? {
         let values = amounts.filter { $0 > 0 }
-        guard values.count >= 6 else { return nil }
+        guard values.count >= minMatchedMonths else { return nil }
         let window = min(12, max(3, values.count / 4))
         let first = Array(values.prefix(window))
         let last = Array(values.suffix(window))
@@ -395,12 +631,125 @@ enum BillBtcBacktest {
         spendChange(amounts: btcAmounts, monthCount: monthCount)
     }
 
-    static func usdSpendChange(usdAmounts: [Decimal], monthCount: Int) -> BitcoinSpendChange? {
-        spendChange(amounts: usdAmounts, monthCount: monthCount)
+    static func storyChange(from report: UsdBtcReportData) -> BitcoinSpendChange? {
+        headlineSpendChange(
+            btcAmounts: report.months.map(\.btcAmount),
+            monthCount: max(report.months.count, report.monthsBack)
+        )
+    }
+
+    static func hasEnoughBacktestData(from report: UsdBtcReportData) -> Bool {
+        !report.bills.isEmpty && report.actualMonths >= minMatchedMonths
+    }
+
+    static func combinedMonthlySeries(from report: UsdBtcReportData) -> UsdBtcBillSeries {
+        let name = report.bills.count == 1 ? (report.bills.first?.name ?? "Bill") : "Monthly bills"
+        return UsdBtcBillSeries(
+            name: name,
+            months: report.months,
+            totalUsd: report.totalUsd,
+            totalBtcAtTime: report.totalBtcAtTime,
+            totalBtcValueNow: report.totalBtcValueNow
+        )
+    }
+
+    static func combinedBillSeries(from bills: [UsdBtcBillSeries]) -> UsdBtcBillSeries {
+        if bills.count == 1, let only = bills.first { return only }
+        let combined = combinedSeries(from: bills)
+        let dates = Array(Set(bills.flatMap { $0.months.map(\.month) })).sorted()
+        let months = zip(dates, zip(combined.usd, combined.btc)).map { date, pair in
+            UsdBtcMonthPoint(
+                month: date,
+                usdExpenses: pair.0,
+                btcAtTime: pair.1,
+                btcValueNow: 0,
+                btcAmount: pair.1,
+                avgBtcPrice: 0,
+                isEstimate: false
+            )
+        }
+        return UsdBtcBillSeries(
+            name: bills.count <= 1 ? (bills.first?.name ?? "Bill") : "Bills",
+            months: months,
+            totalUsd: combined.usd.reduce(0, +),
+            totalBtcAtTime: combined.btc.reduce(0, +),
+            totalBtcValueNow: 0
+        )
+    }
+
+    static func windowed(_ report: UsdBtcReportData, monthsBack: Int) -> UsdBtcReportData {
+        let limit = clampLookbackMonths(monthsBack)
+        let months = Array(report.months.suffix(limit))
+        let start = months.first?.month
+        let bills = report.bills.compactMap { bill -> UsdBtcBillSeries? in
+            let points = start.map { startDate in bill.months.filter { $0.month >= startDate } } ?? bill.months
+            guard !points.isEmpty else { return nil }
+            return UsdBtcBillSeries(
+                name: bill.name,
+                months: points,
+                totalUsd: points.reduce(0) { $0 + $1.usdExpenses },
+                totalBtcAtTime: points.reduce(0) { $0 + $1.btcAmount },
+                totalBtcValueNow: points.reduce(0) { $0 + $1.btcValueNow }
+            )
+        }
+        return UsdBtcReportData(
+            months: months,
+            bills: bills,
+            totalUsd: months.reduce(0) { $0 + $1.usdExpenses },
+            totalBtcAtTime: months.reduce(0) { $0 + $1.btcAmount },
+            totalBtcValueNow: months.reduce(0) { $0 + $1.btcValueNow },
+            monthsBack: limit,
+            trackedBillNames: report.trackedBillNames,
+            estimatedMonths: months.filter(\.isEstimate).count,
+            actualMonths: months.filter { !$0.isEstimate }.count
+        )
+    }
+
+    static func headlineSpendChange(btcAmounts: [Decimal], monthCount: Int) -> BitcoinSpendChange? {
+        let values = btcAmounts.filter { $0 > 0 }
+        guard values.count >= minMatchedMonths, let first = values.first, first > 0, let last = values.last else { return nil }
+        let years = max(1, Int((Double(max(monthCount, 1)) / 12.0).rounded()))
+        return BitcoinSpendChange(
+            percentLess: (first - last) / first,
+            years: years,
+            monthCount: monthCount
+        )
+    }
+
+    static func storyAverages(from report: UsdBtcReportData) -> MonthlyAverages? {
+        trailingAverages(
+            usdAmounts: report.months.map(\.usdExpenses),
+            btcAmounts: report.months.map(\.btcAmount)
+        )
+    }
+
+    static func combinedSeries(from bills: [UsdBtcBillSeries]) -> (usd: [Decimal], btc: [Decimal], monthCount: Int) {
+        let dates = Array(Set(bills.flatMap { $0.months.map(\.month) })).sorted()
+        let usd = dates.map { date in
+            bills.reduce(Decimal(0)) { partial, bill in
+                partial + (bill.months.first(where: { $0.month == date })?.usdExpenses ?? 0)
+            }
+        }
+        let btc = dates.map { date in
+            bills.reduce(Decimal(0)) { partial, bill in
+                partial + (bill.months.first(where: { $0.month == date })?.btcAmount ?? 0)
+            }
+        }
+        return (usd, btc, dates.count)
+    }
+
+    static func storyChange(bills: [UsdBtcBillSeries], monthsBack: Int) -> BitcoinSpendChange? {
+        let series = combinedSeries(from: bills)
+        return headlineSpendChange(btcAmounts: series.btc, monthCount: max(series.monthCount, monthsBack))
+    }
+
+    static func storyAverages(bills: [UsdBtcBillSeries]) -> MonthlyAverages? {
+        let series = combinedSeries(from: bills)
+        return trailingAverages(usdAmounts: series.usd, btcAmounts: series.btc)
     }
 
     static func changeSentence(_ change: BitcoinSpendChange) -> String {
-        let percent = abs((change.percentLess * 100 as NSDecimalNumber).intValue)
+        let percent = percentPoints(change.percentLess)
         if change.percentLess >= 0 {
             return "Paid \(percent)% less Bitcoin than \(change.years) years ago"
         }
@@ -419,10 +768,10 @@ enum BillBtcBacktest {
     }
 
     static func signedPercentLabel(_ change: BitcoinSpendChange) -> String {
-        let percent = abs((change.percentLess * 100 as NSDecimalNumber).intValue)
         if abs((change.percentLess as NSDecimalNumber).doubleValue) < 0.005 {
             return "0%"
         }
+        let percent = percentPoints(change.percentLess)
         if change.percentLess >= 0 {
             return "−\(percent)%"
         }
