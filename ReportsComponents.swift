@@ -146,7 +146,7 @@ struct WalletTotalSpendingAppleCard: View {
                     if let arrowIcon {
                         Image(systemName: arrowIcon)
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Color(.systemBackground))
                             .padding(6)
                             .background(Circle().fill(Color.primary))
                     }
@@ -209,10 +209,13 @@ struct WalletStackedCategoryBarChart: View {
         return max(values.max() ?? 0, 1)
     }
 
+    private var chartCeiling: Double {
+        max(maxValue * 1.12, 1)
+    }
+
     private var yAxisValues: [Double] {
-        let maxVal = maxValue > 0 ? maxValue : 100
-        let step = max(maxVal / 4.0, 25.0)
-        let top = maxValue > 0 ? maxVal : 100
+        let top = maxValue > 0 ? chartCeiling : 100
+        let step = max(top / 4.0, 25.0)
         return [0, step, step * 2, step * 3, top]
     }
 
@@ -236,7 +239,7 @@ struct WalletStackedCategoryBarChart: View {
         let total = periodData.categories.reduce(Decimal(0)) { $0 + $1.amount }
         let value = (total as NSDecimalNumber).doubleValue
         guard value > 0 else { return 6 }
-        return max(8, chartHeight * CGFloat(value / maxValue))
+        return max(8, chartHeight * CGFloat(value / chartCeiling))
     }
 
     private func xAxisLabel(for periodData: (period: String, categories: [(name: String, amount: Decimal)])) -> String {
@@ -538,11 +541,11 @@ struct WalletSummaryRow: View {
                     .frame(width: 32, height: 32)
                     .background(RoundedRectangle(cornerRadius: 8).fill(iconColor.opacity(0.15)))
                 Text(title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(.primary)
                 Spacer()
                 Text(ActivityMoneyFormat.string(usd: amount, bitcoin: bitcoinPriceService))
-                    .font(.subheadline.weight(.medium))
+                    .font(.body.weight(.medium))
                     .foregroundStyle(.primary)
                     .monospacedDigit()
                 Image(systemName: "chevron.right")
@@ -576,11 +579,11 @@ struct CreditCardSpendingRow: View {
                 .frame(width: 32, height: 32)
                 .background(RoundedRectangle(cornerRadius: 8).fill(iconColor.opacity(0.15)))
             Text(title)
-                .font(.subheadline.weight(.semibold))
+                .font(.body.weight(.semibold))
                 .foregroundStyle(.primary)
             Spacer()
             Text(ActivityMoneyFormat.string(usd: amount, bitcoin: bitcoinPriceService))
-                .font(.subheadline.weight(.medium))
+                .font(.body.weight(.medium))
                 .foregroundStyle(.primary)
                 .monospacedDigit()
         }
@@ -784,16 +787,14 @@ struct WalletCategorySection: View {
                                             .frame(width: 32, height: 32)
                                             .background(RoundedRectangle(cornerRadius: 8).fill(colorForCategory(item.name).opacity(0.15)))
                                         Text(item.name)
-                                            .font(.subheadline.weight(.semibold))
+                                            .font(.body.weight(.semibold))
                                             .foregroundStyle(.primary)
                                             .lineLimit(1)
-                                            .minimumScaleFactor(0.7)
                                         Spacer(minLength: 8)
                                         Text(ActivityMoneyFormat.string(usd: item.amount, bitcoin: bitcoinPriceService))
-                                            .font(.subheadline.weight(.medium))
+                                            .font(.body.weight(.medium))
                                             .foregroundStyle(.primary)
                                             .lineLimit(1)
-                                            .minimumScaleFactor(0.7)
                                             .layoutPriority(1)
                                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                                             .font(.caption.weight(.semibold))
@@ -913,20 +914,18 @@ struct WalletCategorySection: View {
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(group.title)
-                            .font(.subheadline.weight(.medium))
+                            .font(.body.weight(.medium))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.7)
                         Text("\(group.entries.count) transactions")
-                            .font(.caption2)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     Text(ActivityMoneyFormat.string(usd: group.amount, bitcoin: bitcoinPriceService))
-                        .font(.subheadline.weight(.medium))
+                        .font(.body.weight(.medium))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.7)
                         .layoutPriority(1)
                     Image(systemName: isPayeeExpanded ? "chevron.down" : "chevron.right")
                         .font(.caption.weight(.semibold))
@@ -1333,25 +1332,22 @@ struct CategoryTransactionRow: View {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(entry.title ?? "Untitled")
-                        .font(.subheadline.weight(.medium))
+                        .font(.body.weight(.medium))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.7)
                     if let subtitleText {
                         Text(subtitleText)
-                            .font(.caption2)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.7)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 Text(ActivityMoneyFormat.string(usd: abs(usdAmount), bitcoin: bitcoinPriceService))
-                    .font(.subheadline.weight(.semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(amountColor)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.7)
                     .layoutPriority(1)
             }
             .contentShape(Rectangle())

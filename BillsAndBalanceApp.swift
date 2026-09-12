@@ -61,6 +61,15 @@ struct BillsAndBalanceApp: App {
     @StateObject private var appLockManager = AppLockManager.shared
     @State private var showSplash = true
 
+    init() {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-UITestingSampleData") {
+            UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+            UserDefaults.standard.set(true, forKey: "shouldLoadSampleData")
+        }
+        #endif
+    }
+
     var body: some Scene {
         WindowGroup {
             ZStack {
@@ -108,12 +117,13 @@ struct BillsAndBalanceApp: App {
                 _ = ShakeDetection.install
                 let started = ContinuousClock.now
                 await bootstrap.prepareIfNeeded()
-                let minimum: Duration = .milliseconds(900)
+                let screenshotting = ProcessInfo.processInfo.arguments.contains("-UITestingSampleData")
+                let minimum: Duration = screenshotting ? .zero : .milliseconds(900)
                 let elapsed = started.duration(to: .now)
                 if elapsed < minimum {
                     try? await Task.sleep(for: minimum - elapsed)
                 }
-                withAnimation(.easeOut(duration: 0.32)) {
+                withAnimation(screenshotting ? nil : .easeOut(duration: 0.32)) {
                     showSplash = false
                 }
             }

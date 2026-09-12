@@ -197,8 +197,8 @@ final class ReportsViewModel: ObservableObject {
     @Published var lastUsedWalletPeriod: WalletPeriod = .month
     @Published var creditCardViewMode: CreditCardViewMode = .transactions
     @Published var categorySortDescending: Bool = true
-    /// Number of months to include in USD vs BTC report (12–96).
-    @Published var usdBtcMonthsBack: Int = 48
+    /// Number of months to include in USD vs BTC report (1Y / 3Y / 5Y / Max).
+    @Published var usdBtcMonthsBack: Int = BillBtcBacktest.LookbackPreset.default.rawValue
     @Published var usdBtcExcludedBillNames: Set<String> = []
     @Published var usdBtcAvailableBillNames: [String] = []
     @Published var usdBtcBillOrder: [String] = []
@@ -234,7 +234,11 @@ final class ReportsViewModel: ObservableObject {
         }
         let storedMonths = UserDefaults.standard.integer(forKey: Self.usdBtcMonthsBackKey)
         if storedMonths >= 12 {
-            usdBtcMonthsBack = BillBtcBacktest.clampLookbackMonths(storedMonths)
+            let snapped = BillBtcBacktest.LookbackPreset.fromStoredMonths(storedMonths).rawValue
+            usdBtcMonthsBack = snapped
+            if snapped != storedMonths {
+                UserDefaults.standard.set(snapped, forKey: Self.usdBtcMonthsBackKey)
+            }
         }
         if let storedBills = UserDefaults.standard.array(forKey: Self.usdBtcExcludedBillsKey) as? [String] {
             usdBtcExcludedBillNames = Set(storedBills)
@@ -261,12 +265,11 @@ final class ReportsViewModel: ObservableObject {
     }
 
     var usdBtcLookbackTitle: String {
-        let years = max(usdBtcMonthsBack / 12, 1)
-        return years == 1 ? "1 year" : "\(years) years"
+        BillBtcBacktest.LookbackPreset.fromStoredMonths(usdBtcMonthsBack).title
     }
 
     func setUsdBtcMonthsBack(_ months: Int) {
-        let resolved = BillBtcBacktest.clampLookbackMonths(months)
+        let resolved = BillBtcBacktest.LookbackPreset.fromStoredMonths(months).rawValue
         guard resolved != usdBtcMonthsBack else { return }
         usdBtcMonthsBack = resolved
         UserDefaults.standard.set(resolved, forKey: Self.usdBtcMonthsBackKey)

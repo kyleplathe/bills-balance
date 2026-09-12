@@ -108,8 +108,10 @@ struct ManageAccountsView: View {
             .id(accountToEdit?.objectID)
         }
         .sheet(item: $exportShareItem) { item in
-            ActivityShareSheet(activityItems: [item.url]) {
-                try? FileManager.default.removeItem(at: item.url)
+            ActivityShareSheet(activityItems: item.activityItems) {
+                if let url = item.url {
+                    try? FileManager.default.removeItem(at: url)
+                }
                 exportShareItem = nil
             }
         }

@@ -7,10 +7,28 @@
 
 import SwiftUI
 
+enum ScreenshotLaunch {
+    static var scene: String? {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["SCREENSHOT_SCENE"]
+        #else
+        nil
+        #endif
+    }
+
+    static var initialTab: Int {
+        switch scene {
+        case "balance", "activity", "account": return 1
+        case "calendar": return 2
+        default: return 0
+        }
+    }
+}
+
 struct MainTabView: View {
     @EnvironmentObject private var appLockManager: AppLockManager
     @Environment(\.scenePhase) private var scenePhase
-    @State private var selectedTab: Int = 0
+    @State private var selectedTab: Int = ScreenshotLaunch.initialTab
     @State private var selectedMonth: Date? = Date()
 
     var body: some View {

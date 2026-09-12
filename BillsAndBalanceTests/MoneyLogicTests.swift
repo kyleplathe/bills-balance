@@ -1081,6 +1081,45 @@ final class LedgerTransferTests: XCTestCase {
         XCTAssertEqual(LedgerTransfer.debitTitle(toAccountName: "Chase", toIsCreditAccount: true), "Payment to Chase")
         XCTAssertEqual(LedgerTransfer.creditTitle(fromAccountName: "Chase", fromIsCreditAccount: true), "Payment from Chase")
     }
+
+    func testMixedListTitlesNameThisAccountAndMatchSign() {
+        XCTAssertEqual(
+            LedgerTransfer.mixedListTitle(
+                accountName: "Venmo",
+                isCredit: false,
+                storedTitle: "Transfer to Bank",
+                accountIsCreditAccount: false
+            ),
+            "Transfer from Venmo"
+        )
+        XCTAssertEqual(
+            LedgerTransfer.mixedListTitle(
+                accountName: "Bank",
+                isCredit: true,
+                storedTitle: "Transfer from Venmo",
+                accountIsCreditAccount: false
+            ),
+            "Transfer to Bank"
+        )
+        XCTAssertEqual(
+            LedgerTransfer.mixedListTitle(
+                accountName: "Checking",
+                isCredit: false,
+                storedTitle: "Payment to Chase",
+                accountIsCreditAccount: false
+            ),
+            "Payment from Checking"
+        )
+        XCTAssertEqual(
+            LedgerTransfer.mixedListTitle(
+                accountName: "Chase",
+                isCredit: true,
+                storedTitle: "Transfer from Checking",
+                accountIsCreditAccount: true
+            ),
+            "Payment to Chase"
+        )
+    }
 }
 
 final class BillBtcBacktestTests: XCTestCase {
@@ -1176,6 +1215,46 @@ final class BillBtcBacktestTests: XCTestCase {
         XCTAssertEqual(result?.isEstimate, false)
         XCTAssertEqual(result?.btc, paidBtc)
         XCTAssertEqual(result?.usd, 100)
+    }
+
+    func testMonthAmountUsesActualUsdWhenDifferentFromTemplate() {
+        let template = BillBtcBacktest.Template(name: "Mortgage", amount: 2000, dueDay: 1, seriesId: nil, category: nil)
+        let now = calendar.date(from: DateComponents(year: 2026, month: 9, day: 1))!
+        let paidBtc = Decimal(1800) / Decimal(80_000)
+        let actual = BillBtcBacktest.LedgerCandidate(
+            date: now,
+            title: "Mortgage",
+            usd: 1800,
+            btc: paidBtc,
+            price: 80_000,
+            billName: "Mortgage",
+            billSeriesId: nil,
+            category: nil
+        )
+        let matched = BillBtcBacktest.monthAmount(
+            template: template,
+            dueDate: now,
+            actual: actual,
+            historicalPrice: 80_000,
+            currentPrice: 80_000,
+            now: now,
+            calendar: calendar
+        )
+        let backfilled = BillBtcBacktest.monthAmount(
+            template: template,
+            dueDate: now,
+            actual: nil,
+            historicalPrice: 80_000,
+            currentPrice: 80_000,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertEqual(matched?.isEstimate, false)
+        XCTAssertEqual(matched?.usd, 1800)
+        XCTAssertEqual(matched?.btc, paidBtc)
+        XCTAssertEqual(backfilled?.isEstimate, true)
+        XCTAssertEqual(backfilled?.usd, 2000)
+        XCTAssertEqual(backfilled?.btc, Decimal(2000) / Decimal(80_000))
     }
 
     func testMarkPaidFillsUsdAndBtc() {
@@ -1578,8 +1657,8 @@ final class BillBtcBacktestTests: XCTestCase {
         XCTAssertGreaterThan(items.first?.percentLess ?? 0, Decimal(string: "0.5")!)
         XCTAssertEqual(items.first?.actualMonths, 0)
         XCTAssertEqual(BillBtcBacktest.actualDataCaption(actualMonths: 20), "20 mo actual")
-        XCTAssertEqual(BillBtcBacktest.backtestCaption(monthCount: 42), "Backtest 3+ years")
-        XCTAssertEqual(BillBtcBacktest.backtestCaption(monthCount: 36), "Backtest 3+ years")
+        XCTAssertEqual(BillBtcBacktest.backtestCaption(monthCount: 42), "Backtest 3 years")
+        XCTAssertEqual(BillBtcBacktest.backtestCaption(monthCount: 36), "Backtest 3 years")
         XCTAssertEqual(BillBtcBacktest.backtestCaption(monthCount: 12), "Backtest 1 year")
         XCTAssertEqual(BillBtcBacktest.backtestCaption(monthCount: 6), "Backtest")
         let spanStart = calendar.date(from: DateComponents(year: 2023, month: 1, day: 1))!
@@ -1595,6 +1674,16 @@ final class BillBtcBacktestTests: XCTestCase {
         XCTAssertEqual(snapshot?.thenLabel, String(Calendar.current.component(.year, from: jan)))
         XCTAssertGreaterThan(snapshot?.thenSats ?? 0, snapshot?.nowSats ?? 0)
         XCTAssertEqual(BillBtcBacktest.satsCaption(1_007_783), "1.0M sats")
+        let bitcoinFromSats = BillBtcBacktest.bitcoinCaption(fromSats: 4_100_000)
+        XCTAssertEqual(bitcoinFromSats, BillBtcBacktest.compactBitcoin(Decimal(string: "0.041")!))
+        XCTAssertTrue(bitcoinFromSats.hasSuffix(" BTC"))
+        XCTAssertFalse(bitcoinFromSats.localizedCaseInsensitiveContains("sats"))
+        XCTAssertEqual(BillBtcBacktest.compactBitcoinAxis(4_100_000), String(bitcoinFromSats.dropLast(4)))
+        let footerDate = calendar.date(from: DateComponents(year: 2026, month: 9, day: 11))!
+        XCTAssertEqual(
+            BillBtcBacktest.shareChartFooter(on: footerDate, locale: Locale(identifier: "en_US"), timeZone: calendar.timeZone),
+            "Bitcoin Deflation Chart · Sep 11, 2026"
+        )
     }
 
     func testLookbackClampIncludesEightYears() {
@@ -1602,6 +1691,109 @@ final class BillBtcBacktestTests: XCTestCase {
         XCTAssertEqual(BillBtcBacktest.clampLookbackMonths(5), 12)
         XCTAssertEqual(BillBtcBacktest.clampLookbackMonths(48), 48)
         XCTAssertEqual(BillBtcBacktest.clampLookbackMonths(200), 96)
+    }
+
+    func testLookbackPresetsSnapStoredMonths() {
+        XCTAssertEqual(BillBtcBacktest.LookbackPreset.default, .fiveYears)
+        XCTAssertEqual(BillBtcBacktest.LookbackPreset.allCases.map(\.title), ["1Y", "3Y", "5Y", "Max"])
+        XCTAssertEqual(BillBtcBacktest.LookbackPreset.fromStoredMonths(12), .oneYear)
+        XCTAssertEqual(BillBtcBacktest.LookbackPreset.fromStoredMonths(36), .threeYears)
+        XCTAssertEqual(BillBtcBacktest.LookbackPreset.fromStoredMonths(60), .fiveYears)
+        XCTAssertEqual(BillBtcBacktest.LookbackPreset.fromStoredMonths(96), .max)
+        XCTAssertEqual(BillBtcBacktest.LookbackPreset.fromStoredMonths(48), .fiveYears)
+        XCTAssertEqual(BillBtcBacktest.LookbackPreset.fromStoredMonths(24), .threeYears)
+        XCTAssertEqual(BillBtcBacktest.LookbackPreset.fromStoredMonths(72), .fiveYears)
+        XCTAssertEqual(BillBtcBacktest.LookbackPreset.fromStoredMonths(84), .max)
+        XCTAssertEqual(BillBtcBacktest.LookbackPreset.fromStoredMonths(5), .fiveYears)
+        XCTAssertEqual(BillBtcBacktest.LookbackPreset.fromStoredMonths(200), .max)
+    }
+
+    func testHistoricalDisclaimerCopy() {
+        XCTAssertEqual(
+            BillBtcBacktest.historicalDisclaimer,
+            "Not financial advice. Not a wallet."
+        )
+        XCTAssertFalse(BillBtcBacktest.historicalDisclaimer.localizedCaseInsensitiveContains("stack sats"))
+        XCTAssertEqual(
+            BillBtcBacktest.shareDisclaimer,
+            "Paid via Strike. Not financial advice. Not a wallet."
+        )
+    }
+
+    func testTwoLineQuoteBalancesLengthAndKeepsShortQuotes() {
+        let long = BillBtcBacktest.twoLineQuote(
+            "The root problem with conventional currency is all the trust that's required to make it work."
+        )
+        let lines = long.split(separator: "\n", omittingEmptySubsequences: false)
+        XCTAssertEqual(lines.count, 2)
+        XCTAssertLessThan(abs(lines[0].count - lines[1].count), 16)
+        XCTAssertEqual(BillBtcBacktest.twoLineQuote("Don't trust, verify."), "Don't trust, verify.")
+    }
+
+    func testLookbackDataStatusCopy() {
+        XCTAssertEqual(
+            BillBtcBacktest.lookbackDataStatus(actualMonths: 8),
+            "Using your actual payments + historical Bitcoin prices"
+        )
+        XCTAssertEqual(
+            BillBtcBacktest.lookbackDataStatus(actualMonths: 0),
+            "Backtested with your current averages + historical prices"
+        )
+    }
+
+    func testWindowedLookbackPresetsUpdateThenNow() {
+        let start = calendar.date(from: DateComponents(year: 2018, month: 1, day: 1))!
+        let template = BillBtcBacktest.Template(name: "Rent", amount: 100, dueDay: 1, seriesId: nil, category: nil)
+        let months: [UsdBtcMonthPoint] = (0..<96).compactMap { offset in
+            let date = calendar.date(byAdding: .month, value: offset, to: start)!
+            guard let amount = BillBtcBacktest.monthAmount(
+                template: template,
+                dueDate: date,
+                actual: nil,
+                historicalPrice: BillBtcBacktest.fallbackBtcUsd(on: date, calendar: calendar),
+                currentPrice: 100_000,
+                now: calendar.date(from: DateComponents(year: 2026, month: 9, day: 1))!,
+                calendar: calendar
+            ) else { return nil }
+            return UsdBtcMonthPoint(
+                month: date,
+                usdExpenses: amount.usd,
+                btcAtTime: amount.btc,
+                btcValueNow: amount.usd,
+                btcAmount: amount.btc,
+                avgBtcPrice: amount.price,
+                isEstimate: true
+            )
+        }
+        let full = UsdBtcReportData(
+            months: months,
+            bills: [UsdBtcBillSeries(name: "Rent", months: months, totalUsd: 100, totalBtcAtTime: 1, totalBtcValueNow: 100)],
+            totalUsd: 100,
+            totalBtcAtTime: 1,
+            totalBtcValueNow: 100,
+            monthsBack: months.count,
+            trackedBillNames: ["Rent"],
+            estimatedMonths: months.count,
+            actualMonths: 0
+        )
+        let oneYear = BillBtcBacktest.windowed(full, monthsBack: BillBtcBacktest.LookbackPreset.oneYear.rawValue)
+        let fiveYear = BillBtcBacktest.windowed(full, monthsBack: BillBtcBacktest.LookbackPreset.fiveYears.rawValue)
+        let max = BillBtcBacktest.windowed(full, monthsBack: BillBtcBacktest.LookbackPreset.max.rawValue)
+        XCTAssertEqual(oneYear.months.count, 12)
+        XCTAssertEqual(fiveYear.months.count, 60)
+        XCTAssertEqual(max.months.count, 96)
+        let oneThen = BillBtcBacktest.thenNow(from: oneYear)
+        let fiveThen = BillBtcBacktest.thenNow(from: fiveYear)
+        let maxThen = BillBtcBacktest.thenNow(from: max)
+        XCTAssertNotEqual(oneThen?.thenSats ?? 0, fiveThen?.thenSats ?? 0)
+        XCTAssertNotEqual(fiveThen?.thenSats ?? 0, maxThen?.thenSats ?? 0)
+        let oneChange = BillBtcBacktest.storyChange(from: oneYear)
+        let fiveChange = BillBtcBacktest.storyChange(from: fiveYear)
+        XCTAssertNotEqual(
+            BillBtcBacktest.percentPoints(oneChange?.percentLess ?? 0),
+            BillBtcBacktest.percentPoints(fiveChange?.percentLess ?? 0)
+        )
+        XCTAssertEqual(BillBtcBacktest.lookbackDataStatus(actualMonths: max.actualMonths), "Backtested with your current averages + historical prices")
     }
 
     func testEstimateHoldsConstantDollarBill() {

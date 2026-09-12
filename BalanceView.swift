@@ -84,7 +84,7 @@ struct BalanceView: View {
     @EnvironmentObject private var paycheckViewModel: PaycheckViewModel
     @EnvironmentObject private var appLockManager: AppLockManager
     @State private var showingManageAccounts = false
-    @State private var showingReports = false
+    @State private var showingReports = ScreenshotLaunch.scene == "activity"
     @State private var showingAddAccount = false
     @State private var showingAccountDetail: Bool = false
     @State private var selectedAccount: Account?
@@ -186,6 +186,16 @@ struct BalanceView: View {
         }
         .onAppear {
             accountViewModel.fetchAccounts()
+            #if DEBUG
+            if ScreenshotLaunch.scene == "account" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    if let account = visibleAccounts.first {
+                        selectedAccount = account
+                        showingAccountDetail = true
+                    }
+                }
+            }
+            #endif
         }
         .task {
             if reportsViewModel.hasActiveBitcoinDigitalWallet {

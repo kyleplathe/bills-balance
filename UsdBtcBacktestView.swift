@@ -3,8 +3,7 @@ import SwiftUI
 struct UsdBtcBacktestView: View {
     @EnvironmentObject private var reportsViewModel: ReportsViewModel
     @State private var shareItem: ShareFileItem?
-    @State private var monthsBack: Double = 48
-    @State private var isDraggingLookback = false
+    @State private var lookback: BillBtcBacktest.LookbackPreset = .fiveYears
 
     var body: some View {
         ScrollView {
@@ -21,7 +20,6 @@ struct UsdBtcBacktestView: View {
             }
             .padding(16)
         }
-        .scrollDisabled(isDraggingLookback)
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .navigationTitle("Bitcoin Deflation")
         .navigationBarTitleDisplayMode(.inline)
@@ -34,14 +32,16 @@ struct UsdBtcBacktestView: View {
             }
         }
         .sheet(item: $shareItem) { item in
-            ActivityShareSheet(activityItems: [item.url]) {
-                try? FileManager.default.removeItem(at: item.url)
+            ActivityShareSheet(activityItems: item.activityItems) {
+                if let url = item.url {
+                    try? FileManager.default.removeItem(at: url)
+                }
                 shareItem = nil
             }
             .id(item.id)
         }
         .task {
-            monthsBack = Double(BillBtcBacktest.clampLookbackMonths(reportsViewModel.usdBtcMonthsBack))
+            lookback = BillBtcBacktest.LookbackPreset.fromStoredMonths(reportsViewModel.usdBtcMonthsBack)
             await reportsViewModel.loadUsdBtcReport()
         }
     }
@@ -50,7 +50,7 @@ struct UsdBtcBacktestView: View {
         guard let full = reportsViewModel.usdBtcReport else { return nil }
         return BillBtcBacktest.windowed(
             reportsViewModel.filteredUsdBtcReport(full),
-            monthsBack: Int(monthsBack)
+            monthsBack: lookback.rawValue
         )
     }
 
@@ -68,14 +68,19 @@ struct UsdBtcBacktestView: View {
                         reportsViewModel.setUsdBtcBillOrder(names)
                     }
                 )
-                .id("\(Int(monthsBack))-\(report.bills.map(\.name).joined(separator: ","))")
+                .id("\(lookback.rawValue)-\(report.bills.map(\.name).joined(separator: ","))")
             } else {
                 Text("Turn on a bill to see Bitcoin over time.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-            lookbackSlider
+            lookbackControl(report: report)
             billChips
+            Text(BillBtcBacktest.historicalDisclaimer)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 2)
         }
         .padding(18)
         .background(cardBackground)
@@ -91,6 +96,7 @@ struct UsdBtcBacktestView: View {
 
             if let snapshot = BillBtcBacktest.thenNow(from: report) {
                 UsdBtcThenNowComparison(snapshot: snapshot, style: .inApp)
+                    .id("\(snapshot.thenLabel)-\(snapshot.thenSats)-\(snapshot.nowSats)")
             } else if let averages {
                 Text(BillBtcBacktest.compactUsd((averages.monthlyUsd as NSDecimalNumber).doubleValue) + "/mo avg")
                     .font(.subheadline.weight(.medium))
@@ -104,29 +110,29 @@ struct UsdBtcBacktestView: View {
         BillBtcBacktest.orderedBills(bills, by: reportsViewModel.orderedUsdBtcNames(bills.map(\.name)))
     }
 
-    private var lookbackSlider: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Lookback")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Text(lookbackLabel)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+    private var lookbackBinding: Binding<BillBtcBacktest.LookbackPreset> {
+        Binding(
+            get: { lookback },
+            set: { newValue in
+                lookback = newValue
+                reportsViewModel.setUsdBtcMonthsBack(newValue.rawValue)
             }
-            Slider(
-                value: $monthsBack,
-                in: Double(BillBtcBacktest.minLookbackMonths)...Double(BillBtcBacktest.maxSliderLookbackMonths),
-                step: 12,
-                onEditingChanged: { editing in
-                    isDraggingLookback = editing
-                    if !editing {
-                        reportsViewModel.setUsdBtcMonthsBack(Int(monthsBack))
-                    }
+        )
+    }
+
+    private func lookbackControl(report: UsdBtcReportData?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Lookback", selection: lookbackBinding) {
+                ForEach(BillBtcBacktest.LookbackPreset.allCases) { preset in
+                    Text(preset.title).tag(preset)
                 }
-            )
-            .tint(Color(red: 0.969, green: 0.576, blue: 0.102))
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .accessibilityLabel("Lookback")
+            Text(BillBtcBacktest.lookbackDataStatus(actualMonths: report?.actualMonths ?? 0))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -179,12 +185,6 @@ struct UsdBtcBacktestView: View {
         }
     }
 
-    private var lookbackLabel: String {
-        let years = Int(monthsBack) / 12
-        if years <= 1 { return "1 year" }
-        return "\(years) years"
-    }
-
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Mark a dollar bill paid from your Bitcoin wallet to see how much less Bitcoin it takes over time.")
@@ -218,13 +218,13 @@ struct UsdBtcBacktestView: View {
 
     private func share(_ report: UsdBtcReportData) {
         let names = reportsViewModel.orderedUsdBtcNames(report.trackedBillNames)
-        guard let url = UsdBtcShareCard.pngURL(
+        guard let image = UsdBtcShareCard.pngImage(
             title: BillBtcBacktest.shareTitle(billNames: names),
             bills: orderedBills(report.bills),
             monthsBack: report.monthsBack,
             colorNames: names
         ) else { return }
         HapticManager.shared.buttonTapped()
-        shareItem = ShareFileItem(url: url)
+        shareItem = ShareFileItem(image: image)
     }
 }

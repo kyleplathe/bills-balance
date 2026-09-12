@@ -41,9 +41,8 @@ struct ReportsView: View {
 
     var body: some View {
         periodPager
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .background(Color(.systemGroupedBackground))
         .toolbar(.hidden, for: .tabBar)
-        .activityFloatingTabBarHidden()
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar {
@@ -58,7 +57,7 @@ struct ReportsView: View {
                 .accessibilityLabel("Close")
             }
             ToolbarItem(placement: .principal) {
-                periodPicker
+                segmentedPeriodPicker
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -160,26 +159,23 @@ struct ReportsView: View {
     }
 
     private var periodPager: some View {
-        GeometryReader { geo in
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: 0) {
-                    ForEach(pageAnchors, id: \.self) { date in
-                        activityPage(
-                            snapshot: snapshot(for: date),
-                            fallbackTitle: reportsViewModel.periodTitle(for: walletPeriod, date: date)
-                        )
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .clipped()
-                        .id(date)
-                    }
+        ScrollView(.horizontal) {
+            LazyHStack(spacing: 0) {
+                ForEach(pageAnchors, id: \.self) { date in
+                    activityPage(
+                        snapshot: snapshot(for: date),
+                        fallbackTitle: reportsViewModel.periodTitle(for: walletPeriod, date: date)
+                    )
+                    .containerRelativeFrame(.horizontal)
+                    .id(date)
                 }
-                .scrollTargetLayout()
             }
-            .scrollTargetBehavior(.paging)
-            .scrollPosition(id: $selectedAnchor)
-            .scrollIndicators(.hidden)
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .scrollTargetLayout()
         }
+        .scrollTargetBehavior(.paging)
+        .scrollPosition(id: $selectedAnchor)
+        .scrollIndicators(.hidden)
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         .accessibilityHint("Swipe left or right to change periods")
     }
 
@@ -278,8 +274,7 @@ struct ReportsView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 24)
+            .padding(.bottom, 16)
         }
         .scrollContentBackground(.hidden)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -348,16 +343,6 @@ struct ReportsView: View {
         }
     }
 
-    @ViewBuilder
-    private var periodPicker: some View {
-        if #available(iOS 26.0, *) {
-            segmentedPeriodPicker
-                .glassEffect(.regular.interactive())
-        } else {
-            segmentedPeriodPicker
-        }
-    }
-
     private var segmentedPeriodPicker: some View {
         Picker("Period", selection: walletPeriodBinding) {
             ForEach(ReportsViewModel.WalletPeriod.allCases, id: \.self) { period in
@@ -366,7 +351,6 @@ struct ReportsView: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .controlSize(.small)
         .frame(maxWidth: 240)
         .accessibilityElement(children: .contain)
         .simultaneousGesture(
@@ -454,17 +438,6 @@ struct ReportsView: View {
             reportsViewModel.loadMonthlyReport()
         case .year:
             reportsViewModel.loadYearWrapReport()
-        }
-    }
-}
-
-private extension View {
-    @ViewBuilder
-    func activityFloatingTabBarHidden() -> some View {
-        if #available(iOS 18.0, *) {
-            self.toolbarVisibility(.hidden, for: .tabBar)
-        } else {
-            self
         }
     }
 }

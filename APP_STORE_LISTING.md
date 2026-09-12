@@ -1,6 +1,8 @@
 # App Store listing
 
-Use this in App Store Connect for version 1.0. Host `PRIVACY.md` publicly (this GitHub file is the in-app / Connect URL until you put it on a simple webpage).
+Use this in App Store Connect. Host `PRIVACY.md` publicly (this GitHub file is the in-app / Connect URL until you put it on a simple webpage).
+
+**Current binary:** 1.0.1 (9). First listing was 1.0 (8).
 
 ## URLs
 
@@ -38,6 +40,10 @@ bills,checkbook,ledger,pay,recurring,calendar,accounts,balance,local,reminders
 
 First release. A simple checkbook for bills, accounts, a calendar, and optional Face ID — all on your device.
 
+## What’s New (1.0.1)
+
+Activity reports use the system Week / Month / Year picker. Recent transfers show the right direction. Bitcoin Deflation share cards can be saved to Photos, with a dated stamp and quote.
+
 ## App Privacy nutrition labels
 
 Data collected by the developer: **none**.
@@ -52,13 +58,13 @@ Tracking: **No**.
 
 This app has no login. On first launch, choose **Try Sample Data** to populate demo checking/savings accounts and bills.
 
-Data is stored only on device (Core Data). CloudKit and any cloud account are not enabled.
+Data stays on device (Core Data). There is no cloud account and CloudKit is not enabled.
+
+This is a personal checkbook, not a bank, broker, or cryptocurrency wallet. It does not store keys, send or receive Bitcoin, or facilitate crypto transactions. Optional BTC is a local balance the user types in after adding a Digital Wallet set to BTC. Bitcoin Deflation is a historical comparison using public CoinGecko prices. It is hidden until that wallet exists.
 
 Optional Face ID / device passcode lock is in Manage Accounts → Privacy.
 
 Notifications are requested only after the Smart Notifications onboarding page (Start Empty / Try Sample Data), from Manage Bills → Enable Bill Reminders, or when the user first adds a bill. Skip does not show the permission dialog.
-
-Bitcoin features stay hidden until the reviewer adds a Digital Wallet account and chooses BTC. They are not part of the default experience.
 
 ## Screenshots
 
@@ -66,9 +72,10 @@ Capture with **Try Sample Data** in light and/or dark mode. Do not include other
 
 Required sizes for this binary (iPhone + iPad):
 
-1. iPhone 6.7" (e.g. iPhone 16 Pro Max)
-2. iPhone 6.1" (e.g. iPhone 16)
-3. iPad 13" (e.g. iPad Pro 13-inch)
+1. **iPhone 6.9"** — 1320×2868 (iPhone 16 Pro Max / 17 Pro Max / 18 Pro Max). 1290×2796 and 1260×2736 are also accepted.
+2. **iPad 13"** — 2064×2752 (iPad Pro 13-inch). 2048×2732 is also accepted.
+
+Apple scales the 6.9" set to smaller iPhones. Extra 6.1" / 6.7" sets are optional.
 
 Suggested frames:
 

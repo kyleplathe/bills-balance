@@ -236,7 +236,7 @@ enum BillBtcBacktest {
         return usd / btcUsdPrice
     }
 
-    /// Same dollar bill at that month’s BTC-USD price. Uses stored sats when they look real.
+    /// Matched months prefer the real payment; unmatched months use the current bill average × that month’s BTC-USD price.
     static func monthAmount(
         template: Template,
         dueDate: Date,
@@ -247,8 +247,11 @@ enum BillBtcBacktest {
         calendar: Calendar = .current,
         lookbackStart _: Date? = nil
     ) -> MonthAmount? {
-        let billUsd = template.amount.magnitude
         _ = now
+        let billUsd: Decimal = {
+            if let actual, actual.usd > 0 { return actual.usd }
+            return template.amount.magnitude
+        }()
         guard billUsd > 0 else { return nil }
 
         let price: Decimal? = {
@@ -322,6 +325,37 @@ enum BillBtcBacktest {
     static let minLookbackMonths = 12
     static let maxSliderLookbackMonths = 96
     static let minMatchedMonths = 6
+
+    enum LookbackPreset: Int, CaseIterable, Identifiable {
+        case oneYear = 12
+        case threeYears = 36
+        case fiveYears = 60
+        case max = 96
+
+        var id: Int { rawValue }
+
+        var title: String {
+            switch self {
+            case .oneYear: return "1Y"
+            case .threeYears: return "3Y"
+            case .fiveYears: return "5Y"
+            case .max: return "Max"
+            }
+        }
+
+        static let `default` = LookbackPreset.fiveYears
+
+        /// Snaps leftover slider values to the nearest preset. Ties prefer the longer window (old 48-month default → 5Y).
+        static func fromStoredMonths(_ months: Int) -> LookbackPreset {
+            guard months >= minLookbackMonths else { return .fiveYears }
+            return allCases.min { a, b in
+                let da = abs(a.rawValue - months)
+                let db = abs(b.rawValue - months)
+                if da != db { return da < db }
+                return a.rawValue > b.rawValue
+            } ?? .fiveYears
+        }
+    }
 
     static func clampLookbackMonths(_ months: Int) -> Int {
         min(maxSliderLookbackMonths, max(minLookbackMonths, months))
@@ -443,6 +477,18 @@ enum BillBtcBacktest {
         "\(compactSats(sats)) sats"
     }
 
+    static func bitcoinCaption(fromSats sats: Double) -> String {
+        compactBitcoin(Decimal(sats) / 100_000_000)
+    }
+
+    static func compactBitcoinAxis(_ sats: Double) -> String {
+        let caption = bitcoinCaption(fromSats: sats)
+        if caption.hasSuffix(" BTC") {
+            return String(caption.dropLast(4))
+        }
+        return caption
+    }
+
     struct ThenNowSnapshot: Equatable {
         var thenLabel: String
         var thenSats: Double
@@ -514,6 +560,13 @@ enum BillBtcBacktest {
         return "\(actualMonths) mo actual"
     }
 
+    static func lookbackDataStatus(actualMonths: Int) -> String {
+        if actualMonths > 0 {
+            return "Using your actual payments + historical Bitcoin prices"
+        }
+        return "Backtested with your current averages + historical prices"
+    }
+
     static func backtestMonthSpan(from dates: [Date], calendar: Calendar = .current) -> Int {
         guard let first = dates.min(), let last = dates.max() else { return 0 }
         let months = calendar.dateComponents([.month], from: first, to: last).month ?? 0
@@ -524,8 +577,23 @@ enum BillBtcBacktest {
         let years = max(monthCount, 0) / 12
         if years <= 0 { return "Backtest" }
         if years == 1 { return "Backtest 1 year" }
-        return "Backtest \(years)+ years"
+        return "Backtest \(years) years"
     }
+
+    static func shareChartFooter(on date: Date = Date(), locale: Locale = .current, timeZone: TimeZone = .current) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = timeZone
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return "Bitcoin Deflation Chart · \(formatter.string(from: date))"
+    }
+
+    static let historicalDisclaimer =
+        "Not financial advice. Not a wallet."
+
+    static let shareDisclaimer =
+        "Paid via Strike. Not financial advice. Not a wallet."
 
     static func satsValue(fromBTC btc: Decimal) -> Double {
         (btc as NSDecimalNumber).doubleValue * 100_000_000
@@ -589,6 +657,30 @@ enum BillBtcBacktest {
 
     static func randomBitcoinQuote() -> BitcoinQuote {
         bitcoinQuotes.randomElement() ?? bitcoinQuotes[0]
+    }
+
+    /// Splits a quote near the midpoint so two centered lines stay close in length.
+    static func twoLineQuote(_ text: String) -> String {
+        let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard words.count >= 4 else { return text }
+        let total = words.joined(separator: " ").count
+        var bestIndex = max(1, words.count / 2)
+        var bestScore = Int.max
+        var running = 0
+        for i in 0..<(words.count - 1) {
+            running += words[i].count + (i == 0 ? 0 : 1)
+            var score = abs(running * 2 - total)
+            if words[i].hasSuffix(",") || words[i].hasSuffix(".") {
+                score -= 4
+            }
+            if score < bestScore {
+                bestScore = score
+                bestIndex = i + 1
+            }
+        }
+        let first = words[..<bestIndex].joined(separator: " ")
+        let second = words[bestIndex...].joined(separator: " ")
+        return "\(first)\n\(second)"
     }
 
     static func sharePunchline(billName: String) -> String {

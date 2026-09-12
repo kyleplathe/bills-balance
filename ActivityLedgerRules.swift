@@ -25,6 +25,20 @@ enum LedgerTransfer {
         fromIsCreditAccount ? "Payment from \(fromAccountName)" : "Transfer from \(fromAccountName)"
     }
 
+    /// Title for mixed-account lists (Balance Recent): this account, matching the signed amount.
+    static func mixedListTitle(
+        accountName: String,
+        isCredit: Bool,
+        storedTitle: String,
+        accountIsCreditAccount: Bool
+    ) -> String {
+        let usePayment = accountIsCreditAccount || storedTitle.localizedCaseInsensitiveContains("payment")
+        if isCredit {
+            return usePayment ? "Payment to \(accountName)" : "Transfer to \(accountName)"
+        }
+        return usePayment ? "Payment from \(accountName)" : "Transfer from \(accountName)"
+    }
+
     static func appendingPairId(to notes: String?, pairId: UUID) -> String {
         let marker = "\u{200B}\(markerKey)\(pairId.uuidString)\u{200B}"
         let existing = notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

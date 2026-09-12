@@ -134,6 +134,21 @@ struct TransactionRow: View {
         RelativeDateFormatter.string(from: date)
     }
 
+    private var displayTitle: String {
+        let stored = entry.title ?? "Transaction"
+        guard showsAccountInSubtitle,
+              LedgerTransfer.isTransfer(category: entry.category, title: stored),
+              let name = account.name, !name.isEmpty else {
+            return stored
+        }
+        return LedgerTransfer.mixedListTitle(
+            accountName: name,
+            isCredit: entry.isCredit,
+            storedTitle: stored,
+            accountIsCreditAccount: LedgerTransfer.isCreditAccount(account.type)
+        )
+    }
+
     private var subtitleText: String? {
         var parts: [String] = []
         if let date = entry.date {
@@ -180,7 +195,7 @@ struct TransactionRow: View {
             
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Text(entry.title ?? "Transaction")
+                    Text(displayTitle)
                         .font(.subheadline.weight(.medium))
                         .foregroundColor(.primary)
                         .lineLimit(1)

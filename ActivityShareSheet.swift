@@ -3,7 +3,24 @@ import UIKit
 
 struct ShareFileItem: Identifiable {
     let id = UUID()
-    let url: URL
+    let url: URL?
+    let image: UIImage?
+
+    var activityItems: [Any] {
+        if let image { return [image] }
+        if let url { return [url] }
+        return []
+    }
+
+    init(url: URL) {
+        self.url = url
+        self.image = nil
+    }
+
+    init(image: UIImage) {
+        self.url = nil
+        self.image = image
+    }
 }
 
 struct ActivityShareSheet: UIViewControllerRepresentable {

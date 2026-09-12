@@ -17,6 +17,10 @@ Export Backup writes a file you choose to save in Files, iCloud Drive, or anothe
 
 Optional Face ID or device passcode lock keeps the app closed until you unlock it. That preference stays on this device. We never see your biometrics.
 
+## Photos
+
+Sharing a Bitcoin Deflation chart can use Save Image. That writes the graphic to your photo library on this device. We do not read your photos.
+
 ## Notifications
 
 Bill reminders use Apple’s notification system on this device. Permission is optional.
