@@ -3,46 +3,63 @@
 //  BillsAndBalance
 //
 //  Stable color and icon for a category name. Charts, lists, and pickers
-//  all read from here so Housing stays orange whether it ranks first or eighth.
+//  all read from here so Food stays orange whether it ranks first or eighth.
 //
 
 import SwiftUI
 
 enum CategoryStyle {
+    /// High-chroma tones aligned to Apple Card category hues (Food→orange,
+    /// Travel→green, etc.) with matched lightness so weighted blends melt cleanly.
+    private enum Tone {
+        static let rose      = Color(red: 0.98, green: 0.28, blue: 0.42) // Healthcare (Apple red)
+        static let coral     = Color(red: 1.00, green: 0.42, blue: 0.28) // Housing
+        static let tangerine = Color(red: 1.00, green: 0.52, blue: 0.20) // Food (Apple orange)
+        static let amber     = Color(red: 1.00, green: 0.78, blue: 0.18) // Shopping (Apple yellow)
+        static let gold      = Color(red: 1.00, green: 0.68, blue: 0.16) // Utilities / tax
+        static let emerald   = Color(red: 0.18, green: 0.82, blue: 0.48) // Travel (Apple green)
+        static let jade      = Color(red: 0.12, green: 0.72, blue: 0.48) // Savings / Investments
+        static let electric  = Color(red: 0.28, green: 0.52, blue: 1.00) // Transportation (Apple blue)
+        static let azure     = Color(red: 0.30, green: 0.62, blue: 0.98) // Education
+        static let violet    = Color(red: 0.62, green: 0.36, blue: 0.98) // Services / Insurance (Apple purple)
+        static let orchid    = Color(red: 0.52, green: 0.40, blue: 0.96) // Debt / Business / Subscriptions
+        static let hotPink   = Color(red: 1.00, green: 0.32, blue: 0.58) // Entertainment (Apple pink)
+        static let blush     = Color(red: 0.98, green: 0.45, blue: 0.62) // Gifts
+        static let cyan      = Color(red: 0.18, green: 0.82, blue: 0.92) // custom fallback
+        static let teal      = Color(red: 0.12, green: 0.78, blue: 0.72) // Transfer / Personal Care
+        static let mint      = Color(red: 0.22, green: 0.86, blue: 0.58) // Income
+        static let muted     = Color(red: 0.52, green: 0.54, blue: 0.60) // Other
+    }
+
     private static let customPalette: [Color] = [
-        Color(red: 0.55, green: 0.36, blue: 0.96),
-        Color(red: 0.18, green: 0.66, blue: 0.72),
-        Color(red: 0.93, green: 0.45, blue: 0.21),
-        Color(red: 0.22, green: 0.47, blue: 0.93),
-        Color(red: 0.76, green: 0.28, blue: 0.48),
-        Color(red: 0.20, green: 0.62, blue: 0.38),
-        Color(red: 0.90, green: 0.72, blue: 0.18),
-        Color(red: 0.42, green: 0.45, blue: 0.58)
+        Tone.violet, Tone.cyan, Tone.tangerine, Tone.electric,
+        Tone.hotPink, Tone.emerald, Tone.amber, Tone.orchid
     ]
 
     static func color(for name: String) -> Color {
         switch canonical(name) {
-        case "Housing": return .orange
-        case "Utilities": return .yellow
-        case "Food & Dining": return .pink
-        case "Transportation": return .blue
-        case "Healthcare": return .red
-        case "Insurance": return .indigo
-        case "Entertainment": return .purple
-        case "Shopping": return Color(red: 1.0, green: 0.48, blue: 0.30)
-        case "Personal Care": return .mint
-        case "Education": return Color(red: 0.35, green: 0.62, blue: 0.90)
-        case "Subscriptions": return .cyan
-        case "Debt Payment": return .brown
-        case "Savings": return .green
-        case "Investments": return Color(red: 0.18, green: 0.70, blue: 0.48)
-        case "Gifts & Donations": return Color(red: 0.95, green: 0.40, blue: 0.62)
-        case "Travel": return Color(red: 0.32, green: 0.52, blue: 0.96)
-        case "Business": return Color(red: 0.48, green: 0.52, blue: 0.64)
-        case "Other", "Uncategorized", "": return .gray
-        case "Digital Wallet Fees": return .orange
-        case "Income": return .green
-        case "Transfer": return .teal
+        case "Housing": return Tone.coral
+        case "Utilities": return Tone.gold
+        case "Food & Dining": return Tone.tangerine
+        case "Transportation": return Tone.electric
+        case "Healthcare": return Tone.rose
+        case "Insurance": return Tone.violet
+        case "Entertainment": return Tone.hotPink
+        case "Shopping": return Tone.amber
+        case "Personal Care": return Tone.teal
+        case "Education": return Tone.azure
+        case "Subscriptions": return Tone.orchid
+        case "Debt Payment": return Tone.orchid
+        case "Savings": return Tone.jade
+        case "Investments": return Tone.jade
+        case "Gifts & Donations": return Tone.blush
+        case "Travel": return Tone.emerald
+        case "Business": return Tone.violet
+        case "Other", "Uncategorized", "": return Tone.muted
+        case "Digital Wallet Fees": return Tone.gold
+        case "Sales Tax": return Tone.gold
+        case "Income": return Tone.mint
+        case "Transfer": return Tone.teal
         default:
             return customPalette[stableIndex(for: name) % customPalette.count]
         }
@@ -68,6 +85,7 @@ enum CategoryStyle {
         case "Travel": return "airplane"
         case "Business": return "briefcase.fill"
         case "Digital Wallet Fees": return "bitcoinsign.circle.fill"
+        case "Sales Tax": return "percent"
         case "Income": return "arrow.down.circle.fill"
         case "Transfer": return "arrow.left.arrow.right"
         case "Other", "Uncategorized": return "questionmark.circle.fill"
@@ -76,20 +94,19 @@ enum CategoryStyle {
         }
     }
 
-    /// Apple Card-style spectrum: coral at the base, gold, magenta, then indigo at the top.
+    /// Fallback spectrum when a bar has no category breakdown — Apple Card hue order
+    /// (red → orange → yellow → green → blue → purple → pink) in the electric-sunset family.
     /// Long overlapping stops so colors melt instead of banding. Map this to the *chart*
     /// height (not each bar) so every bar shares the same color at the same Y.
     static let appleCardSpectrum = LinearGradient(
         stops: [
-            .init(color: Color(red: 0.98, green: 0.32, blue: 0.18), location: 0.00),
-            .init(color: Color(red: 1.00, green: 0.48, blue: 0.14), location: 0.10),
-            .init(color: Color(red: 1.00, green: 0.62, blue: 0.16), location: 0.22),
-            .init(color: Color(red: 1.00, green: 0.78, blue: 0.22), location: 0.36),
-            .init(color: Color(red: 1.00, green: 0.58, blue: 0.42), location: 0.48),
-            .init(color: Color(red: 0.98, green: 0.36, blue: 0.58), location: 0.60),
-            .init(color: Color(red: 0.86, green: 0.28, blue: 0.78), location: 0.72),
-            .init(color: Color(red: 0.62, green: 0.38, blue: 0.98), location: 0.84),
-            .init(color: Color(red: 0.38, green: 0.52, blue: 1.00), location: 1.00),
+            .init(color: Tone.rose,      location: 0.00),
+            .init(color: Tone.tangerine, location: 0.14),
+            .init(color: Tone.amber,     location: 0.28),
+            .init(color: Tone.emerald,   location: 0.44),
+            .init(color: Tone.electric,  location: 0.60),
+            .init(color: Tone.violet,    location: 0.76),
+            .init(color: Tone.hotPink,   location: 1.00),
         ],
         startPoint: .bottom,
         endPoint: .top
@@ -129,7 +146,7 @@ enum CategoryStyle {
                 return self.color(for: sorted[index + 1].name)
             }()
             // Longer soft overlap between category bands so adjacent colors melt together.
-            let blend = min(0.28, max(0.08, share * 0.55))
+            let blend = min(0.35, max(0.10, share * 0.70))
             let holdEnd = max(cursor, cursor + share - blend)
             let bandEnd = min(1, cursor + share)
             let mid = (holdEnd + bandEnd) / 2
@@ -139,8 +156,8 @@ enum CategoryStyle {
             }
             stops.append(Gradient.Stop(color: color, location: holdEnd))
             if blend > 0.001, index + 1 < sorted.count {
-                stops.append(Gradient.Stop(color: color.opacity(0.85), location: mid))
-                stops.append(Gradient.Stop(color: nextColor.opacity(0.9), location: bandEnd))
+                stops.append(Gradient.Stop(color: color.opacity(0.88), location: mid))
+                stops.append(Gradient.Stop(color: nextColor.opacity(0.92), location: bandEnd))
             } else {
                 stops.append(Gradient.Stop(color: color, location: bandEnd))
             }
@@ -160,7 +177,7 @@ enum CategoryStyle {
             "Insurance", "Entertainment", "Shopping", "Personal Care", "Education",
             "Subscriptions", "Debt Payment", "Savings", "Investments", "Gifts & Donations",
             "Travel", "Business", "Other", "Uncategorized", "Digital Wallet Fees",
-            "Income", "Transfer"
+            "Sales Tax", "Income", "Transfer"
         ]
         return known.first { $0.caseInsensitiveCompare(trimmed) == .orderedSame } ?? trimmed
     }
