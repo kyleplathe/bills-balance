@@ -46,6 +46,30 @@ extension LedgerEntry {
         return isCredit ? amount : amount * -1
     }
 
+    /// USD signed amount for Activity/reports. Settled rows never revalue against live BTC.
+    func reportUSDAmount(account: Account, liveBTCPrice: Decimal) -> Decimal {
+        if account.currencyCode == "BTC" {
+            let usd = usdAmountDecimal
+            if usd != 0 {
+                return isCredit ? usd : -usd
+            }
+            let btc = amountInCurrency(for: account)
+            guard btc != 0 else { return 0 }
+            let frozenPrice = btcPriceAtTransactionDecimal
+            if frozenPrice > 0 {
+                let usdVal = btc * frozenPrice
+                return isCredit ? usdVal : -usdVal
+            }
+            if isReconciledFlag {
+                return 0
+            }
+            let usdVal = btc * liveBTCPrice
+            return isCredit ? usdVal : -usdVal
+        }
+        let amt = usdAmountDecimal != 0 ? usdAmountDecimal : amountDecimal
+        return isCredit ? amt : -amt
+    }
+
     var isReconciledFlag: Bool {
         get { value(forKey: "isReconciled") as? Bool ?? false }
         set { setValue(newValue, forKey: "isReconciled") }

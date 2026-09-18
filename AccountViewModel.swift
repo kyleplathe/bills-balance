@@ -629,7 +629,8 @@ class AccountViewModel: ObservableObject {
                            title: String? = nil,
                            notes: String? = nil,
                            bitcoinPriceService: BitcoinPriceService? = nil,
-                           satsAmount: Decimal? = nil) -> LedgerEntry? {
+                           satsAmount: Decimal? = nil,
+                           feeAmount: Decimal? = nil) -> LedgerEntry? {
         // Don't create ledger entries for bills paid with credit cards unless they have an explicit account
         // Credit card payments don't affect account balances
         if let paymentCard = bill.paymentCard, !paymentCard.isEmpty, bill.account == nil {
@@ -655,8 +656,12 @@ class AccountViewModel: ObservableObject {
         entry.createdAt = Date()
         entry.account = account
         entry.bill = bill
+        if let fee = feeAmount, fee > 0 {
+            entry.feeAmount = NSDecimalNumber(decimal: fee.magnitude)
+        }
         
         // Handle BTC accounts: store both USD and BTC so mark-paid is dual-currency.
+        // `amount` is principal only; wallet fees live in feeAmount.
         if account.currencyCode == "BTC" {
             entry.usdAmount = NSDecimalNumber(decimal: amount)
             let priceService = bitcoinPriceService ?? BitcoinPriceService.shared

@@ -11,7 +11,7 @@ struct PrivacyPolicyView: View {
                         "Bills & Balance is a local-first checkbook. Accounts, bills, income, and transactions are stored on your iPhone or iPad using Core Data. There is no account to create, and we do not operate a server that receives your ledger."
                     }
                     policySection("Backup") {
-                        "Export Backup writes a file you choose to save in Files, iCloud Drive, or another app. Nothing is uploaded unless you share that file."
+                        "Export Backup writes a file you choose to save in Files, iCloud Drive, or another app. The file includes accounts, transactions, bills, and income. Nothing is uploaded unless you share that file."
                     }
                     policySection("Lock") {
                         "Optional Face ID or device passcode lock keeps the app closed until you unlock it. That preference stays on this device. We never see your biometrics."

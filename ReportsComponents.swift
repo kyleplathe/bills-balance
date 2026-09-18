@@ -38,16 +38,24 @@ enum ActivityMoneyFormat {
     }
 }
 
-/// Skinny rounded-rect bar. Filled bars mask a chart-height spectrum so color is tied to Y.
-/// When `showsTrack` is true, a gray full-height slot sits behind the value fill.
+/// Skinny rounded-rect bar. Filled bars use a category-weighted vertical blend
+/// (or the Apple Card spectrum fallback) masked to bar height so color tracks Y.
 struct WalletActivityBar: View {
     let width: CGFloat
     let barHeight: CGFloat
     let chartHeight: CGFloat
+    var categories: [(name: String, amount: Decimal)] = []
     var isPlaceholder: Bool = false
     var appeared: Bool = true
     var delay: Double = 0
     var showsTrack: Bool = false
+
+    private var fill: LinearGradient {
+        if categories.contains(where: { $0.amount > 0 }) {
+            return CategoryStyle.valueWeightedGradient(categories: categories)
+        }
+        return CategoryStyle.appleCardSpectrum
+    }
 
     var body: some View {
         let radius = min(2, width / 2)
@@ -67,7 +75,7 @@ struct WalletActivityBar: View {
 
             if !isPlaceholder {
                 Rectangle()
-                    .fill(CategoryStyle.appleCardSpectrum)
+                    .fill(fill)
                     .frame(width: width, height: chartHeight)
                     .mask(alignment: .bottom) {
                         shape.frame(width: width, height: displayedHeight)
@@ -277,6 +285,7 @@ struct WalletStackedCategoryBarChart: View {
                                 width: barWidth,
                                 barHeight: barHeight(for: periodData, chartHeight: chartHeight),
                                 chartHeight: chartHeight,
+                                categories: periodData.categories,
                                 isPlaceholder: total <= 0,
                                 appeared: appeared,
                                 delay: Double(index) * 0.03
@@ -361,6 +370,7 @@ struct CompactWalletStackedCategoryBarChart: View {
                     width: barWidth,
                     barHeight: height,
                     chartHeight: chartHeight,
+                    categories: periodData.categories,
                     isPlaceholder: !hasValue,
                     appeared: appeared,
                     delay: Double(index) * 0.04,
@@ -1262,39 +1272,14 @@ struct CategoryTransactionRow: View {
             if fromNotes > 0 { return fromNotes }
             guard account.feePercentageDecimal > 0 else { return .zero }
 
-            let transactionAmount: Decimal
-            if account.currencyCode == "BTC" {
-                let usd = entry.usdAmountDecimal
-                if usd != 0 {
-                    transactionAmount = abs(usd)
-                } else {
-                    let btc = entry.amountInCurrency(for: account)
-                    let price = entry.btcPriceAtTransactionDecimal > 0 ? entry.btcPriceAtTransactionDecimal : bitcoinPriceService.btcToUsdRate
-                    transactionAmount = abs(btc * price)
-                }
-            } else {
-                let amt = entry.usdAmountDecimal != 0 ? entry.usdAmountDecimal : entry.amountDecimal
-                transactionAmount = abs(amt)
-            }
+            let transactionAmount = abs(entry.reportUSDAmount(
+                account: account,
+                liveBTCPrice: bitcoinPriceService.btcToUsdRate
+            ))
             return transactionAmount * (account.feePercentageDecimal / 100)
         }
 
-        let signed: Decimal
-        if account.currencyCode == "BTC" {
-            let usd = entry.usdAmountDecimal
-            if usd != 0 {
-                signed = entry.isCredit ? usd : -usd
-            } else {
-                let btc = entry.amountInCurrency(for: account)
-                let price = entry.btcPriceAtTransactionDecimal > 0 ? entry.btcPriceAtTransactionDecimal : bitcoinPriceService.btcToUsdRate
-                let usdVal = btc * price
-                signed = entry.isCredit ? usdVal : -usdVal
-            }
-        } else {
-            let amt = entry.usdAmountDecimal != 0 ? entry.usdAmountDecimal : entry.amountDecimal
-            signed = entry.isCredit ? amt : -amt
-        }
-        return signed
+        return entry.reportUSDAmount(account: account, liveBTCPrice: bitcoinPriceService.btcToUsdRate)
     }
 
     private var amountColor: Color {

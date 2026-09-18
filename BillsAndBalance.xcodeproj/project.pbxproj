@@ -16,6 +16,7 @@
 		DE57A1042F08AA0002 /* StatementClearImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE57A1032F08AA0002 /* StatementClearImportSheet.swift */; };
 		DE57B0012F08BB0001 /* TransactionCSVParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE57B0022F08BB0001 /* TransactionCSVParser.swift */; };
 		DE57E0052F08EE0001 /* FeeParsing.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE57E0042F08EE0001 /* FeeParsing.swift */; };
+		DE72A2012FDC9A01004756CF /* AccountCurrencyPreference.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE72A1012FDC9A01004756CF /* AccountCurrencyPreference.swift */; };
 		DE57F0012F09FF0001 /* LiveDateTimeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE57F0022F09FF0001 /* LiveDateTimeView.swift */; };
 		DE5E0D092FDC8C0A004756CF /* SupabaseSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5E0D082FDC8C0A004756CF /* SupabaseSupport.swift */; };
 		DE5E0D0B2FDC8C24004756CF /* CoreDataConvenience.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5E0D0A2FDC8C24004756CF /* CoreDataConvenience.swift */; };
@@ -100,6 +101,7 @@
 		DE57A1032F08AA0002 /* StatementClearImportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatementClearImportSheet.swift; sourceTree = "<group>"; };
 		DE57B0022F08BB0001 /* TransactionCSVParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransactionCSVParser.swift; sourceTree = "<group>"; };
 		DE57E0042F08EE0001 /* FeeParsing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeeParsing.swift; sourceTree = "<group>"; };
+		DE72A1012FDC9A01004756CF /* AccountCurrencyPreference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountCurrencyPreference.swift; sourceTree = "<group>"; };
 		DE57F0022F09FF0001 /* LiveDateTimeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveDateTimeView.swift; sourceTree = "<group>"; };
 		DE5E0D082FDC8C0A004756CF /* SupabaseSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseSupport.swift; sourceTree = "<group>"; };
 		DE5E0D0A2FDC8C24004756CF /* CoreDataConvenience.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreDataConvenience.swift; sourceTree = "<group>"; };
@@ -200,6 +202,7 @@
 				DE546C2C2F04AEC00048E56 /* ReportsView.swift */,
 				DE546C2E2F04AEC00048E56 /* ReportsViewModel.swift */,
 				DE57E0042F08EE0001 /* FeeParsing.swift */,
+				DE72A1012FDC9A01004756CF /* AccountCurrencyPreference.swift */,
 				DE71A1012FDC9911004756CF /* MoneyFormatting.swift */,
 				DE71A1022FDC9913004756CF /* FormInputComponents.swift */,
 				DE9A1B732ECA1C1400C38E04 /* ManageAccountsView.swift */,
@@ -495,6 +498,7 @@
 				DE57A1042F08AA0002 /* StatementClearImportSheet.swift in Sources */,
 				DE57B0012F08BB0001 /* TransactionCSVParser.swift in Sources */,
 				DE57E0052F08EE0001 /* FeeParsing.swift in Sources */,
+				DE72A2012FDC9A01004756CF /* AccountCurrencyPreference.swift in Sources */,
 				DE71A2012FDC9912004756CF /* MoneyFormatting.swift in Sources */,
 				DE71A2022FDC9914004756CF /* FormInputComponents.swift in Sources */,
 				DE61A2012FDC9101004756CF /* RecurrenceCalculator.swift in Sources */,

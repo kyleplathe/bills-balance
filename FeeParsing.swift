@@ -2,24 +2,31 @@
 //  FeeParsing.swift
 //  BillsAndBalance
 //
-//  Extracts digital wallet fee amounts from transaction notes.
-//  Fees are stored as lines on each transaction; this parses those lines.
+//  Extracts fee and sales-tax amounts from transaction notes.
 //
 
 import Foundation
 
 enum FeeParsing {
-    /// Extracts USD fee amounts from transaction notes. Data is pulled from the
-    /// "digital wallet fees" line on each transaction. Supports:
-    /// - "Fee: 6.36 USD (0.796%)" or "Fee: $6.36 USD" (transaction card format)
-    /// - "Strike fee: $6.36" or "Strike fee: 6.36" (Strike/bill flow format)
-    /// Sums all matching amounts (multiple fee lines per transaction supported).
+    /// Extracts USD fee amounts from transaction notes. Supports:
+    /// - "Fee: 6.36 USD (0.796%)" or "Fee: $6.36 USD"
+    /// - "Strike fee: $6.36" or "Strike fee: 6.36"
+    /// - "Digital Wallet Fee: 6.36 USD (0.796%)"
+    /// - "Transfer Fee: 2.50 USD"
     static func feeFromNotes(_ notes: String?) -> Decimal {
         guard let notes = notes else { return 0 }
         var total: Decimal = 0
         for line in notes.components(separatedBy: .newlines) {
             let t = line.trimmingCharacters(in: .whitespaces)
-            if t.contains("Fee:"), t.contains(" USD") {
+            if t.contains("Digital Wallet Fee:") {
+                if let num = extractLeadingNumber(from: t, after: "Digital Wallet Fee:") {
+                    total += num
+                }
+            } else if t.contains("Transfer Fee:") {
+                if let num = extractLeadingNumber(from: t, after: "Transfer Fee:") {
+                    total += num
+                }
+            } else if t.contains("Fee:"), t.contains(" USD") {
                 if let num = extractLeadingNumber(from: t, after: "Fee:") {
                     total += num
                 }
@@ -30,6 +37,47 @@ enum FeeParsing {
             }
         }
         return total
+    }
+
+    /// Extracts sales tax from notes: "Sales Tax: 1.25 USD" or "Sales Tax: $1.25".
+    static func salesTaxFromNotes(_ notes: String?) -> Decimal {
+        guard let notes = notes else { return 0 }
+        var total: Decimal = 0
+        for line in notes.components(separatedBy: .newlines) {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if t.contains("Sales Tax:") {
+                if let num = extractLeadingNumber(from: t, after: "Sales Tax:") {
+                    total += num
+                }
+            }
+        }
+        return total
+    }
+
+    static func appendingSalesTaxNote(to notes: String?, tax: Decimal) -> String? {
+        guard tax > 0 else { return notes }
+        let taxDouble = (tax as NSDecimalNumber).doubleValue
+        let line = "Sales Tax: \(String(format: "%.2f", taxDouble)) USD"
+        if let notes, !notes.isEmpty {
+            return notes.contains("Sales Tax:") ? notes : "\(notes)\n\(line)"
+        }
+        return line
+    }
+
+    static func appendingWalletFeeNote(to notes: String?, fee: Decimal, percentage: Decimal?) -> String? {
+        guard fee > 0 else { return notes }
+        let feeDouble = (fee as NSDecimalNumber).doubleValue
+        let line: String
+        if let percentage, percentage > 0 {
+            let pct = (percentage as NSDecimalNumber).doubleValue
+            line = "Digital Wallet Fee: \(String(format: "%.2f", feeDouble)) USD (\(String(format: "%.3f", pct))%)"
+        } else {
+            line = "Digital Wallet Fee: \(String(format: "%.2f", feeDouble)) USD"
+        }
+        if let notes, !notes.isEmpty {
+            return notes.contains("Digital Wallet Fee:") ? notes : "\(notes)\n\(line)"
+        }
+        return line
     }
 
     private static func extractLeadingNumber(from s: String, after prefix: String) -> Decimal? {

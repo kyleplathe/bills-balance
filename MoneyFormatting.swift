@@ -33,8 +33,8 @@ enum MoneyKind: Equatable {
 
     var keyboard: UIKeyboardType {
         switch self {
-        case .sats: return .numberPad
-        case .usd, .bitcoin, .percent: return .decimalPad
+        case .sats, .usd: return .numberPad
+        case .bitcoin, .percent: return .decimalPad
         }
     }
 }
@@ -101,6 +101,15 @@ enum MoneyFormatting {
         if trimmed.isEmpty { return "" }
         guard let value = parse(text, kind: kind) else { return text }
         return format(value, kind: kind)
+    }
+
+    /// ATM-style USD entry: digits are cents. `"1234"` → `"12.34"`.
+    static func applyUSDCentsInput(_ text: String) -> String {
+        let digits = text.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
+        if digits.isEmpty { return "" }
+        let limited = String(digits.prefix(12))
+        guard let cents = Decimal(string: limited) else { return "" }
+        return format(cents / 100, kind: .usd)
     }
 
     static func currencyString(_ amount: Decimal) -> String {

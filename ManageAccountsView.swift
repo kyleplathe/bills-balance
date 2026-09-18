@@ -15,6 +15,8 @@ struct ManageAccountsView: View {
     @EnvironmentObject private var billViewModel: BillViewModel
     @EnvironmentObject private var paycheckViewModel: PaycheckViewModel
     @EnvironmentObject private var appLockManager: AppLockManager
+    @EnvironmentObject private var categoryManager: CategoryManager
+    @EnvironmentObject private var cardManager: CreditCardManager
 
     @State private var showingAccountEditor = false
     @State private var accountToEdit: Account?
@@ -260,7 +262,7 @@ struct ManageAccountsView: View {
         } header: {
             Text("Backup")
         } footer: {
-            Text("Save to Files or iCloud Drive. Your data stays on this device until you export.")
+            Text("Save to Files or iCloud Drive. The file includes accounts, transactions, bills, and income. Your data stays on this device until you export.")
                 .font(.footnote)
         }
     }
@@ -363,7 +365,16 @@ struct ManageAccountsView: View {
 
     private func exportBackup() {
         do {
-            let url = try AccountExportService.writeExportFile(accounts: accountViewModel.accounts)
+            let context = PersistenceController.shared.container.viewContext
+            let allBills = (try? context.fetch(NSFetchRequest<Bill>(entityName: "Bill"))) ?? billViewModel.bills
+            let allPaychecks = (try? context.fetch(NSFetchRequest<Paycheck>(entityName: "Paycheck"))) ?? paycheckViewModel.paychecks
+            let url = try AccountExportService.writeExportFile(
+                accounts: accountViewModel.accounts,
+                bills: allBills,
+                paychecks: allPaychecks,
+                customCategories: categoryManager.customCategories,
+                creditCards: cardManager.cards
+            )
             exportShareItem = ShareFileItem(url: url)
         } catch {
             exportErrorMessage = error.localizedDescription
@@ -385,6 +396,10 @@ struct ManageAccountsView: View {
                     let data = try Data(contentsOf: url)
                     let count = try accountViewModel.importAccounts(from: data)
                     await MainActor.run {
+                        billViewModel.fetchBills()
+                        paycheckViewModel.fetchPaychecks()
+                        categoryManager.reloadFromStorage()
+                        cardManager.reloadFromStorage()
                         isImportParsing = false
                         importedAccountCount = count
                         showImportSuccessAlert = true

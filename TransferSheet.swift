@@ -18,12 +18,18 @@ struct TransferSheet: View {
     @State private var toAccount: Account?
     @State private var amountString: String = ""
     @State private var feeAmountString: String = ""
-    @State private var satsAmountString: String = ""
+    @State private var bitcoinAmountString: String = ""
+    @State private var amountEntryMode: AmountEntryMode = .usd
     @State private var notes: String = ""
     @State private var date: Date = Date()
     @State private var isCleared: Bool = false
     @State private var transferError: String?
     @FocusState private var isAmountFocused: Bool
+
+    private enum AmountEntryMode: String, CaseIterable {
+        case usd = "USD"
+        case bitcoin = "BTC"
+    }
 
     init(fromAccount: Account, allowsChangingSource: Bool = false) {
         _fromAccount = State(initialValue: fromAccount)
@@ -34,6 +40,17 @@ struct TransferSheet: View {
         fromAccount.currencyCode == "BTC" || toAccount?.currencyCode == "BTC"
     }
 
+    private var bitcoinDisplayFormat: String {
+        if fromAccount.currencyCode == "BTC" {
+            return fromAccount.btcDisplayFormat ?? "sats"
+        }
+        return toAccount?.btcDisplayFormat ?? "sats"
+    }
+
+    private var bitcoinKind: MoneyKind {
+        MoneyFormatting.kindForBTCDisplay(bitcoinDisplayFormat)
+    }
+
     private var sourceAccounts: [Account] {
         accountViewModel.accounts.filter { !$0.isHiddenFlag }
     }
@@ -42,8 +59,24 @@ struct TransferSheet: View {
         sourceAccounts.filter { $0.objectID != fromAccount.objectID }
     }
 
-    private var parsedAmount: Decimal? {
-        MoneyFormatting.parse(amountString, kind: .usd)
+    private var parsedUSDAmount: Decimal? {
+        if isBTCTransfer, amountEntryMode == .bitcoin {
+            guard let btc = MoneyFormatting.btcAmount(fromInput: bitcoinAmountString, displayFormat: bitcoinDisplayFormat),
+                  btc > 0 else { return nil }
+            return btc * bitcoinPriceService.btcToUsdRate
+        }
+        return MoneyFormatting.parse(amountString, kind: .usd)
+    }
+
+    private var parsedBTCAmount: Decimal? {
+        guard isBTCTransfer else { return nil }
+        if amountEntryMode == .bitcoin {
+            return MoneyFormatting.btcAmount(fromInput: bitcoinAmountString, displayFormat: bitcoinDisplayFormat)
+        }
+        guard let usd = MoneyFormatting.parse(amountString, kind: .usd), usd > 0 else { return nil }
+        let rate = bitcoinPriceService.btcToUsdRate
+        guard rate > 0 else { return nil }
+        return usd / rate
     }
 
     private var parsedFee: Decimal {
@@ -51,18 +84,34 @@ struct TransferSheet: View {
     }
 
     private var canSave: Bool {
-        toAccount != nil && (parsedAmount ?? 0) > 0
+        guard toAccount != nil, let usd = parsedUSDAmount, usd > 0 else { return false }
+        if isBTCTransfer {
+            guard let btc = parsedBTCAmount, btc > 0 else { return false }
+        }
+        return true
     }
 
     private var amountFooter: String? {
         if toAccount == nil {
             return "Choose a destination account"
         }
+        if isBTCTransfer, amountEntryMode == .bitcoin {
+            if bitcoinAmountString.trimmingCharacters(in: .whitespaces).isEmpty {
+                return "Enter a \(bitcoinDisplayFormat == "sats" ? "sats" : "BTC") amount"
+            }
+            if parsedBTCAmount == nil || (parsedBTCAmount ?? 0) <= 0 {
+                return "Enter a valid \(bitcoinDisplayFormat == "sats" ? "sats" : "BTC") amount"
+            }
+            return nil
+        }
         if amountString.trimmingCharacters(in: .whitespaces).isEmpty {
             return "Enter an amount"
         }
-        if parsedAmount == nil || (parsedAmount ?? 0) <= 0 {
+        if parsedUSDAmount == nil || (parsedUSDAmount ?? 0) <= 0 {
             return "Enter a valid amount"
+        }
+        if isBTCTransfer, parsedBTCAmount == nil || (parsedBTCAmount ?? 0) <= 0 {
+            return "Bitcoin amount could not be calculated"
         }
         return nil
     }
@@ -71,13 +120,48 @@ struct TransferSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    MoneyAmountHeader(
-                        text: $amountString,
-                        kind: .usd,
-                        tone: .neutral,
-                        isFocused: $isAmountFocused
-                    )
-                    if parsedFee > 0, let amount = parsedAmount {
+                    if isBTCTransfer {
+                        Picker("Amount unit", selection: $amountEntryMode) {
+                            ForEach(AmountEntryMode.allCases, id: \.self) { mode in
+                                Text(mode == .bitcoin
+                                     ? (bitcoinDisplayFormat == "sats" ? "Sats" : "BTC")
+                                     : "USD")
+                                .tag(mode)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .accessibilityLabel("Transfer amount unit")
+                    }
+
+                    if isBTCTransfer, amountEntryMode == .bitcoin {
+                        MoneyAmountHeader(
+                            text: $bitcoinAmountString,
+                            kind: bitcoinKind,
+                            tone: .neutral,
+                            isFocused: $isAmountFocused
+                        )
+                        if let usd = parsedUSDAmount, usd > 0 {
+                            Text("≈ \(MoneyFormatting.currencyString(usd))")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                    } else {
+                        MoneyAmountHeader(
+                            text: $amountString,
+                            kind: .usd,
+                            tone: .neutral,
+                            isFocused: $isAmountFocused
+                        )
+                        if isBTCTransfer, let btc = parsedBTCAmount, btc > 0 {
+                            Text("≈ \(MoneyFormatting.displayString(forBTC: btc, displayFormat: bitcoinDisplayFormat))\(bitcoinDisplayFormat == "sats" ? " sats" : " BTC")")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                    }
+
+                    if parsedFee > 0, let amount = parsedUSDAmount {
                         HStack {
                             Text("Total")
                             Spacer()
@@ -121,6 +205,10 @@ struct TransferSheet: View {
                     if toAccount?.objectID == fromAccount.objectID {
                         toAccount = nil
                     }
+                    syncAmountModeForAccounts()
+                }
+                .onChange(of: toAccount?.objectID) { _, _ in
+                    syncAmountModeForAccounts()
                 }
 
                 Section {
@@ -128,19 +216,10 @@ struct TransferSheet: View {
                         text: $feeAmountString,
                         kind: .usd,
                         placeholder: "Fee (optional)",
-                        accessibilityLabel: "Fee"
+                        accessibilityLabel: "Transfer fee"
                     )
-                    if isBTCTransfer {
-                        MoneyTextField(
-                            text: $satsAmountString,
-                            kind: .sats,
-                            placeholder: "0",
-                            accessibilityLabel: "Sats",
-                            suffix: "sats"
-                        )
-                    }
                 } header: {
-                    Text(isBTCTransfer ? "Bitcoin" : "Fee")
+                    Text("Fee")
                 }
 
                 Section {
@@ -160,6 +239,7 @@ struct TransferSheet: View {
                 )
             }
             .onAppear {
+                syncAmountModeForAccounts()
                 isAmountFocused = true
             }
             .alert("Couldn't Transfer", isPresented: Binding(
@@ -173,25 +253,41 @@ struct TransferSheet: View {
         }
     }
 
+    private func syncAmountModeForAccounts() {
+        if isBTCTransfer {
+            if fromAccount.currencyCode == "BTC" || toAccount?.currencyCode == "BTC" {
+                // Prefer sats/BTC entry when a digital wallet BTC account is involved.
+                if amountEntryMode == .usd,
+                   (fromAccount.isBitcoinDigitalWallet || toAccount?.isBitcoinDigitalWallet == true) {
+                    amountEntryMode = .bitcoin
+                }
+            }
+        } else {
+            amountEntryMode = .usd
+        }
+    }
+
     private func saveTransfer() {
-        guard let toAccount, let amount = parsedAmount, amount > 0 else { return }
+        guard let toAccount, let amount = parsedUSDAmount, amount > 0 else { return }
 
         let feeAmount: Decimal? = parsedFee > 0 ? parsedFee : nil
-        let satsAmount = MoneyFormatting.btcAmount(fromInput: satsAmountString, displayFormat: "sats")
+        let btcAmount = parsedBTCAmount
         let btcPrice: Decimal? = {
-            guard isBTCTransfer else { return nil }
-            if let sats = satsAmount, sats > 0, amount > 0 {
-                return amount / sats
-            }
-            return bitcoinPriceService.btcToUsdRate
+            guard isBTCTransfer, let btc = btcAmount, btc > 0 else { return nil }
+            return amount / btc
         }()
+
+        if isBTCTransfer, btcAmount == nil || (btcAmount ?? 0) <= 0 {
+            transferError = "Enter a BTC or sats amount for this transfer."
+            return
+        }
 
         guard accountViewModel.transfer(
             from: fromAccount,
             to: toAccount,
             usdAmount: amount,
             feeAmount: feeAmount,
-            btcAmount: satsAmount,
+            btcAmount: btcAmount,
             btcPrice: btcPrice,
             date: date,
             notes: notes.isEmpty ? nil : notes,

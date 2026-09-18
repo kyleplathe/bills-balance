@@ -120,34 +120,16 @@ private func isDigitalWallet(_ account: Account?) -> Bool {
     return (account.type ?? "").lowercased() == "digital wallet"
 }
 
-// MARK: - USD Amount for Reporting
-
+/// Settled (reconciled) amounts must never move with the live BTC price.
+/// Pending BTC rows without a frozen USD/price may still estimate using the live rate.
 private func reportUSDAmount(for entry: LedgerEntry, account: Account, btcService: BitcoinPriceService) -> Decimal {
-    let signed: Decimal
-    if account.currencyCode == "BTC" {
-        let usd = entry.usdAmountDecimal
-        if usd != 0 {
-            signed = entry.isCredit ? usd : -usd
-        } else {
-            let btc = entry.amountInCurrency(for: account)
-            let price = entry.btcPriceAtTransactionDecimal > 0 ? entry.btcPriceAtTransactionDecimal : btcService.btcToUsdRate
-            let usdVal = btc * price
-            signed = entry.isCredit ? usdVal : -usdVal
-        }
-    } else {
-        let amt = entry.usdAmountDecimal != 0 ? entry.usdAmountDecimal : entry.amountDecimal
-        signed = entry.isCredit ? amt : -amt
-    }
-    return signed
+    entry.reportUSDAmount(account: account, liveBTCPrice: btcService.btcToUsdRate)
 }
 
 // MARK: - Digital Wallet Fee Calculation
 
-/// Calculates the fee amount for a transaction on a digital wallet account
-/// Fee is calculated as: transaction_amount * (feePercentage / 100)
+/// Fee attributed to a digital-wallet (or transfer) debit. Prefer stored feeAmount / notes.
 private func calculateDigitalWalletFee(for entry: LedgerEntry, account: Account, btcService: BitcoinPriceService) -> Decimal {
-    guard isDigitalWallet(account) else { return 0 }
-
     if entry.feeAmountDecimal > 0 {
         return entry.feeAmountDecimal
     }
@@ -157,9 +139,26 @@ private func calculateDigitalWalletFee(for entry: LedgerEntry, account: Account,
         return fromNotes
     }
 
-    guard account.feePercentageDecimal > 0 else { return 0 }
+    guard isDigitalWallet(account), account.feePercentageDecimal > 0 else { return 0 }
     let transactionAmount = abs(reportUSDAmount(for: entry, account: account, btcService: btcService))
-    return transactionAmount * (account.feePercentageDecimal / 100)
+    // Percentage is of principal; when fee was baked into USD, reverse it.
+    let rate = account.feePercentageDecimal / 100
+    guard rate > 0, rate < 1 else {
+        return transactionAmount * rate
+    }
+    let principal = transactionAmount / (1 + rate)
+    return transactionAmount - principal
+}
+
+/// Splits a debit into principal, sales tax, and fee without double-counting in totals.
+private func spendingParts(for entry: LedgerEntry, account: Account, btcService: BitcoinPriceService) -> (principal: Decimal, salesTax: Decimal, fee: Decimal) {
+    let raw = abs(reportUSDAmount(for: entry, account: account, btcService: btcService))
+    let fee = calculateDigitalWalletFee(for: entry, account: account, btcService: btcService)
+    let tax = FeeParsing.salesTaxFromNotes(entry.notes)
+    // Fees and tax are stored in notes/feeAmount and typically baked into usdAmount.
+    let attributed = min(raw, fee + tax)
+    let principal = max(0, raw - attributed)
+    return (principal, min(tax, raw), min(fee, max(0, raw - min(tax, raw))))
 }
 
 // MARK: - ReportsViewModel
@@ -455,15 +454,17 @@ final class ReportsViewModel: ObservableObject {
             if usd > 0 {
                 income += usd
             } else {
-                expenses += abs(usd)
+                let parts = spendingParts(for: entry, account: account, btcService: bitcoinPriceService)
+                // Purchase total (principal + tax) + fees = money spent; fees tracked separately.
+                expenses += parts.principal + parts.salesTax
                 let cat = entry.category?.isEmpty == false ? entry.category! : "Uncategorized"
-                byCategory[cat, default: 0] += abs(usd)
-                if isDigitalWallet(account) {
-                    let fee = calculateDigitalWalletFee(for: entry, account: account, btcService: bitcoinPriceService)
-                    if fee > 0 {
-                        fees += fee
-                        byCategory["Digital Wallet Fees", default: 0] += fee
-                    }
+                byCategory[cat, default: 0] += parts.principal
+                if parts.salesTax > 0 {
+                    byCategory["Sales Tax", default: 0] += parts.salesTax
+                }
+                if parts.fee > 0 {
+                    fees += parts.fee
+                    byCategory["Digital Wallet Fees", default: 0] += parts.fee
                 }
             }
         }
@@ -1458,6 +1459,7 @@ final class ReportsViewModel: ObservableObject {
         let entries = fetchEntries(from: start, to: end)
         var allCategories: Set<String> = []
         var hasFees = false
+        var hasSalesTax = false
         for entry in entries {
             guard let account = entry.account, !account.isHiddenFlag else { continue }
             let usd = reportUSDAmount(for: entry, account: account, btcService: bitcoinPriceService)
@@ -1465,25 +1467,27 @@ final class ReportsViewModel: ObservableObject {
             
             guard includeInActivity(entry) else { continue }
             
+            let parts = spendingParts(for: entry, account: account, btcService: bitcoinPriceService)
             let cat = entry.category?.isEmpty == false ? entry.category! : "Uncategorized"
             allCategories.insert(cat)
-            
-            // Check if there are digital wallet fees
-            if isDigitalWallet(account) && account.feePercentageDecimal > 0 {
-                let fee = calculateDigitalWalletFee(for: entry, account: account, btcService: bitcoinPriceService)
-                if fee > 0 {
-                    hasFees = true
-                }
-            }
+            if parts.fee > 0 { hasFees = true }
+            if parts.salesTax > 0 { hasSalesTax = true }
         }
-        // Add Digital Wallet Fees category if fees exist
         if hasFees {
             allCategories.insert("Digital Wallet Fees")
         }
-        // Sort categories, but put Digital Wallet Fees at the end for better visual hierarchy
+        if hasSalesTax {
+            allCategories.insert("Sales Tax")
+        }
+        // Sort categories, but put fee/tax buckets at the end for better visual hierarchy
         let sortedCategories = Array(allCategories).sorted { cat1, cat2 in
-            if cat1 == "Digital Wallet Fees" { return false }
-            if cat2 == "Digital Wallet Fees" { return true }
+            let trailing = ["Digital Wallet Fees", "Sales Tax"]
+            let t1 = trailing.firstIndex(of: cat1) ?? -1
+            let t2 = trailing.firstIndex(of: cat2) ?? -1
+            if t1 >= 0 || t2 >= 0 {
+                if t1 >= 0 && t2 >= 0 { return t1 < t2 }
+                return t1 < 0
+            }
             return cat1 < cat2
         }
         
@@ -1548,15 +1552,14 @@ final class ReportsViewModel: ObservableObject {
                 
                 guard includeInActivity(entry) else { continue }
                 
+                let parts = spendingParts(for: entry, account: account, btcService: bitcoinPriceService)
                 let cat = entry.category?.isEmpty == false ? entry.category! : "Uncategorized"
-                categoryAmounts[cat, default: 0] += abs(usd)
-                
-                // Add digital wallet fees to category breakdown
-                if isDigitalWallet(account) {
-                    let fee = calculateDigitalWalletFee(for: entry, account: account, btcService: bitcoinPriceService)
-                    if fee > 0 {
-                        categoryAmounts["Digital Wallet Fees", default: 0] += fee
-                    }
+                categoryAmounts[cat, default: 0] += parts.principal
+                if parts.salesTax > 0 {
+                    categoryAmounts["Sales Tax", default: 0] += parts.salesTax
+                }
+                if parts.fee > 0 {
+                    categoryAmounts["Digital Wallet Fees", default: 0] += parts.fee
                 }
             }
             

@@ -83,6 +83,7 @@ struct BalanceView: View {
     @EnvironmentObject private var categoryManager: CategoryManager
     @EnvironmentObject private var paycheckViewModel: PaycheckViewModel
     @EnvironmentObject private var appLockManager: AppLockManager
+    @EnvironmentObject private var cardManager: CreditCardManager
     @State private var showingManageAccounts = false
     @State private var showingReports = ScreenshotLaunch.scene == "activity"
     @State private var showingAddAccount = false
@@ -133,6 +134,8 @@ struct BalanceView: View {
                 .environmentObject(billViewModel)
                 .environmentObject(paycheckViewModel)
                 .environmentObject(appLockManager)
+                .environmentObject(categoryManager)
+                .environmentObject(cardManager)
         }
         .sheet(isPresented: $showingAddAccount) {
             AccountEditorSheet(account: nil) { name, type, startingBalance, isHidden, currency, btcDisplayFormat, feePercentage, startingBalanceUSD, startingBalanceBTCPrice, reserveBalance in
@@ -308,7 +311,7 @@ struct BalanceView: View {
         ChipCard(verticalPadding: 10, horizontalPadding: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 FittedChipLine(
-                    text: "Total Balance",
+                    text: "Current Balance",
                     maxSize: 13,
                     minSize: 10,
                     weight: .medium,
@@ -334,10 +337,10 @@ struct BalanceView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(
                     hideBalances
-                        ? "Total balance hidden"
-                        : "Total balance \(totalBalance.formatted(.currency(code: "USD")))"
+                        ? "Current balance hidden"
+                        : "Current balance \(totalBalance.formatted(.currency(code: "USD")))"
                 )
-                .accessibilityHint("Shows or hides total balance")
+                .accessibilityHint("Shows or hides current balance")
 
                 FittedChipLine(
                     text: balanceChipSubtitle,
@@ -635,7 +638,41 @@ private struct AccountChipCard: View {
     @EnvironmentObject private var bitcoinPriceService: BitcoinPriceService
     let account: Account
     let onTap: () -> Void
-    
+
+    private var prefersBitcoin: Bool {
+        account.currencyCode == "BTC"
+            && AccountCurrencyPreference.prefersBitcoin(for: account.id)
+    }
+
+    private var ledgerBalance: Decimal {
+        accountViewModel.totalBalance(for: account)
+    }
+
+    private var usdBalance: Decimal {
+        if account.currencyCode == "BTC" {
+            return bitcoinPriceService.convertBTCToUSD(ledgerBalance)
+        }
+        return ledgerBalance
+    }
+
+    private var balanceColor: Color {
+        if prefersBitcoin {
+            return .white
+        }
+        return usdBalance < 0 ? Color(red: 1.0, green: 0.45, blue: 0.45) : .white
+    }
+
+    private var bitcoinPrimaryText: String {
+        let btc = ledgerBalance
+        let format = account.btcDisplayFormat ?? "sats"
+        let body = MoneyFormatting.displayString(forBTC: abs(btc), displayFormat: format)
+        let sign = btc < 0 ? "-" : ""
+        if format == "sats" {
+            return "\(sign)\(body) sats"
+        }
+        return "\(sign)₿\(body)"
+    }
+
     var body: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 2) {
@@ -644,10 +681,11 @@ private struct AccountChipCard: View {
                     maxSize: 24,
                     minSize: 13,
                     weight: .bold,
-                    color: .white,
+                    color: balanceColor,
                     design: .rounded
                 )
                 .privacySensitive()
+
                 HStack(spacing: 4) {
                     FittedChipLine(
                         text: account.name ?? "Account",
@@ -677,25 +715,25 @@ private struct AccountChipCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityBalanceLabel)
     }
-    
+
     private var displayedBalance: String {
-        formatAccountBalanceUSD(accountViewModel.totalBalance(for: account), account: account)
+        if prefersBitcoin {
+            return bitcoinPrimaryText
+        }
+        return formatUSD(usdBalance)
     }
-    
+
     private var accessibilityBalanceLabel: String {
         let name = account.name ?? "Account"
         return "\(name), \(displayedBalance)"
     }
-    
+
     private var accountGradient: LinearGradient {
-        // Blue gradient with slight variation based on account
         let baseBlue = Color.blue
         let darkerBlue = Color(red: 0.0, green: 0.4, blue: 0.8)
-        
-        // Slight variation based on account name for visual distinction
         let hash = abs((account.name ?? "").hashValue)
-        let variation = Double(hash % 20) / 100.0 // 0.0 to 0.2 variation
-        
+        let variation = Double(hash % 20) / 100.0
+
         return LinearGradient(
             gradient: Gradient(colors: [
                 baseBlue.opacity(1.0 - variation),
@@ -705,25 +743,15 @@ private struct AccountChipCard: View {
             endPoint: .bottomTrailing
         )
     }
-    
-    private func formatAccountBalanceUSD(_ balance: Decimal, account: Account) -> String {
-        // Always display in USD on the balance page
-        let usdBalance: Decimal
-        if account.currencyCode == "BTC" {
-            // Convert BTC to USD using current price
-            usdBalance = bitcoinPriceService.convertBTCToUSD(balance)
-        } else {
-            usdBalance = balance
-        }
-        
-        // USD formatting with commas and decimals
+
+    private func formatUSD(_ balance: Decimal) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = "USD"
         formatter.currencySymbol = "$"
         formatter.maximumFractionDigits = 2
         formatter.minimumFractionDigits = 2
-        return formatter.string(from: usdBalance as NSDecimalNumber) ?? "$\(usdBalance)"
+        return formatter.string(from: balance as NSDecimalNumber) ?? "$\(balance)"
     }
 }
 

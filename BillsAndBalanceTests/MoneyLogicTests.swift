@@ -102,6 +102,16 @@ final class MoneyFormattingTests: XCTestCase {
         XCTAssertEqual(MoneyFormatting.displayString(forBTC: Decimal(1), displayFormat: "sats"), "100,000,000")
         XCTAssertEqual(MoneyFormatting.displayString(forBTC: Decimal(string: "0.5")!, displayFormat: "bitcoin"), "0.50")
     }
+
+    func testUSDCentsAsYouType() {
+        XCTAssertEqual(MoneyFormatting.applyUSDCentsInput(""), "")
+        XCTAssertEqual(MoneyFormatting.applyUSDCentsInput("1"), "0.01")
+        XCTAssertEqual(MoneyFormatting.applyUSDCentsInput("12"), "0.12")
+        XCTAssertEqual(MoneyFormatting.applyUSDCentsInput("123"), "1.23")
+        XCTAssertEqual(MoneyFormatting.applyUSDCentsInput("1234"), "12.34")
+        XCTAssertEqual(MoneyFormatting.applyUSDCentsInput("12.34"), "12.34")
+        XCTAssertEqual(MoneyFormatting.applyUSDCentsInput("$1,234.50"), "1,234.50")
+    }
 }
 
 final class DuplicateBillGuardTests: XCTestCase {

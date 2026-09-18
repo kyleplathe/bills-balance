@@ -24,6 +24,7 @@ struct TransactionEditorSheet: View {
     @State private var title: String
     @State private var amountString: String
     @State private var feeAmountString: String
+    @State private var salesTaxString: String
     @State private var satsAmountString: String
     @State private var btcPriceString: String
     @State private var isCredit: Bool
@@ -46,6 +47,7 @@ struct TransactionEditorSheet: View {
         _title = State(initialValue: "")
         _amountString = State(initialValue: "")
         _feeAmountString = State(initialValue: "")
+        _salesTaxString = State(initialValue: "")
         _satsAmountString = State(initialValue: "")
         _btcPriceString = State(initialValue: "")
         _isCredit = State(initialValue: false)
@@ -67,13 +69,17 @@ struct TransactionEditorSheet: View {
 
         let absUSD = abs(entry.usdAmountDecimal)
         let fee = entry.feeAmountDecimal
+        let tax = FeeParsing.salesTaxFromNotes(entry.notes)
+        let attributed = fee + tax
         let principal: Decimal
-        if fee > 0, fee < absUSD {
-            principal = absUSD - fee
-            _feeAmountString = State(initialValue: MoneyFormatting.format(fee, kind: .usd))
+        if attributed > 0, attributed < absUSD {
+            principal = absUSD - attributed
+            _feeAmountString = State(initialValue: fee > 0 ? MoneyFormatting.format(fee, kind: .usd) : "")
+            _salesTaxString = State(initialValue: tax > 0 ? MoneyFormatting.format(tax, kind: .usd) : "")
         } else {
             principal = absUSD
             _feeAmountString = State(initialValue: fee > 0 ? MoneyFormatting.format(fee, kind: .usd) : "")
+            _salesTaxString = State(initialValue: tax > 0 ? MoneyFormatting.format(tax, kind: .usd) : "")
         }
         if principal != .zero {
             _amountString = State(initialValue: MoneyFormatting.format(principal, kind: .usd))
@@ -113,6 +119,14 @@ struct TransactionEditorSheet: View {
         account?.currencyCode == "BTC"
     }
 
+    private var isDigitalWalletAccount: Bool {
+        account?.isDigitalWallet == true
+    }
+
+    private var showsFeeFields: Bool {
+        isBTCAccount || isDigitalWalletAccount || !isCredit
+    }
+
     private var parsedAmount: Decimal? {
         MoneyFormatting.parse(amountString, kind: .usd)
     }
@@ -121,9 +135,13 @@ struct TransactionEditorSheet: View {
         MoneyFormatting.parse(feeAmountString, kind: .usd) ?? 0
     }
 
+    private var parsedSalesTax: Decimal {
+        MoneyFormatting.parse(salesTaxString, kind: .usd) ?? 0
+    }
+
     private var totalUSD: Decimal? {
         guard let amount = parsedAmount, amount > 0 else { return nil }
-        return amount + parsedFee
+        return amount + parsedFee + parsedSalesTax
     }
 
     private var canSave: Bool {
@@ -164,7 +182,7 @@ struct TransactionEditorSheet: View {
                         isCredit: $isCredit,
                         isFocused: $isAmountFocused
                     )
-                    if isBTCAccount, let total = totalUSD {
+                    if let total = totalUSD, (parsedFee > 0 || parsedSalesTax > 0) {
                         HStack {
                             Text("Total")
                             Spacer()
@@ -179,15 +197,21 @@ struct TransactionEditorSheet: View {
                     }
                 }
                 .onChange(of: amountString) { _, _ in
-                    if isBTCAccount { autoCalculateFee() }
+                    if isDigitalWalletAccount { autoCalculateFee() }
                 }
 
-                if isBTCAccount {
+                if showsFeeFields, !isCredit {
                     Section {
+                        MoneyTextField(
+                            text: $salesTaxString,
+                            kind: .usd,
+                            placeholder: "Sales tax (optional)",
+                            accessibilityLabel: "Sales tax"
+                        )
                         MoneyTextField(
                             text: $feeAmountString,
                             kind: .usd,
-                            placeholder: "Fee (optional)",
+                            placeholder: isDigitalWalletAccount ? "Wallet fee (optional)" : "Fee (optional)",
                             accessibilityLabel: "Fee"
                         )
                         if parsedFee > 0, let amount = parsedAmount, amount > 0 {
@@ -197,7 +221,9 @@ struct TransactionEditorSheet: View {
                                 .font(.caption)
                         }
                     } header: {
-                        Text("Fee")
+                        Text("Tax & Fees")
+                    } footer: {
+                        Text("Bill or purchase amount stays separate. Add sales tax or fees when they settle.")
                     }
                 }
 
@@ -398,18 +424,25 @@ struct TransactionEditorSheet: View {
         let finalCategory = category.isEmpty ? nil : category
         let signedPrincipal = isCredit ? amount : -amount
         let fee = parsedFee
-        let total = amount + fee
+        let tax = parsedSalesTax
+        let total = amount + fee + tax
         let signedTotal = isCredit ? total : -total
 
         switch mode {
         case .create(let account):
-            saveNew(account: account, title: trimmedTitle, signedPrincipal: signedPrincipal, signedTotal: signedTotal, fee: fee, category: finalCategory)
+            saveNew(account: account, title: trimmedTitle, signedPrincipal: signedPrincipal, signedTotal: signedTotal, fee: fee, salesTax: tax, category: finalCategory)
         case .edit(let entry):
-            saveEdit(entry: entry, title: trimmedTitle, signedPrincipal: signedPrincipal, signedTotal: signedTotal, fee: fee, category: finalCategory)
+            saveEdit(entry: entry, title: trimmedTitle, signedPrincipal: signedPrincipal, signedTotal: signedTotal, fee: fee, salesTax: tax, category: finalCategory)
         }
     }
 
-    private func saveNew(account: Account, title: String, signedPrincipal: Decimal, signedTotal: Decimal, fee: Decimal, category: String?) {
+    private func composedNotes(salesTax: Decimal) -> String? {
+        let base = notes.isEmpty ? nil : notes
+        return FeeParsing.appendingSalesTaxNote(to: base, tax: salesTax)
+    }
+
+    private func saveNew(account: Account, title: String, signedPrincipal: Decimal, signedTotal: Decimal, fee: Decimal, salesTax: Decimal, category: String?) {
+        let entryNotes = composedNotes(salesTax: salesTax)
         if isBTCAccount {
             let satsAmount = MoneyFormatting.btcAmount(fromInput: satsAmountString, displayFormat: account.btcDisplayFormat ?? "sats")
             let btcPrice: Decimal? = {
@@ -426,7 +459,7 @@ struct TransactionEditorSheet: View {
                 usdAmount: signedTotal,
                 btcPriceAtTransaction: btcPrice,
                 date: date,
-                notes: notes.isEmpty ? nil : notes,
+                notes: entryNotes,
                 isReconciled: isCleared,
                 category: category,
                 feeAmount: fee > 0 ? fee : nil,
@@ -437,12 +470,13 @@ struct TransactionEditorSheet: View {
                 to: account,
                 title: title,
                 btcAmount: nil,
-                usdAmount: signedPrincipal,
+                usdAmount: signedTotal,
                 btcPriceAtTransaction: nil,
                 date: date,
-                notes: notes.isEmpty ? nil : notes,
+                notes: entryNotes,
                 isReconciled: isCleared,
                 category: category,
+                feeAmount: fee > 0 ? fee : nil,
                 isCreditOverride: isCredit
             )
         }
@@ -452,7 +486,7 @@ struct TransactionEditorSheet: View {
         dismiss()
     }
 
-    private func saveEdit(entry: LedgerEntry, title: String, signedPrincipal: Decimal, signedTotal: Decimal, fee: Decimal, category: String?) {
+    private func saveEdit(entry: LedgerEntry, title: String, signedPrincipal: Decimal, signedTotal: Decimal, fee: Decimal, salesTax: Decimal, category: String?) {
         guard let account else {
             dismiss()
             return
@@ -474,10 +508,10 @@ struct TransactionEditorSheet: View {
             date: date,
             title: title,
             btcAmount: btcAmount,
-            usdAmount: isBTCAccount ? signedTotal : signedPrincipal,
+            usdAmount: signedTotal,
             btcPrice: btcPrice,
             isReconciled: isCleared,
-            notes: notes.isEmpty ? nil : notes,
+            notes: composedNotes(salesTax: salesTax),
             category: category,
             feeAmount: fee > 0 ? fee : nil
         )

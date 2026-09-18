@@ -58,6 +58,13 @@ struct MoneyAmountHeader: View {
                 text = MoneyFormatting.formatForDisplay(text, kind: kind)
             }
         }
+        .onChange(of: text) { _, newValue in
+            guard kind == .usd else { return }
+            let formatted = MoneyFormatting.applyUSDCentsInput(newValue)
+            if formatted != newValue {
+                text = formatted
+            }
+        }
     }
 
     private var amountRow: some View {
@@ -143,6 +150,13 @@ struct MoneyTextField: View {
         .onChange(of: isFocused) { _, focused in
             if !focused {
                 text = MoneyFormatting.formatForDisplay(text, kind: kind)
+            }
+        }
+        .onChange(of: text) { _, newValue in
+            guard kind == .usd else { return }
+            let formatted = MoneyFormatting.applyUSDCentsInput(newValue)
+            if formatted != newValue {
+                text = formatted
             }
         }
         .onAppear {

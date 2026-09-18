@@ -66,5 +66,14 @@ class CreditCardManager: ObservableObject {
     private func save() {
         UserDefaults.standard.set(cards, forKey: storageKey)
     }
+
+    /// Reloads cards after a backup import writes UserDefaults.
+    func reloadFromStorage() {
+        if let saved = UserDefaults.standard.stringArray(forKey: storageKey) {
+            cards = saved
+        } else {
+            cards = []
+        }
+    }
 }
 

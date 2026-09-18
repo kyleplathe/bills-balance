@@ -18,7 +18,7 @@ struct AccountDetailView: View {
     
     let account: Account
     
-    @State private var showingCurrencyToggle: Bool = false // false = USD, true = BTC (for chip card only)
+    @State private var showingCurrencyToggle: Bool = false // false = USD, true = BTC/sats
     @State private var showingBalanceDetails: Bool = false
     @State private var showingEditAccount = false
     @State private var showingAddTransaction = false
@@ -214,6 +214,7 @@ struct AccountDetailView: View {
             }
         }
         .onAppear {
+            loadCurrencyPreference()
             loadTransactions()
         }
         .onChange(of: showingAddTransaction) { _, newValue in
@@ -240,7 +241,7 @@ struct AccountDetailView: View {
             }
         }
         .onChange(of: account.objectID) { _, _ in
-            // Refresh when account changes
+            loadCurrencyPreference()
             loadTransactions()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSManagedObjectContext.didSaveObjectsNotification)) { _ in
@@ -340,84 +341,113 @@ struct AccountDetailView: View {
     // MARK: - Balance Hero
     
     private var balanceHero: some View {
-        VStack(spacing: 8) {
-            VStack(spacing: 4) {
-                if account.currencyCode == "BTC" {
-                    Button {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            showingCurrencyToggle.toggle()
-                        }
-                    } label: {
-                        ZStack {
-                            if !showingCurrencyToggle {
-                                Text(formattedAvailableBalance)
-                                    .font(.system(size: dynamicHeroBalanceFontSize, weight: .bold, design: .rounded))
-                                    .monospacedDigit()
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.5)
-                                    .transition(.asymmetric(
-                                        insertion: .move(edge: .trailing).combined(with: .opacity),
-                                        removal: .move(edge: .leading).combined(with: .opacity)
-                                    ))
-                            }
-                            
-                            if showingCurrencyToggle {
-                                Text(formattedAvailableBalance)
-                                    .font(.system(size: dynamicHeroBalanceFontSize, weight: .bold, design: .rounded))
-                                    .monospacedDigit()
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.5)
-                                    .transition(.asymmetric(
-                                        insertion: .move(edge: .trailing).combined(with: .opacity),
-                                        removal: .move(edge: .leading).combined(with: .opacity)
-                                    ))
-                            }
-                        }
-                        .id(showingCurrencyToggle ? "btc" : "usd")
-                        .frame(height: dynamicHeroBalanceFontSize + 8)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Available balance \(formattedAvailableBalance). Double tap to switch currency.")
-                    
-                    Text(showingCurrencyToggle ? "≈ \(usdEquivalent)" : "≈ \(btcEquivalent)")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                } else {
-                    Text(formattedAvailableBalance)
-                        .font(.system(size: dynamicHeroBalanceFontSize, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .frame(height: dynamicHeroBalanceFontSize + 8)
-                        .accessibilityLabel("Available balance \(formattedAvailableBalance)")
-                }
+        VStack(spacing: 12) {
+            availableHeroBlock
+
+            if showsClearedCaption {
+                currentHeroBlock
             }
-            
-            balanceCaption
         }
         .frame(maxWidth: .infinity)
         .multilineTextAlignment(.center)
     }
-    
-    private var balanceCaption: some View {
+
+    private var availableHeroBlock: some View {
         VStack(spacing: 4) {
             Text("Available")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-            
-            if showsClearedCaption {
-                Text("Cleared \(formattedClearedBalance)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+
+            if account.currencyCode == "BTC" {
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        showingCurrencyToggle.toggle()
+                        AccountCurrencyPreference.setPrefersBitcoin(showingCurrencyToggle, for: account.id)
+                    }
+                } label: {
+                    VStack(spacing: 4) {
+                        Text(formattedAvailableBalance)
+                            .font(.system(size: dynamicHeroBalanceFontSize, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
+                            .frame(height: dynamicHeroBalanceFontSize + 8)
+                            .contentTransition(.opacity)
+                            .id(showingCurrencyToggle ? "btc" : "usd")
+
+                        Text(formattedAvailableSecondary)
+                            .font(.system(size: dynamicAvailableSecondaryFontSize, weight: .semibold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
+                            .contentTransition(.opacity)
+                            .id(showingCurrencyToggle ? "btc-secondary" : "usd-secondary")
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Available \(formattedAvailableBalance), \(formattedAvailableSecondary). Double tap to switch currency.")
+            } else {
+                Text(formattedAvailableBalance)
+                    .font(.system(size: dynamicHeroBalanceFontSize, weight: .bold, design: .rounded))
                     .monospacedDigit()
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    .frame(height: dynamicHeroBalanceFontSize + 8)
+                    .accessibilityLabel("Available \(formattedAvailableBalance)")
             }
         }
     }
-    
+
+    private var currentHeroBlock: some View {
+        VStack(spacing: 6) {
+            Divider()
+                .frame(maxWidth: 120)
+
+            Text("Current")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Text(formattedClearedBalance)
+                .font(.system(size: dynamicCurrentPrimaryFontSize, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .accessibilityLabel("Current \(formattedClearedBalance)")
+
+            if account.currencyCode == "BTC" {
+                Text(formattedCurrentSecondary)
+                    .font(.system(size: dynamicCurrentSecondaryFontSize, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    .accessibilityLabel(formattedCurrentSecondary)
+            }
+        }
+    }
+
+    /// Opposite unit under Available: sats when primary is USD, USD when primary is sats/BTC.
+    private var formattedAvailableSecondary: String {
+        if showingCurrencyToggle {
+            let usd = bitcoinPriceService.convertBTCToUSD(availableBalance)
+            return formatUSDBalance(usd)
+        }
+        return formatBTCBalance(availableBalance)
+    }
+
+    /// Opposite unit under Current: sats when primary is USD, USD when primary is sats/BTC.
+    private var formattedCurrentSecondary: String {
+        if showingCurrencyToggle {
+            let usd = bitcoinPriceService.convertBTCToUSD(clearedBalance)
+            return formatUSDBalance(usd)
+        }
+        return formatBTCBalance(clearedBalance)
+    }
+
     // MARK: - Cleared Balance Formatters
     
     private var clearedBalance: Decimal {
@@ -436,20 +466,42 @@ struct AccountDetailView: View {
             return formatUSDBalance(clearedBalance)
         }
     }
-    
-    private var dynamicHeroBalanceFontSize: CGFloat {
-        let balanceString = formattedAvailableBalance
-        let characterCount = balanceString.count
-        let baseSize: CGFloat = 48
+
+    private func dynamicBalanceAmountFontSize(for text: String, baseSize: CGFloat, minimum: CGFloat) -> CGFloat {
+        let characterCount = text.count
         if characterCount <= 8 {
             return baseSize
         } else if characterCount <= 12 {
-            return baseSize - CGFloat((characterCount - 8) * 4)
+            return max(minimum, baseSize - CGFloat((characterCount - 8) * 3))
         } else if characterCount <= 16 {
-            return baseSize - CGFloat(16 + (characterCount - 12) * 3)
+            return max(minimum, baseSize - CGFloat(12 + (characterCount - 12) * 2))
         } else {
-            return max(32, baseSize - CGFloat(28 + (characterCount - 16) * 2))
+            return max(minimum, baseSize - CGFloat(20 + (characterCount - 16) * 2))
         }
+    }
+    
+    private var dynamicHeroBalanceFontSize: CGFloat {
+        dynamicBalanceAmountFontSize(for: formattedAvailableBalance, baseSize: 48, minimum: 28)
+    }
+
+    private var dynamicAvailableSecondaryFontSize: CGFloat {
+        dynamicBalanceAmountFontSize(for: formattedAvailableSecondary, baseSize: 22, minimum: 13)
+    }
+
+    private var dynamicCurrentPrimaryFontSize: CGFloat {
+        dynamicBalanceAmountFontSize(for: formattedClearedBalance, baseSize: 26, minimum: 16)
+    }
+
+    private var dynamicCurrentSecondaryFontSize: CGFloat {
+        dynamicBalanceAmountFontSize(for: formattedCurrentSecondary, baseSize: 22, minimum: 13)
+    }
+
+    private func loadCurrencyPreference() {
+        guard account.currencyCode == "BTC" else {
+            showingCurrencyToggle = false
+            return
+        }
+        showingCurrencyToggle = AccountCurrencyPreference.prefersBitcoin(for: account.id)
     }
     
     // MARK: - Balance Chip Card (Deprecated)
@@ -476,6 +528,7 @@ struct AccountDetailView: View {
                         Button {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                 showingCurrencyToggle.toggle()
+                                AccountCurrencyPreference.setPrefersBitcoin(showingCurrencyToggle, for: account.id)
                             }
                         } label: {
                             ZStack {
@@ -569,7 +622,7 @@ struct AccountDetailView: View {
                         Divider()
                             .background(Color.white.opacity(0.2))
                         
-                        balanceDetailRow(label: "Pending", value: formattedPendingBalance)
+                        balanceDetailRow(label: "Current", value: formattedClearedBalance)
                             .padding(.vertical, 12)
                     }
                     .transition(.asymmetric(
@@ -1014,11 +1067,17 @@ struct AccountDetailView: View {
             btcPrice = usdAmount > 0 && btcAmount > 0 ? usdAmount / btcAmount : bitcoinPriceService.btcToUsdRate
         }
         
-        // Update the entry with sats and price
+        // Update the entry with sats and price; freeze USD so Activity totals stay settled.
         entry.btcAmount = NSDecimalNumber(decimal: btcAmount)
         entry.amount = NSDecimalNumber(decimal: btcAmount) // Set amount to BTC for BTC accounts
         entry.btcPriceAtTransaction = NSDecimalNumber(decimal: btcPrice)
-        
+        let frozenUSD = entry.usdAmountDecimal > 0
+            ? entry.usdAmountDecimal
+            : (btcAmount * btcPrice)
+        if frozenUSD > 0 {
+            entry.usdAmount = NSDecimalNumber(decimal: frozenUSD)
+        }
+
         // Mark as reconciled
         entry.isReconciledFlag = true
         

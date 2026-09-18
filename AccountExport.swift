@@ -11,7 +11,7 @@ enum AccountExportError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .noAccounts: return "There are no accounts to export."
-        case .invalidPayload: return "This file is not a Bills & Balance account export."
+        case .invalidPayload: return "This file is not a Bills & Balance backup."
         case .decodeFailed: return "Could not read the export file."
         case .missingColumns: return "CSV must have Name and Starting Balance columns."
         case .noValidRows: return "No valid accounts were found in the CSV."
@@ -23,6 +23,10 @@ struct AccountExportPayload: Codable {
     var version: Int
     var exportedAt: Date
     var accounts: [ExportedAccount]
+    var bills: [ExportedBill]?
+    var paychecks: [ExportedPaycheck]?
+    var customCategories: [String]?
+    var creditCards: [String]?
 }
 
 struct ExportedAccount: Codable {
@@ -35,6 +39,9 @@ struct ExportedAccount: Codable {
     var btcDisplayFormat: String
     var feePercentage: Decimal
     var order: Int16
+    var reserveBalance: Decimal?
+    var startingBalanceUSD: Decimal?
+    var startingBalanceBTCPrice: Decimal?
     var entries: [ExportedLedgerEntry]
 }
 
@@ -52,11 +59,54 @@ struct ExportedLedgerEntry: Codable {
     var usdAmount: Decimal?
     var btcPriceAtTransaction: Decimal?
     var feeAmount: Decimal?
+    var billId: UUID?
+}
+
+struct ExportedBill: Codable {
+    var id: UUID
+    var name: String
+    var amount: Decimal
+    var dueDate: Date?
+    var isPaid: Bool
+    var paidDate: Date?
+    var notes: String?
+    var category: String?
+    var autoPay: Bool
+    var paymentCard: String?
+    var recurrenceType: String?
+    var recurrenceInterval: Int16
+    var seriesId: UUID?
+    var trackInBitcoin: Bool
+    var accountId: UUID?
+    var createdAt: Date?
+    var updatedAt: Date?
+}
+
+struct ExportedPaycheck: Codable {
+    var id: UUID
+    var name: String
+    var amount: Decimal
+    var firstDepositDate: Date?
+    var notes: String?
+    var recurrenceType: String?
+    var recurrenceInterval: Int16
+    var autoReconcile: Bool
+    var accountId: UUID?
+    var createdAt: Date?
+    var updatedAt: Date?
 }
 
 enum AccountExportService {
-    static func makePayload(accounts: [Account]) -> AccountExportPayload {
-        let exported = accounts.map { account -> ExportedAccount in
+    static let currentVersion = 2
+
+    static func makePayload(
+        accounts: [Account],
+        bills: [Bill] = [],
+        paychecks: [Paycheck] = [],
+        customCategories: [String] = [],
+        creditCards: [String] = []
+    ) -> AccountExportPayload {
+        let exportedAccounts = accounts.map { account -> ExportedAccount in
             let entries = (account.ledgerEntries as? Set<LedgerEntry> ?? [])
                 .sorted { ($0.date ?? .distantPast) < ($1.date ?? .distantPast) }
                 .map { entry in
@@ -73,7 +123,8 @@ enum AccountExportService {
                         btcAmount: entry.btcAmount?.decimalValue,
                         usdAmount: entry.usdAmount?.decimalValue,
                         btcPriceAtTransaction: entry.btcPriceAtTransaction?.decimalValue,
-                        feeAmount: entry.feeAmount?.decimalValue
+                        feeAmount: entry.feeAmount?.decimalValue,
+                        billId: entry.bill?.id
                     )
                 }
             return ExportedAccount(
@@ -86,10 +137,60 @@ enum AccountExportService {
                 btcDisplayFormat: account.btcDisplayFormat ?? "sats",
                 feePercentage: account.feePercentageDecimal,
                 order: account.order,
+                reserveBalance: account.reserveBalanceDecimal,
+                startingBalanceUSD: account.startingBalanceUSDDecimal,
+                startingBalanceBTCPrice: account.startingBalanceBTCPriceDecimal,
                 entries: entries
             )
         }
-        return AccountExportPayload(version: 1, exportedAt: Date(), accounts: exported)
+
+        let exportedBills = bills.map { bill in
+            ExportedBill(
+                id: bill.id ?? UUID(),
+                name: bill.name ?? "Bill",
+                amount: bill.amountDecimal,
+                dueDate: bill.dueDate,
+                isPaid: bill.isPaid,
+                paidDate: bill.paidDate,
+                notes: bill.notes,
+                category: bill.category,
+                autoPay: bill.autoPay,
+                paymentCard: bill.paymentCard,
+                recurrenceType: bill.recurrenceType,
+                recurrenceInterval: bill.recurrenceInterval,
+                seriesId: bill.seriesId,
+                trackInBitcoin: bill.trackInBitcoinFlag,
+                accountId: bill.account?.id,
+                createdAt: bill.createdAt,
+                updatedAt: bill.updatedAt
+            )
+        }
+
+        let exportedPaychecks = paychecks.map { paycheck in
+            ExportedPaycheck(
+                id: paycheck.id ?? UUID(),
+                name: paycheck.name ?? "Income",
+                amount: paycheck.amount?.decimalValue ?? 0,
+                firstDepositDate: paycheck.firstDepositDate,
+                notes: paycheck.notes,
+                recurrenceType: paycheck.recurrenceType,
+                recurrenceInterval: paycheck.recurrenceInterval,
+                autoReconcile: paycheck.autoReconcile,
+                accountId: paycheck.account?.id,
+                createdAt: paycheck.createdAt,
+                updatedAt: paycheck.updatedAt
+            )
+        }
+
+        return AccountExportPayload(
+            version: currentVersion,
+            exportedAt: Date(),
+            accounts: exportedAccounts,
+            bills: exportedBills,
+            paychecks: exportedPaychecks,
+            customCategories: customCategories,
+            creditCards: creditCards
+        )
     }
 
     static func jsonData(from payload: AccountExportPayload) throws -> Data {
@@ -99,9 +200,23 @@ enum AccountExportService {
         return try encoder.encode(payload)
     }
 
-    static func writeExportFile(accounts: [Account]) throws -> URL {
-        guard !accounts.isEmpty else { throw AccountExportError.noAccounts }
-        let payload = makePayload(accounts: accounts)
+    static func writeExportFile(
+        accounts: [Account],
+        bills: [Bill] = [],
+        paychecks: [Paycheck] = [],
+        customCategories: [String] = [],
+        creditCards: [String] = []
+    ) throws -> URL {
+        guard !accounts.isEmpty || !bills.isEmpty || !paychecks.isEmpty else {
+            throw AccountExportError.noAccounts
+        }
+        let payload = makePayload(
+            accounts: accounts,
+            bills: bills,
+            paychecks: paychecks,
+            customCategories: customCategories,
+            creditCards: creditCards
+        )
         let data = try jsonData(from: payload)
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
@@ -209,6 +324,12 @@ enum AccountExportService {
         existing = (try? context.fetch(request)) ?? []
         let existingIDs = Set(existing.compactMap(\.id))
         let existingNames = Set(existing.compactMap(\.name))
+        var accountsByID: [UUID: Account] = Dictionary(
+            uniqueKeysWithValues: existing.compactMap { account in
+                guard let id = account.id else { return nil }
+                return (id, account)
+            }
+        )
 
         for exported in payload.accounts {
             let account: Account
@@ -233,7 +354,19 @@ enum AccountExportService {
             account.btcDisplayFormat = exported.btcDisplayFormat
             account.feePercentageDecimal = exported.feePercentage
             account.order = exported.order
+            if let reserve = exported.reserveBalance {
+                account.reserveBalanceDecimal = reserve
+            }
+            if let usd = exported.startingBalanceUSD {
+                account.startingBalanceUSD = NSDecimalNumber(decimal: usd)
+            }
+            if let price = exported.startingBalanceBTCPrice {
+                account.startingBalanceBTCPrice = NSDecimalNumber(decimal: price)
+            }
             account.updatedAt = Date()
+            if let id = account.id {
+                accountsByID[id] = account
+            }
 
             let existingEntryIDs = Set((account.ledgerEntries as? Set<LedgerEntry> ?? []).compactMap(\.id))
             for exportedEntry in exported.entries where !existingEntryIDs.contains(exportedEntry.id) {
@@ -262,6 +395,93 @@ enum AccountExportService {
                 }
                 entry.account = account
             }
+        }
+
+        var billsByID: [UUID: Bill] = [:]
+        if let bills = payload.bills {
+            let billRequest = NSFetchRequest<Bill>(entityName: "Bill")
+            let existingBills = (try? context.fetch(billRequest)) ?? []
+            let existingBillIDs = Set(existingBills.compactMap(\.id))
+
+            for exported in bills {
+                let bill: Bill
+                if existingBillIDs.contains(exported.id),
+                   let match = existingBills.first(where: { $0.id == exported.id }) {
+                    bill = match
+                } else {
+                    bill = Bill(context: context)
+                    bill.id = exported.id
+                    bill.createdAt = exported.createdAt ?? Date()
+                    imported += 1
+                }
+                bill.name = exported.name
+                bill.amount = NSDecimalNumber(decimal: exported.amount)
+                bill.dueDate = exported.dueDate
+                bill.isPaid = exported.isPaid
+                bill.paidDate = exported.paidDate
+                bill.notes = exported.notes
+                bill.category = exported.category
+                bill.autoPay = exported.autoPay
+                bill.paymentCard = exported.paymentCard
+                bill.recurrenceType = exported.recurrenceType
+                bill.recurrenceInterval = exported.recurrenceInterval
+                bill.seriesId = exported.seriesId
+                bill.trackInBitcoinFlag = exported.trackInBitcoin
+                bill.updatedAt = exported.updatedAt ?? Date()
+                if let accountId = exported.accountId {
+                    bill.account = accountsByID[accountId]
+                }
+                billsByID[exported.id] = bill
+            }
+        }
+
+        // Link ledger entries to bills after bills exist.
+        for exported in payload.accounts {
+            guard let account = accountsByID[exported.id] else { continue }
+            let entries = account.ledgerEntries as? Set<LedgerEntry> ?? []
+            for exportedEntry in exported.entries {
+                guard let billId = exportedEntry.billId,
+                      let bill = billsByID[billId],
+                      let entry = entries.first(where: { $0.id == exportedEntry.id }) else { continue }
+                entry.bill = bill
+            }
+        }
+
+        if let paychecks = payload.paychecks {
+            let paycheckRequest = NSFetchRequest<Paycheck>(entityName: "Paycheck")
+            let existingPaychecks = (try? context.fetch(paycheckRequest)) ?? []
+            let existingPaycheckIDs = Set(existingPaychecks.compactMap(\.id))
+
+            for exported in paychecks {
+                let paycheck: Paycheck
+                if existingPaycheckIDs.contains(exported.id),
+                   let match = existingPaychecks.first(where: { $0.id == exported.id }) {
+                    paycheck = match
+                } else {
+                    paycheck = Paycheck(context: context)
+                    paycheck.id = exported.id
+                    paycheck.createdAt = exported.createdAt ?? Date()
+                    imported += 1
+                }
+                paycheck.name = exported.name
+                paycheck.amount = NSDecimalNumber(decimal: exported.amount)
+                paycheck.firstDepositDate = exported.firstDepositDate
+                paycheck.notes = exported.notes
+                paycheck.recurrenceType = exported.recurrenceType
+                paycheck.recurrenceInterval = exported.recurrenceInterval
+                paycheck.autoReconcile = exported.autoReconcile
+                paycheck.updatedAt = exported.updatedAt ?? Date()
+                if let accountId = exported.accountId {
+                    paycheck.account = accountsByID[accountId]
+                }
+            }
+        }
+
+        if let categories = payload.customCategories {
+            UserDefaults.standard.set(categories, forKey: "customCategories")
+        }
+        if let cards = payload.creditCards {
+            UserDefaults.standard.set(cards, forKey: "creditCardNames")
         }
 
         if context.hasChanges {
